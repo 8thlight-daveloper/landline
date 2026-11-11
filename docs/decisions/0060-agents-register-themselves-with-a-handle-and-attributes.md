@@ -23,8 +23,17 @@ several folders, branches, and worktrees needs more than a name to tell them apa
 
 ## Decision
 
-**A harness session registers itself.** `landline mcp` registers on start, so the only setup is one line of harness
-configuration that names the server. No `register`, `agent`, or `wire` step is needed in the normal case.
+**A harness session registers itself, in two parts that have different trust.**
+
+- **Authentication** is done by the MCP process, not the model. `landline mcp` registers with the hub when the harness
+  has finished its handshake, and keeps the token it gets in its own memory. The token never passes through the model's
+  context, so the model cannot leak it or be asked for it.
+- **Claims** are things only the model knows: its model name, its effort, a label, and a Codex session id. Every agent
+  is told, in the server's instructions, to call one tool, `landline_attach`, at the start of a session with the claims
+  it knows. The hub shows them to peers as self-reported.
+
+The only setup is one line of harness configuration that names the server. A person can still register a name by hand
+with `landline register --name`, which is how scripts and tests register, and that name behaves as it did before.
 
 **A registration gets a handle that is never reused.**
 
@@ -50,15 +59,14 @@ configuration that names the server. No `register`, `agent`, or `wire` step is n
 one live agent matches, and it returns the candidates when several do. A label is not unique, and the hub never picks
 between two agents that share one.
 
-**The hub is found, and started, in a fixed order.**
+**The hub is an explicit service, and no agent starts it.**
 
-1. The `LANDLINE_URL` environment variable.
-1. The hub address in `~/.config/landline/`.
-1. The default `127.0.0.1:8787`. Only this case may start a hub, and the hub it starts is a background process that
-   binds to localhost, writes its secret to a private file, and outlives the session that started it. A lock keeps two
-   sessions from starting two hubs.
-
-A machine whose configuration names a remote hub never starts one of its own.
+- `landline server up` runs the hub in the background, `server run` keeps it in the foreground, and `server install`
+  sets it up to start at login: a launchd user agent on macOS and a systemd user unit on Linux. No agent session starts,
+  owns, or stops the hub, so no session is special and no start race or lock is needed.
+- `landline mcp` finds the hub from the `LANDLINE_URL` environment variable, then from the address in
+  `~/.config/landline/`, then at the default `127.0.0.1:8787`. When the hub is not there, its tools return an error that
+  says to run `landline server up`, and it tries again on the next call.
 
 **There is one hub, and everyone uses it.** Hubs do not find or join each other. A second machine joins the first
 machine's hub with `landline server join <url>`, which stores the address and the secret in a private file. The hub
@@ -70,9 +78,25 @@ automatic discovery.
 that runs as the same operating system user can read it too. The earlier advice to keep it out of an agent's environment
 was a speed bump and not a boundary, and the README says so.
 
+**A Codex agent proves it controls the session it names.** `landline_attach` takes a Codex `CODEX_THREAD_ID`, which the
+agent reads from its shell tool's environment, because the MCP server cannot read it. The hub accepts only a UUID, and
+does not trust it yet. It sends a one-time code to that thread through the Codex wake, and the wake text carries the
+marker of [0020](0020-messages-carry-no-user-authority.md). The attach finishes when the agent calls `landline_attach`
+again with the code. An agent that names another session's id never sees the code, so it cannot finish. A code works
+once, expires after five minutes, and allows five tries. When it finishes, the hub records the Codex wake method and
+that id as the wake target for the agent's handle, and the Codex wake of [0030](0030-wake-adapters-per-harness.md) works
+without a `--wake-target` flag.
+
+**An attribute comes from the first source that has it, in this order:** a claim the agent made through
+`landline_attach`, then a flag in the server's own arguments, then a `LANDLINE_*` environment variable, then what the
+harness reports. A model name comes from the agent, because neither harness exposes it. A launcher can set the
+environment variables for Claude Code, which passes its environment through. Codex does not, so a Codex attribute must
+come from the server's arguments or from the `env` entries in its MCP configuration. This closes the question of how
+`landline claude` and the MCP server agree.
+
 ## Consequences
 
-- Setup is one line of harness configuration. A second machine needs one `server join`.
+- Setup is one line of harness configuration and one hub service. A second machine needs one `server join`.
 - An agent can impersonate another by registering a handle that looks like it. The hub assigns handles, and the header
   shows the attributes, so a peer reading a message can see the sender's real handle and folder. That is acceptable on
   one person's machine, and a person who needs more has to separate the agents by operating system user.
@@ -83,6 +107,8 @@ was a speed bump and not a boundary, and the README says so.
 
 ## Alternatives considered
 
+- **The first session starts the hub.** It needs a start lock, ties the hub's life to one session, and makes that
+  session special. An explicit service has none of those problems and costs one command.
 - **Keep person-chosen names.** It needs a setup step per agent and cannot tell two sessions in one project apart.
 - **Reuse a name once its agent is idle.** An idle name might belong to a session that is only waiting, so a new
   registration could take it by mistake. A fresh handle each time removes the question.
@@ -117,16 +143,7 @@ A probe MCP server was launched by each harness on 2026-11-11, and recorded its 
   socket delivery strategy of [0050](0050-delivery-is-an-ordered-list-of-strategies.md) could therefore be built from
   inside the MCP process without a hook. Its message format is still undocumented.
 
-**A Codex agent attaches its session in a second step.** `landline mcp` registers on start with no wake method. The
-server's instructions tell a Codex agent to call a tool, `landline_attach`, once at the start of a session with its
-`CODEX_THREAD_ID`. The hub then records the Codex wake method and that id as the wake target for the agent's handle, and
-the Codex wake of [0030](0030-wake-adapters-per-harness.md) works without a `--wake-target` flag. The hub accepts only a
-UUID as the id. The id is the agent's own claim, so an agent that names another session's id would have its messages
-delivered into that session. Each message still carries the marker of [0020](0020-messages-carry-no-user-authority.md),
-and the wake line names the sender.
+## Open questions
 
-**An attribute comes from the first source that has it, in this order:** a flag in the server's own arguments, then a
-`LANDLINE_*` environment variable, then what the harness reports. A launcher can set the environment variables for
-Claude Code, which passes its environment through. Codex does not, so a Codex attribute must come from the server's
-arguments or from the `env` entries in its MCP configuration. This closes the question of how `landline claude` and the
-MCP server agree.
+- Whether a single-use registration ticket, issued by a launcher and tied to a folder and a harness, should replace the
+  shared hub secret for registration. It is deferred, because the shared secret limit above is already accepted.
