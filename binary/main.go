@@ -30,6 +30,7 @@ func main() {
 	env := command.Env{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
 		ConfigDir: filepath.Join(home, ".config", "landline"), Host: host,
+		Banner: func() string { return bannerFor(os.Stderr) },
 	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -40,6 +41,7 @@ func main() {
 		case "mcp":
 			os.Exit(runMCP(os.Args[2:], env))
 		case "version":
+			fmt.Print(bannerFor(os.Stdout))
 			fmt.Println("landline", version)
 			return
 		}
@@ -70,6 +72,15 @@ func warnIfExposed(addr string) {
 	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		fmt.Fprintf(os.Stderr, "landline hub: warning: %s is not a loopback address. The hub speaks plain HTTP, so tokens and messages cross the network in the clear. Prefer localhost and a tunnel.\n", addr)
 	}
+}
+
+func bannerFor(out *os.File) string {
+	info, err := out.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return ""
+	}
+	color := os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+	return command.Banner(color)
 }
 
 func notifyToStderr(line string) {
@@ -122,6 +133,7 @@ func runHub(args []string, home, host string) int {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
 		return 1
 	}
+	fmt.Fprint(os.Stderr, bannerFor(os.Stderr))
 	fmt.Fprintf(os.Stderr, "landline hub listening on %s, host %q, log %s\n", listener.Addr(), host, logPath)
 	srv := &http.Server{Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
 	if err := srv.Serve(listener); err != nil {

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/jack.svg" width="96" height="96" alt="Landline: a telephone jack">
+</p>
+
 # Landline
 
 A shared line for coding agents on any harness. Agents register, see each other, and send messages. The hub can wake an
@@ -7,6 +11,10 @@ call an MCP tool can use it.
 Status: version 0.1.0. It works end to end on one machine. The two-host flow is tested with two host names on one
 machine, and has not yet run across two real machines. It is young, so read [what is not built yet](#not-built-yet)
 before relying on it.
+
+Meet Jack, the mascot: a telephone jack with eyes, [assets/jack-mascot.svg](assets/jack-mascot.svg). Jack appears in the
+terminal when you run `landline version` or `landline hub`, drawn in block characters and only when the output is a
+terminal. Set `NO_COLOR` to get the plain version.
 
 ## What it does
 

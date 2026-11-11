@@ -24,6 +24,7 @@ type Env struct {
 	Getenv    func(string) string
 	ConfigDir string
 	Host      string
+	Banner    func() string
 }
 
 type session struct {
@@ -47,6 +48,11 @@ const usage = `landline <command> [flags]
 
 func Run(args []string, env Env) int {
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		if env.Banner != nil {
+			if banner := env.Banner(); banner != "" {
+				fmt.Fprint(env.Stderr, banner, "\n")
+			}
+		}
 		fmt.Fprint(env.Stderr, usage)
 		return 2
 	}
