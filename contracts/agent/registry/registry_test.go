@@ -419,12 +419,26 @@ func setField(entry *model.Agent, field, value string) {
 		entry.WakeKind = value
 	case "WakeTarget":
 		entry.WakeTarget = value
+	case "Folder":
+		entry.Folder = value
+	case "Branch":
+		entry.Branch = value
+	case "Worktree":
+		entry.Worktree = value
+	case "HarnessVersion":
+		entry.HarnessVersion = value
+	case "Model":
+		entry.Model = value
+	case "Effort":
+		entry.Effort = value
+	case "Label":
+		entry.Label = value
 	}
 }
 
 func TestEveryFieldAcceptsExactlySixtyFourBytesAndRefusesTheUnicodeLineBreaks(t *testing.T) {
 	t.Parallel()
-	for _, field := range []string{"Harness", "Host", "Session", "WakeKind", "WakeTarget"} {
+	for _, field := range []string{"Harness", "Host", "Session", "WakeKind", "WakeTarget", "Folder", "Branch", "Worktree", "HarnessVersion", "Model", "Effort", "Label"} {
 		entry := agent("alpha")
 		setField(&entry, field, strings.Repeat("h", 64))
 		if _, err := newImpl().Register(nil, entry, t0); err != nil {
@@ -485,5 +499,109 @@ func TestReRegisteringWithEmptyOptionalFieldsReplacesTheOldValues(t *testing.T) 
 	got, err := r.Register(agents, second, t0.Add(time.Second))
 	if err != nil || len(got) != 1 || got[0].WakeKind != "" || got[0].WakeTarget != "" || got[0].Host != "" || got[0].Session != "" {
 		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestEveryAttributeIsStoredAsGivenAndMayBeEmpty(t *testing.T) {
+	t.Parallel()
+	entry := agent("alpha")
+	entry.Folder, entry.Branch, entry.Worktree, entry.HarnessVersion = "threnos", "fix/login", "wt-2", "2.1.296"
+	entry.Model, entry.Effort, entry.Label = "claude-opus-5-5", "medium", "  main reviewer  "
+	got, err := newImpl().Register(nil, entry, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := entry
+	want.LastSeen = t0
+	if got[0] != want {
+		t.Fatalf("got %+v, want %+v", got[0], want)
+	}
+	bare, err := newImpl().Register(nil, agent("bravo"), t0)
+	if err != nil || bare[0].Label != "" || bare[0].Model != "" {
+		t.Fatalf("empty attributes: %+v, %v", bare, err)
+	}
+}
+
+func resolveList() []model.Agent {
+	mk := func(name, label string) model.Agent { return model.Agent{Name: name, Harness: "h", Label: label} }
+	return []model.Agent{mk("alpha-1k2", "tutor"), mk("alpha-9z9", "reviewer"), mk("bravo-3x3", "tutor"), mk("charlie-7q7", "")}
+}
+
+func TestResolveFindsAnExactHandleWhetherOrNotTheAgentIsLive(t *testing.T) {
+	t.Parallel()
+	all := resolveList()
+	got, candidates := newImpl().Resolve(all, nil, "charlie-7q7")
+	if got.Name != "charlie-7q7" || candidates != nil {
+		t.Fatalf("got %+v %v", got, candidates)
+	}
+}
+
+func TestResolveByLabelNeedsExactlyOneLiveMatchAndOtherwiseReturnsTheCandidatesSorted(t *testing.T) {
+	t.Parallel()
+	all := resolveList()
+	got, candidates := newImpl().Resolve(all, all, "reviewer")
+	if got.Name != "alpha-9z9" || candidates != nil {
+		t.Fatalf("one match: %+v %v", got, candidates)
+	}
+	got, candidates = newImpl().Resolve(all, []model.Agent{all[2], all[0]}, "tutor")
+	if got.Name != "" || !reflect.DeepEqual(names(candidates), []string{"alpha-1k2", "bravo-3x3"}) {
+		t.Fatalf("two matches: %+v %v", got, names(candidates))
+	}
+	got, candidates = newImpl().Resolve(all, []model.Agent{all[0]}, "tutor")
+	if got.Name != "alpha-1k2" || candidates != nil {
+		t.Fatalf("one live match among two: %+v %v", got, names(candidates))
+	}
+}
+
+func TestResolveByPrefixOfAHandleOrALabelNeedsExactlyOneLiveMatch(t *testing.T) {
+	t.Parallel()
+	all := resolveList()
+	if got, _ := newImpl().Resolve(all, all, "bra"); got.Name != "bravo-3x3" {
+		t.Fatalf("handle prefix: %+v", got)
+	}
+	if got, _ := newImpl().Resolve(all, all, "rev"); got.Name != "alpha-9z9" {
+		t.Fatalf("label prefix: %+v", got)
+	}
+	got, candidates := newImpl().Resolve(all, all, "alpha")
+	if got.Name != "" || !reflect.DeepEqual(names(candidates), []string{"alpha-1k2", "alpha-9z9"}) {
+		t.Fatalf("ambiguous prefix: %+v %v", got, names(candidates))
+	}
+}
+
+func TestResolveFindsNothingForAnEmptyUnknownOrCaseDifferentQuery(t *testing.T) {
+	t.Parallel()
+	all := resolveList()
+	for _, query := range []string{"", "zulu", "TUTOR", "Bravo", "tutors", "alpha-1k2x"} {
+		if got, candidates := newImpl().Resolve(all, all, query); got.Name != "" || len(candidates) != 0 {
+			t.Errorf("%q: %+v %v", query, got, names(candidates))
+		}
+	}
+}
+
+func TestResolvePrefersAnExactHandleOverALabelAndALabelOverAPrefix(t *testing.T) {
+	t.Parallel()
+	all := []model.Agent{
+		{Name: "tutor", Harness: "h"},
+		{Name: "bravo-1", Harness: "h", Label: "tutor"},
+		{Name: "tutorial-2", Harness: "h"},
+	}
+	if got, _ := newImpl().Resolve(all, all, "tutor"); got.Name != "tutor" {
+		t.Fatalf("handle first: %+v", got)
+	}
+	all = all[1:]
+	if got, _ := newImpl().Resolve(all, all, "tutor"); got.Name != "bravo-1" {
+		t.Fatalf("label before prefix: %+v", got)
+	}
+}
+
+func TestResolveNeverChangesItsInputs(t *testing.T) {
+	t.Parallel()
+	all := resolveList()
+	live := []model.Agent{all[3], all[1], all[0]}
+	beforeAll, beforeLive := append([]model.Agent(nil), all...), append([]model.Agent(nil), live...)
+	newImpl().Resolve(all, live, "alpha")
+	newImpl().Resolve(all, live, "tutor")
+	if !reflect.DeepEqual(all, beforeAll) || !reflect.DeepEqual(live, beforeLive) {
+		t.Fatalf("an input changed: %v %v", names(all), names(live))
 	}
 }

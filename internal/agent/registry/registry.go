@@ -23,7 +23,7 @@ func (Registry) Register(agents []model.Agent, entry model.Agent, now time.Time)
 	if strings.TrimSpace(entry.Harness) == "" {
 		return nil, model.ErrNoHarness
 	}
-	for _, field := range []string{entry.Harness, entry.Host, entry.Session, entry.WakeKind, entry.WakeTarget} {
+	for _, field := range []string{entry.Harness, entry.Host, entry.Session, entry.WakeKind, entry.WakeTarget, entry.Folder, entry.Branch, entry.Worktree, entry.HarnessVersion, entry.Model, entry.Effort, entry.Label} {
 		if !plainField(field) {
 			return nil, model.ErrBadField
 		}
@@ -70,6 +70,41 @@ func plainField(text string) bool {
 		}
 	}
 	return true
+}
+
+func (Registry) Resolve(all, live []model.Agent, query string) (model.Agent, []model.Agent) {
+	if query == "" {
+		return model.Agent{}, nil
+	}
+	for _, each := range all {
+		if each.Name == query {
+			return each, nil
+		}
+	}
+	pick := func(matches []model.Agent) (model.Agent, []model.Agent, bool) {
+		switch len(matches) {
+		case 0:
+			return model.Agent{}, nil, false
+		case 1:
+			return matches[0], nil, true
+		}
+		sortByName(matches)
+		return model.Agent{}, matches, true
+	}
+	var labelled, prefixed []model.Agent
+	for _, each := range live {
+		if each.Label == query {
+			labelled = append(labelled, each)
+		}
+		if strings.HasPrefix(each.Name, query) || (each.Label != "" && strings.HasPrefix(each.Label, query)) {
+			prefixed = append(prefixed, each)
+		}
+	}
+	if match, candidates, found := pick(labelled); found {
+		return match, candidates
+	}
+	match, candidates, _ := pick(prefixed)
+	return match, candidates
 }
 
 func sortByName(agents []model.Agent) {

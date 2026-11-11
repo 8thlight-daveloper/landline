@@ -38,6 +38,8 @@ type Config struct {
 	Now        func() time.Time
 	NewID      func() string
 	NewToken   func() string
+	NewSuffix  func() string
+	NewCode    func() string
 	Wakers     map[string]Waker
 	Notify     func(string)
 	StatePath  string
@@ -57,6 +59,7 @@ type Server struct {
 	seq     int64
 	changed chan struct{}
 	wakes   map[string][]*queuedWake
+	attach  map[string]*attachChallenge
 }
 
 type queuedWake struct {
@@ -94,6 +97,12 @@ func New(cfg Config, store Store) (*Server, error) {
 	if cfg.NewID == nil {
 		cfg.NewID = func() string { return "m-" + randomHex(8) }
 	}
+	if cfg.NewCode == nil {
+		cfg.NewCode = func() string { return strings.ToUpper(randomHex(3))[:6] }
+	}
+	if cfg.NewSuffix == nil {
+		cfg.NewSuffix = func() string { return randomHex(2)[:3] }
+	}
 	if cfg.NewToken == nil {
 		cfg.NewToken = func() string { return randomHex(24) }
 	}
@@ -102,7 +111,7 @@ func New(cfg Config, store Store) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg, store: store,
-		tokens: map[string]string{}, cursors: map[string]int64{}, waiting: map[string]int{}, wakes: map[string][]*queuedWake{},
+		tokens: map[string]string{}, cursors: map[string]int64{}, waiting: map[string]int{}, wakes: map[string][]*queuedWake{}, attach: map[string]*attachChallenge{},
 		seq: store.LastSeq(), changed: make(chan struct{}),
 	}
 	s.loadState()
@@ -122,6 +131,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/register", s.register)
 	mux.HandleFunc("POST /v1/send", s.send)
 	mux.HandleFunc("GET /v1/inbox", s.inbox)
+	mux.HandleFunc("POST /v1/attach", s.attachClaims)
 	mux.HandleFunc("GET /v1/agents", s.list)
 	mux.HandleFunc("GET /v1/log", s.logRead)
 	mux.HandleFunc("GET /v1/wakes", s.wakePoll)
@@ -205,27 +215,71 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "a wake method needs a wake_target")
 		return
 	}
+	if (body.Name == "") == (body.Seed == "") {
+		fail(w, http.StatusBadRequest, "give either a name or a seed, and not both")
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry := model.Agent{Name: body.Name, Harness: body.Harness, Host: body.Host, Session: body.Session, WakeKind: body.WakeKind, WakeTarget: body.WakeTarget}
+	name := body.Name
+	if body.Seed != "" {
+		name = s.newHandle(body.Seed)
+	}
+	entry := model.Agent{
+		Name: name, Harness: body.Harness, Host: body.Host, Session: body.Session, WakeKind: body.WakeKind, WakeTarget: body.WakeTarget,
+		Folder: body.Folder, Branch: body.Branch, Worktree: body.Worktree, HarnessVersion: body.HarnessVersion,
+		Model: body.Model, Effort: body.Effort, Label: body.Label,
+	}
 	updated, err := s.reg.Register(s.agents, entry, s.cfg.Now())
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	s.agents = updated
-	for token, name := range s.tokens {
-		if name == body.Name {
+	for token, owner := range s.tokens {
+		if owner == name {
 			delete(s.tokens, token)
 		}
 	}
 	token := s.cfg.NewToken()
-	s.tokens[token] = body.Name
-	if _, seen := s.cursors[body.Name]; !seen {
-		s.cursors[body.Name] = s.store.LastSeq()
+	s.tokens[token] = name
+	if _, seen := s.cursors[name]; !seen {
+		s.cursors[name] = s.store.LastSeq()
 	}
 	s.saveLocked()
-	write(w, http.StatusOK, model.RegisterResponse{Name: body.Name, Token: token})
+	write(w, http.StatusOK, model.RegisterResponse{Name: name, Token: token})
+}
+
+var handleBase = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+func (s *Server) newHandle(seed string) string {
+	base := strings.Trim(handleBase.ReplaceAllString(strings.ToLower(seed), "-"), "-_")
+	if base == "" {
+		base = "agent"
+	}
+	if len(base) > 24 {
+		base = strings.TrimRight(base[:24], "-_")
+	}
+	for {
+		handle := base + "-" + s.cfg.NewSuffix()
+		if _, taken := s.reg.Find(s.agents, handle); !taken && handle != model.Broadcast {
+			return handle
+		}
+	}
+}
+
+func (s *Server) listed(now time.Time) []model.Agent {
+	online := map[string]bool{}
+	for _, a := range s.reg.Online(s.agents, now, s.cfg.Window) {
+		online[a.Name] = true
+	}
+	out := []model.Agent{}
+	for _, a := range s.agents {
+		if online[a.Name] || a.WakeKind != "" || now.Sub(a.LastSeen) <= s.cfg.IdleWindow {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +293,21 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
+	if body.To != model.Broadcast {
+		match, candidates := s.reg.Resolve(s.agents, s.listed(s.cfg.Now()), body.To)
+		if len(candidates) > 1 {
+			names := make([]string, len(candidates))
+			for i, each := range candidates {
+				names[i] = each.Name
+			}
+			s.mu.Unlock()
+			fail(w, http.StatusConflict, "more than one agent matches "+body.To+": "+strings.Join(names, ", ")+". Use a handle")
+			return
+		}
+		if match.Name != "" {
+			body.To = match.Name
+		}
+	}
 	decision, err := s.rt.Route(s.agents, from, model.SendRequest(body), s.cfg.NewID(), s.seq+1, s.cfg.Now())
 	if err != nil {
 		s.mu.Unlock()
@@ -496,7 +565,10 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	out := []model.AgentInfo{}
 	for _, a := range listed {
 		if online[a.Name] || a.WakeKind != "" || now.Sub(a.LastSeen) <= s.cfg.IdleWindow {
-			out = append(out, model.AgentInfo{Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, WakeKind: a.WakeKind, Online: online[a.Name], LastSeen: a.LastSeen})
+			out = append(out, model.AgentInfo{
+				Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, WakeKind: a.WakeKind, Online: online[a.Name], LastSeen: a.LastSeen,
+				Folder: a.Folder, Branch: a.Branch, Worktree: a.Worktree, HarnessVersion: a.HarnessVersion, Model: a.Model, Effort: a.Effort, Label: a.Label,
+			})
 		}
 	}
 	write(w, http.StatusOK, out)

@@ -27,13 +27,20 @@ func (k Kind) Valid() bool {
 }
 
 type Agent struct {
-	Name       string    `json:"name"`
-	Harness    string    `json:"harness"`
-	Host       string    `json:"host"`
-	Session    string    `json:"session"`
-	WakeKind   string    `json:"wake_kind"`
-	WakeTarget string    `json:"wake_target"`
-	LastSeen   time.Time `json:"last_seen"`
+	Name           string    `json:"name"`
+	Harness        string    `json:"harness"`
+	Host           string    `json:"host"`
+	Session        string    `json:"session"`
+	WakeKind       string    `json:"wake_kind"`
+	WakeTarget     string    `json:"wake_target"`
+	LastSeen       time.Time `json:"last_seen"`
+	Folder         string    `json:"folder,omitempty"`
+	Branch         string    `json:"branch,omitempty"`
+	Worktree       string    `json:"worktree,omitempty"`
+	HarnessVersion string    `json:"harness_version,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	Effort         string    `json:"effort,omitempty"`
+	Label          string    `json:"label,omitempty"`
 }
 
 type Envelope struct {

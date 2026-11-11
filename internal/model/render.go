@@ -21,5 +21,10 @@ func Render(e Envelope, from Agent) string {
 	if e.InReplyTo != "" {
 		header += " in-reply-to: " + oneLine(e.InReplyTo)
 	}
+	for _, each := range []struct{ name, value string }{{"label", from.Label}, {"folder", from.Folder}, {"branch", from.Branch}, {"model", from.Model}} {
+		if each.value != "" {
+			header += " " + each.name + ": " + oneLine(each.value)
+		}
+	}
 	return header + "\n\n" + e.Body
 }

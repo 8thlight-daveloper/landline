@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -58,14 +59,16 @@ func startOn(t *testing.T, host string) *harness {
 	}
 	t.Cleanup(func() { log.Close() })
 	h := &harness{t: t, waker: &fakeWaker{}, now: time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)}
-	counter := 0
+	counter, suffix := 0, 0
 	hub, err := New(Config{
-		Secret: secret,
-		Host:   host,
-		Now:    func() time.Time { h.mu.Lock(); defer h.mu.Unlock(); return h.now },
-		NewID:  func() string { counter++; return "m-" + string(rune('a'+counter)) },
-		Wakers: map[string]Waker{"codex": h.waker},
-		Notify: func(s string) { h.mu.Lock(); h.notes = append(h.notes, s); h.mu.Unlock() },
+		Secret:    secret,
+		Host:      host,
+		Now:       func() time.Time { h.mu.Lock(); defer h.mu.Unlock(); return h.now },
+		NewID:     func() string { counter++; return "m-" + string(rune('a'+counter)) },
+		NewCode:   func() string { return "ABC123" },
+		NewSuffix: func() string { suffix++; return fmt.Sprintf("s%02d", suffix) },
+		Wakers:    map[string]Waker{"codex": h.waker},
+		Notify:    func(s string) { h.mu.Lock(); h.notes = append(h.notes, s); h.mu.Unlock() },
 	}, log)
 	if err != nil {
 		t.Fatal(err)
@@ -1118,5 +1121,258 @@ func TestASecondJSONValueInARequestIsRefused(t *testing.T) {
 	}
 	if status, raw := h.call("GET", "/v1/log", secret, nil); status != 200 || strings.Contains(string(raw), "one") {
 		t.Fatalf("a message from a refused request was logged: %d %s", status, raw)
+	}
+}
+
+const threadID = "01a1c829-7970-7083-af01-e69ca7fb7ce5"
+
+func (h *harness) registerSeed(seed string, extra map[string]string) (string, string) {
+	h.t.Helper()
+	body := map[string]string{"seed": seed, "harness": "claude-code", "host": "mac", "session": "s"}
+	for k, v := range extra {
+		body[k] = v
+	}
+	status, raw := h.call("POST", "/v1/register", secret, body)
+	if status != 200 {
+		h.t.Fatalf("register seed %q: %d %s", seed, status, raw)
+	}
+	var out model.RegisterResponse
+	json.Unmarshal(raw, &out)
+	return out.Name, out.Token
+}
+
+func (h *harness) agents(token string) []model.AgentInfo {
+	h.t.Helper()
+	_, raw := h.call("GET", "/v1/agents", token, nil)
+	var out []model.AgentInfo
+	json.Unmarshal(raw, &out)
+	return out
+}
+
+func TestASeedGetsAFreshHandleEveryTimeAndNeverAnOldOne(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	first, _ := h.registerSeed("threnos", nil)
+	second, _ := h.registerSeed("threnos", nil)
+	third, _ := h.registerSeed("Repo Tutor!", nil)
+	if first != "threnos-s01" || second != "threnos-s02" || third != "repo-tutor-s03" {
+		t.Fatalf("%q %q %q", first, second, third)
+	}
+}
+
+func TestASeedThatSanitizesToNothingStillGetsAHandleAndALongOneIsCut(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	bare, _ := h.registerSeed("***", nil)
+	long, _ := h.registerSeed(strings.Repeat("abcdefghij", 6), nil)
+	if bare != "agent-s01" || len(long) > 32 || !strings.HasSuffix(long, "-s02") {
+		t.Fatalf("%q %q", bare, long)
+	}
+}
+
+func TestRegisterWantsEitherANameOrASeedAndNeverBoth(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	for _, body := range []map[string]string{
+		{"harness": "x"},
+		{"harness": "x", "name": "alpha", "seed": "alpha"},
+	} {
+		if status, _ := h.call("POST", "/v1/register", secret, body); status != 400 {
+			t.Errorf("%v: %d", body, status)
+		}
+	}
+}
+
+func TestAttributesAreRegisteredShownInTheListAndChecked(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	handle, token := h.registerSeed("threnos", map[string]string{"folder": "threnos", "branch": "fix/login", "harness_version": "2.1.296", "model": "claude-opus-5-5", "effort": "medium", "label": "lead"})
+	var found model.AgentInfo
+	for _, a := range h.agents(token) {
+		if a.Name == handle {
+			found = a
+		}
+	}
+	if found.Folder != "threnos" || found.Branch != "fix/login" || found.HarnessVersion != "2.1.296" || found.Model != "claude-opus-5-5" || found.Effort != "medium" || found.Label != "lead" {
+		t.Fatalf("%+v", found)
+	}
+	if status, _ := h.call("POST", "/v1/register", secret, map[string]string{"seed": "x", "harness": "h", "branch": "bad\nbranch"}); status != 400 {
+		t.Fatalf("a branch with a line break registered: %d", status)
+	}
+}
+
+func TestSendResolvesALabelAPrefixAndAnExactHandleAndRefusesAnAmbiguousName(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	_, sender := h.registerSeed("sender", nil)
+	tutorOne, tutorToken := h.registerSeed("repo-tutor", map[string]string{"label": "tutor"})
+	_, otherToken := h.registerSeed("other", map[string]string{"label": "reviewer"})
+	if status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: "tutor", Body: "by label"}); status != 200 {
+		t.Fatalf("label: %d %s", status, raw)
+	}
+	if got := h.inbox(tutorToken, ""); len(got.Messages) != 1 || got.Messages[0].To != tutorOne {
+		t.Fatalf("the label did not resolve to the handle: %+v", got.Messages)
+	}
+	if status, _ := h.call("POST", "/v1/send", sender, model.SendBody{To: "revi", Body: "by prefix"}); status != 200 {
+		t.Fatalf("prefix: %d", status)
+	}
+	if got := h.inbox(otherToken, ""); len(got.Messages) != 1 {
+		t.Fatalf("prefix delivery: %+v", got.Messages)
+	}
+	if status, _ := h.call("POST", "/v1/send", sender, model.SendBody{To: tutorOne, Body: "exact"}); status != 200 {
+		t.Fatalf("exact: %d", status)
+	}
+	h.registerSeed("repo-tutor-two", map[string]string{"label": "tutor"})
+	status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: "tutor", Body: "ambiguous"})
+	if status != 409 || !strings.Contains(string(raw), tutorOne) || !strings.Contains(string(raw), "Use a handle") {
+		t.Fatalf("ambiguous: %d %s", status, raw)
+	}
+	if status, _ := h.call("POST", "/v1/send", sender, model.SendBody{To: "nobody", Body: "x"}); status != 404 {
+		t.Fatalf("unknown: %d", status)
+	}
+}
+
+func TestAttachUpdatesTheClaimsAndNeedsAnAgentToken(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	handle, token := h.registerSeed("threnos", nil)
+	status, raw := h.call("POST", "/v1/attach", token, model.AttachRequest{Model: "claude-opus-5-5", Effort: "high", Label: "lead"})
+	var out model.AttachResponse
+	json.Unmarshal(raw, &out)
+	if status != 200 || !reflect.DeepEqual(out.Updated, []string{"model", "effort", "label"}) || out.Challenge || out.Attached {
+		t.Fatalf("%d %s", status, raw)
+	}
+	var found model.AgentInfo
+	for _, a := range h.agents(token) {
+		if a.Name == handle {
+			found = a
+		}
+	}
+	if found.Model != "claude-opus-5-5" || found.Effort != "high" || found.Label != "lead" {
+		t.Fatalf("%+v", found)
+	}
+	for _, bad := range []string{"", "nope", secret} {
+		if status, _ := h.call("POST", "/v1/attach", bad, model.AttachRequest{Label: "x"}); status != 401 {
+			t.Errorf("token %q: %d", bad, status)
+		}
+	}
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{Label: "bad\nlabel"}); status != 400 {
+		t.Fatalf("a label with a line break: %d", status)
+	}
+}
+
+func TestACodexAttachSendsACodeThroughTheWakeAndFinishesOnlyWithThatCode(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	handle, token := h.registerSeed("tutor", nil)
+	status, raw := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID})
+	var started model.AttachResponse
+	json.Unmarshal(raw, &started)
+	if status != 200 || !started.Challenge || started.Attached {
+		t.Fatalf("start: %d %s", status, raw)
+	}
+	if h.waker.count() != 1 {
+		t.Fatalf("wake calls %d", h.waker.count())
+	}
+	call := h.waker.calls[0]
+	if !strings.HasPrefix(call, threadID+"|[landline] "+model.Marker+"\n") || !strings.Contains(call, "code ABC123") || !strings.Contains(call, handle) {
+		t.Fatalf("the challenge text: %q", call)
+	}
+	for _, agent := range h.agents(token) {
+		if agent.Name == handle && agent.WakeKind != "" {
+			t.Fatal("the wake method was set before the code was confirmed")
+		}
+	}
+	status, raw = h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Code: "abc123"})
+	var done model.AttachResponse
+	json.Unmarshal(raw, &done)
+	if status != 200 || !done.Attached {
+		t.Fatalf("finish: %d %s", status, raw)
+	}
+	var found model.AgentInfo
+	for _, agent := range h.agents(token) {
+		if agent.Name == handle {
+			found = agent
+		}
+	}
+	if found.WakeKind != "codex" {
+		t.Fatalf("%+v", found)
+	}
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Code: "ABC123"}); status != 422 {
+		t.Fatalf("a code was used twice: %d", status)
+	}
+}
+
+func TestAWrongCodeAWrongThreadAnExpiredCodeAndFiveTriesAllFail(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	_, token := h.registerSeed("tutor", nil)
+	other := "11111111-2222-3333-4444-555555555555"
+	start := func() {
+		if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID}); status != 200 {
+			t.Fatalf("start %d", status)
+		}
+	}
+	start()
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Code: "WRONG1"}); status != 422 {
+		t.Fatalf("wrong code: %d", status)
+	}
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: other, Code: "ABC123"}); status != 422 {
+		t.Fatalf("wrong thread: %d", status)
+	}
+	for i := 0; i < 3; i++ {
+		h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Code: "WRONG1"})
+	}
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Code: "ABC123"}); status != 422 {
+		t.Fatalf("the right code after five tries: %d", status)
+	}
+	start()
+	h.mu.Lock()
+	h.now = h.now.Add(6 * time.Minute)
+	h.mu.Unlock()
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Code: "ABC123"}); status != 422 {
+		t.Fatalf("an expired code: %d", status)
+	}
+}
+
+func TestACodexAttachRefusesANonUUIDAndACodeWithoutAThreadAndAFailedWakeLeavesNoChallenge(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	_, token := h.registerSeed("tutor", nil)
+	for _, req := range []model.AttachRequest{{CodexThread: "not-a-uuid"}, {CodexThread: "01A1C829-7970-7083-AF01-E69CA7FB7CE5"}, {Code: "ABC123"}} {
+		if status, _ := h.call("POST", "/v1/attach", token, req); status != 400 {
+			t.Errorf("%+v: %d", req, status)
+		}
+	}
+	h.waker.fail = errors.New("no such thread")
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID}); status != 502 {
+		t.Fatalf("a failed wake: %d", status)
+	}
+	h.waker.fail = nil
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Code: "ABC123"}); status != 422 {
+		t.Fatalf("a code from a failed wake worked: %d", status)
+	}
+}
+
+func TestACodexAttachForAnAgentOnAnotherHostGoesThroughThatHostsDaemon(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	status, raw := h.call("POST", "/v1/register", secret, map[string]string{"seed": "tutor", "harness": "codex", "host": "linux"})
+	var reg model.RegisterResponse
+	json.Unmarshal(raw, &reg)
+	if status != 200 {
+		t.Fatalf("%d %s", status, raw)
+	}
+	if status, raw := h.call("POST", "/v1/attach", reg.Token, model.AttachRequest{CodexThread: threadID}); status != 200 {
+		t.Fatalf("%d %s", status, raw)
+	}
+	if h.waker.count() != 0 {
+		t.Fatal("the hub woke a session on another host itself")
+	}
+	_, polled := h.call("GET", "/v1/wakes?host=linux", secret, nil)
+	var jobs []model.WakeJob
+	json.Unmarshal(polled, &jobs)
+	if len(jobs) != 1 || jobs[0].Kind != "codex" || jobs[0].Target != threadID || !strings.Contains(jobs[0].Text, "code ABC123") || !strings.HasPrefix(jobs[0].Text, "[landline] "+model.Marker) {
+		t.Fatalf("jobs %+v", jobs)
 	}
 }

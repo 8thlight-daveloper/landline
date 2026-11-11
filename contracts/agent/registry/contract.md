@@ -6,7 +6,7 @@ Holds the list of registered agents as a value. Every call takes the list and re
 
 ## Interface
 
-`api.go` defines `Registry` with `Register`, `Online`, and `Find`.
+`api.go` defines `Registry` with `Register`, `Online`, `Find`, and `Resolve`.
 
 ## Rules
 
@@ -19,14 +19,21 @@ Holds the list of registered agents as a value. Every call takes the list and re
 - A harness that is empty after trimming Unicode white space (the Unicode White_Space property, so a zero-width space is
   not white space), such as a space, a tab, a no-break space, or an em space, is `model.ErrNoHarness`. That check comes
   before the field rules, so a harness of only a tab is `model.ErrNoHarness`.
-- The harness, host, session, wake method, and wake target are each at most 64 bytes, counted in bytes. They hold no
-  control character, no line or paragraph separator, and no invisible formatting character such as a right-to-left
-  override, which are the Unicode categories Cc, Zl, Zp, and Cf. So none of them can break onto a new line or reorder
-  the text around them. Anything else is `model.ErrBadField`. An empty host, session, wake method, or wake target is
-  allowed.
+- The harness, host, session, wake method, wake target, folder, branch, worktree, harness version, model, effort, and
+  label are each at most 64 bytes, counted in bytes. They hold no control character, no line or paragraph separator, and
+  no invisible formatting character such as a right-to-left override, which are the Unicode categories Cc, Zl, Zp, and
+  Cf. So none of them can break onto a new line or reorder the text around them. Anything else is `model.ErrBadField`.
+  An empty host, session, wake method, or wake target is allowed.
 - The returned list is sorted by name. The input list is never changed, including when `Register` replaces an entry.
 - `Online` returns the agents whose `LastSeen` is no more than `window` before `now`, sorted by name. An agent whose
   `LastSeen` is after `now` counts as heard from. The list passed in is never reordered.
+- `Resolve(all, live, query)` turns what a person typed into one agent. It returns the agent and no candidates when it
+  found exactly one, no agent and the candidates sorted by name when several matched, and no agent and no candidates
+  when none did. The rules apply in this order, and the first that finds anything decides:
+  1. A handle that equals the query exactly, among all agents, live or not.
+  1. A label that equals the query exactly, among the live agents. An empty label never matches.
+  1. A handle or a label that starts with the query, among the live agents. An empty query finds nothing. Matching is
+     exact and case-sensitive. Neither list is changed.
 - `Find` returns the named agent and true, or false. The name is matched exactly, with no case folding or trimming.
 
 ## Side effects and data access

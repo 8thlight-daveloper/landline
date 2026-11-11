@@ -3,17 +3,39 @@ package model
 import "time"
 
 type RegisterRequest struct {
-	Name       string `json:"name"`
-	Harness    string `json:"harness"`
-	Host       string `json:"host"`
-	Session    string `json:"session"`
-	WakeKind   string `json:"wake_kind"`
-	WakeTarget string `json:"wake_target"`
+	Name           string `json:"name"`
+	Seed           string `json:"seed,omitempty"`
+	Harness        string `json:"harness"`
+	Host           string `json:"host"`
+	Session        string `json:"session"`
+	WakeKind       string `json:"wake_kind"`
+	WakeTarget     string `json:"wake_target"`
+	Folder         string `json:"folder,omitempty"`
+	Branch         string `json:"branch,omitempty"`
+	Worktree       string `json:"worktree,omitempty"`
+	HarnessVersion string `json:"harness_version,omitempty"`
+	Model          string `json:"model,omitempty"`
+	Effort         string `json:"effort,omitempty"`
+	Label          string `json:"label,omitempty"`
 }
 
 type RegisterResponse struct {
 	Name  string `json:"name"`
 	Token string `json:"token"`
+}
+
+type AttachRequest struct {
+	Model       string `json:"model,omitempty"`
+	Effort      string `json:"effort,omitempty"`
+	Label       string `json:"label,omitempty"`
+	CodexThread string `json:"codex_thread,omitempty"`
+	Code        string `json:"code,omitempty"`
+}
+
+type AttachResponse struct {
+	Updated   []string `json:"updated"`
+	Challenge bool     `json:"challenge"`
+	Attached  bool     `json:"attached"`
 }
 
 type SendBody struct {
@@ -54,13 +76,20 @@ type InboxResponse struct {
 }
 
 type AgentInfo struct {
-	Name     string    `json:"name"`
-	Harness  string    `json:"harness"`
-	Host     string    `json:"host"`
-	Session  string    `json:"session"`
-	WakeKind string    `json:"wake_kind"`
-	Online   bool      `json:"online"`
-	LastSeen time.Time `json:"last_seen"`
+	Name           string    `json:"name"`
+	Harness        string    `json:"harness"`
+	Host           string    `json:"host"`
+	Session        string    `json:"session"`
+	WakeKind       string    `json:"wake_kind"`
+	Online         bool      `json:"online"`
+	LastSeen       time.Time `json:"last_seen"`
+	Folder         string    `json:"folder,omitempty"`
+	Branch         string    `json:"branch,omitempty"`
+	Worktree       string    `json:"worktree,omitempty"`
+	HarnessVersion string    `json:"harness_version,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	Effort         string    `json:"effort,omitempty"`
+	Label          string    `json:"label,omitempty"`
 }
 
 type ErrorResponse struct {
