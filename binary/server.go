@@ -148,12 +148,13 @@ func serverUp(args []string, env command.Env, dataDir string) int {
 		fmt.Fprintln(os.Stderr, "landline server up:", err)
 		return 1
 	}
-	os.WriteFile(pidFile(dataDir), []byte(strconv.Itoa(child.Process.Pid)), 0o600)
+	pid := child.Process.Pid
+	os.WriteFile(pidFile(dataDir), []byte(strconv.Itoa(pid)), 0o600)
 	child.Process.Release()
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		if raw, _ := os.ReadFile(outPath); strings.Contains(string(raw), "listening on") {
-			fmt.Printf("the hub is running (pid %d) at %s. Its output is in %s\n", child.Process.Pid, "http://"+addr, outPath)
+			fmt.Printf("the hub is running (pid %d) at %s. Its output is in %s\n", pid, "http://"+addr, outPath)
 			return 0
 		}
 		time.Sleep(50 * time.Millisecond)

@@ -143,7 +143,24 @@ A probe MCP server was launched by each harness on 2026-11-11, and recorded its 
   socket delivery strategy of [0050](0050-delivery-is-an-ordered-list-of-strategies.md) could therefore be built from
   inside the MCP process without a hook. Its message format is still undocumented.
 
+## Findings from the build
+
+A real Claude Code 2.1.296 session was started with only `landline server up` and one MCP configuration entry, with no
+`register` and no `wire` step.
+
+- **Registration worked.** The session found the hub through the saved config and registered itself with a handle
+  (`work-d21`), its folder, harness, harness version, and effort (from `CLAUDE_EFFORT`). A message from another agent
+  woke it with nothing typed, and it replied.
+- **The model did not call `landline_attach` on its own.** The server's instructions tell every agent to call it at the
+  start of a session. The session had no turn until a message woke it, and during that turn it answered the message and
+  did not attach. Its model and label were therefore empty. Instructions alone do not make the claims reliable.
+- **What follows.** A Claude Code launcher can set the label and the model without the model's help, from its own
+  arguments. A Codex agent still has to attach, because its wake needs the session id, and whether Codex follows the
+  instruction has not been tested.
+
 ## Open questions
 
+- Whether Codex follows the server's instruction to call `landline_attach` at the start of a session. If it does not,
+  the first message delivered to an unattached agent could carry a reminder.
 - Whether a single-use registration ticket, issued by a launcher and tied to a folder and a harness, should replace the
   shared hub secret for registration. It is deferred, because the shared secret limit above is already accepted.
