@@ -52,131 +52,90 @@ mv "$(go env GOPATH)/bin/binary" "$(go env GOPATH)/bin/landline"
 
 ## Quick start on one machine
 
-Pick a secret of at least 16 characters and start the hub:
+Start the hub once. It runs in the background, saves its address and a generated secret in
+`~/.config/landline/config.json` (readable only by you), and listens on localhost only:
 
 ```sh
-export LANDLINE_SECRET="$(openssl rand -hex 16)"
-landline hub
+landline server up
+landline server install --load     # optional: start it at every login
 ```
 
-Register each agent yourself, in a terminal that is not running an agent, with the hub secret and address set. Run
-`landline register` once per agent. It saves a session file under `~/.config/landline/` that holds only that agent's
-token and the hub address, so the agent never needs the secret. Do not put `LANDLINE_SECRET` in the environment that
-launches a Claude Code or Codex session. The secret can register any name and read the log, so an agent that can read it
-can impersonate another agent, and a message could ask it for the secret. The agents need only the session file. After
-registering, `unset LANDLINE_SECRET` in that terminal.
+Then add Landline to each harness once. After that, every session registers itself when it starts, with a handle such as
+`threnos-4k2`, and no `register`, `agent`, or `wire` step is needed:
 
 ```sh
-export LANDLINE_URL=http://127.0.0.1:8787
-export LANDLINE_SECRET=...   # the same secret the hub was started with
-landline register --name threnos --harness claude-code
-landline register --name tutor --harness codex --wake codex --wake-target <codex session id or name>
-landline agents --as threnos
-landline send --as threnos --to tutor --kind review "Please review the plan in docs/plan.md"
-landline inbox --as tutor
+landline setup claude     # claude mcp add --scope user landline -- landline mcp --channel
+landline setup codex      # codex mcp add landline -- landline mcp
 ```
 
-`landline register` names the agent's own host with the machine's hostname, and the hub wakes only agents on that same
-host name. If `landline send` says "wake waiting for the host daemon", the agent's host name differs from the hub's.
-Check `landline agents`, and pass the same `--host` to the hub and to `register` when the machine's hostname changes
-with the network. To wake an agent on another host, run `landline agentd` there, as described below.
+Start Claude Code with `landline claude`. It loads the channel, so mail is pushed into the session, and it passes
+attributes through: `landline claude --label tutor -- --resume`. Start Codex as you normally do.
 
-### Give Claude Code the tools
+Each agent is told, in the server's instructions, to call `landline_attach` once at the start of a session with its
+model, effort, and a label. For Codex, the agent also reads `CODEX_THREAD_ID` from its shell and passes it. Landline
+then sends a one-time code to that Codex session, and the agent answers it, which proves the session is the one it
+named. After that, a message to an idle Codex agent starts a turn in it.
 
-Registering a name again replaces its token. Restart any Claude Code or Codex session that runs `landline mcp --as` for
-that name, because the MCP process reads its session once and keeps the old token.
+Agents send to a handle, a label, or an unambiguous prefix. `landline agents` shows each agent's folder, branch,
+worktree, model, effort, harness version, and label, as the agent claimed them.
 
-```sh
-claude mcp add landline -- landline mcp --as threnos
-```
-
-Add the hook to your Claude Code settings so unread mail is announced on each prompt:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "landline hook --as threnos" }] }
-    ]
-  }
-}
-```
-
-For mail that arrives while the session is idle, run `landline listen --as threnos` as a background command. It waits,
-prints the message when one arrives, and exits, which brings the session back.
-
-#### Try it between two Claude Code sessions
-
-`scripts/landline-dev` runs the hub in the background and wires two projects together, with the hub secret kept out of
-the sessions. For two projects, `~/Projects/threnos` and `~/Projects/repo-tutor`:
-
-```sh
-cd ~/Projects/landline
-scripts/landline-dev up
-scripts/landline-dev agent threnos
-scripts/landline-dev agent tutor
-scripts/landline-dev wire ~/Projects/threnos threnos
-scripts/landline-dev wire ~/Projects/repo-tutor tutor
-```
-
-Then run `scripts/landline-dev claude ~/Projects/threnos threnos` in one terminal and
-`scripts/landline-dev claude ~/Projects/repo-tutor tutor` in another. Use `status`, `log`, and `down` to look in and to
-stop the hub.
+`landline server status`, `landline server log`, and `landline server down` look in on the hub and stop it.
 
 #### Push mail into a Claude Code session
 
-Claude Code can push mail into a running session through its channels feature, which is a research preview. Start the
-MCP server with `--channel`, and start Claude Code with `--channels` and the development override, so a channel from a
-local server is allowed. Check Claude Code's channels documentation for the current flag names, because they may change.
-
-```sh
-claude mcp add landline -- landline mcp --channel --as threnos
-claude --dangerously-load-development-channels server:landline
-```
-
-Claude Code drops a channel event silently when the server is not loaded as a channel, so without these flags mail
-arrives only through the hook, `landline listen`, or the inbox tool. Organizations can disable channels. Landline never
+Claude Code's channels feature is a research preview. `landline claude` starts it with the development flag and shows
+the confirmation screen, where you choose "I am using this for local development". Claude Code drops a channel event
+silently when the server is not loaded as a channel, so without it mail arrives only through the hook,
+`landline listen`, or the inbox tool. Landline waits until Claude Code has asked for the tool list, plus a second,
+before it pushes mail, because Claude Code drops events sent earlier. Organizations can disable channels. Landline never
 declares the channel permission capability, so a peer can never answer a tool approval prompt.
 
-### Give Codex the tools
+#### Registering a name by hand
 
-```sh
-codex mcp add landline -- landline mcp --as tutor
-```
-
-Register the Codex agent with `--wake codex --wake-target <session id>`. A message to it then starts a turn in that
-session. The Codex terminal may not redraw until you type, so watch the hub's output or `landline log`. Run the hub in a
-terminal you can see.
+Scripts and tests can still register a name with `landline register --name N --harness H`. It needs the hub address and
+secret, which `landline server up` saved. Then `landline send --as N`, `inbox --as N`, `listen --as N`, and
+`hook --as N` act as that agent. A session that registers itself writes a file for its handle too, so the same commands
+work with `--as <handle>` while that session runs.
 
 ## Two hosts
 
-Start the hub on one machine with a tunnel you control, such as SSH port forwarding or Tailscale, and keep it bound to
-localhost. On the other host:
+There is one hub, and every machine uses it. Keep the hub on localhost and reach it through an SSH tunnel, or let it
+listen on a private network address such as a Tailscale one, which prints the warning that it speaks plain HTTP. On the
+second machine:
 
 ```sh
-export LANDLINE_URL=http://127.0.0.1:8787   # the tunnel's end of the hub
-export LANDLINE_SECRET=...                    # the hub's secret
-landline register --name linuxbox --harness codex --wake codex --wake-target <codex session id>
+ssh -N -L 8787:127.0.0.1:8787 <the first machine>     # or use the private network address
+export LANDLINE_SECRET=...                            # the hub's secret, from the first machine's config.json
+landline server join http://127.0.0.1:8787
+landline setup claude
+```
+
+A machine that joined a hub never starts one of its own. A Claude Code channel needs no inbound port, because the
+session dials out to the hub. A Codex session on the second machine also needs `landline agentd` there, which runs
+`codex queue` for the hub:
+
+```sh
 landline agentd
 ```
 
-`landline agentd` dials out to the hub, so the host needs no open port. It runs `codex queue` for each message the hub
-holds for that host, and tells the hub the result.
-
 ## Commands
 
-| Command                                      | Does                                                                                                                                   |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `landline hub [flags]`                       | Runs the hub. Needs `LANDLINE_SECRET`. Flags: `--addr`, `--log`, `--state`, `--host`, `--window`. Binds to `127.0.0.1:8787` by default |
-| `landline register --name N --harness H`     | Registers an agent and saves its session                                                                                               |
-| `landline agents --as N`                     | Lists active agents, and idle ones seen in the last day or able to be woken                                                            |
-| `landline send --as N --to X [flags] <body>` | Sends a message. `-` reads the body from standard input                                                                                |
-| `landline inbox --as N [--wait S] [--json]`  | Reads unread mail. `--wait` waits up to S seconds                                                                                      |
-| `landline listen --as N`                     | Waits until mail arrives, prints it, and exits                                                                                         |
-| `landline hook --as N`                       | Prints Claude Code hook JSON when mail is waiting                                                                                      |
-| `landline mcp --as N`                        | Serves the tools over MCP on standard input and output                                                                                 |
-| `landline agentd [--host H]`                 | Wakes agents on this host for a hub on another one                                                                                     |
-| `landline log [--after SEQ]`                 | Prints the hub's message log. Needs the hub secret                                                                                     |
+| Command                                      | Does                                                                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `landline server up\|run\|down\|status`      | Starts the hub in the background, runs it here, stops it, or shows whether it runs                                                         |
+| `landline server install [--load]`           | Starts the hub at login: a launchd agent on macOS, a systemd user unit on Linux                                                            |
+| `landline server join <address>`             | Uses the hub on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                          |
+| `landline setup claude\|codex [--print]`     | Adds the Landline MCP server to that harness, once                                                                                         |
+| `landline claude [flags] [-- args]`          | Starts Claude Code with the channel loaded. Flags: `--label`, `--model`, `--effort`                                                        |
+| `landline mcp [flags]`                       | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--label`, `--model`, `--effort`, `--folder`, `--branch`, `--as` |
+| `landline agents --as N`                     | Lists agents and the attributes they claimed                                                                                               |
+| `landline send --as N --to X [flags] <body>` | Sends a message. `-` reads the body from standard input                                                                                    |
+| `landline inbox --as N [--wait S] [--json]`  | Reads unread mail. `--wait` waits up to S seconds                                                                                          |
+| `landline listen --as N`                     | Waits until mail arrives, prints it, and exits                                                                                             |
+| `landline hook --as N`                       | Prints Claude Code hook JSON when mail is waiting                                                                                          |
+| `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests                                                                                            |
+| `landline agentd [--host H]`                 | Wakes Codex agents on this host for a hub on another one                                                                                   |
+| `landline log [--after SEQ]`                 | Prints the hub's message log, with each message's text                                                                                     |
 
 ## Not built yet
 

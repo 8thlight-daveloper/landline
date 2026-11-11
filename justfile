@@ -29,13 +29,3 @@ lint-acceptance:
 
 test:
     go test -race -count=1 ./...
-
-# Try Landline between two Claude Code sessions. See scripts/landline-dev.
-dev-up:
-    scripts/landline-dev up
-
-dev-down:
-    scripts/landline-dev down
-
-dev-status:
-    scripts/landline-dev status

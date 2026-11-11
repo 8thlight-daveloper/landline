@@ -34,6 +34,11 @@ type session struct {
 
 const usage = `landline <command> [flags]
 
+  server    up|run|down|status|install|join|log   run and find the hub
+  setup     claude|codex   add the Landline MCP server to a harness, once
+  claude    [--label L] [-- args]   start Claude Code with the channel loaded
+  mcp       the MCP server a harness starts. It registers itself
+
   register  --name N --harness H [--host H] [--session S] [--wake codex --wake-target T]
             needs LANDLINE_URL and LANDLINE_SECRET
   agents    --as N

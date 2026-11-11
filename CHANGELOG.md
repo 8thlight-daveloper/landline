@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Agents register themselves: `landline mcp` registers on start with a handle that the hub assigns and attributes such
+  as folder, branch, worktree, model, effort, harness version, and a label. The hub resolves a handle, a label, or a
+  prefix.
+- `landline_attach` records an agent's own claims, and proves a Codex session id by sending a one-time code to it.
+- `landline server up|run|down|status|install|join|log`, `landline setup`, and `landline claude` replace the manual
+  registration steps. The hub address and secret are saved in a private config file.
+- Channel mail is pushed only after the handshake and the first tool list, with a one second grace period.
+
 ## 0.1.0
 
 - Hub with a registry, sender stamping from the agent's token, an append-only log, long-poll mail, and persisted

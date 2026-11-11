@@ -39,6 +39,10 @@ func main() {
 			os.Exit(runHub(os.Args[2:], env, home, host))
 		case "server":
 			os.Exit(runServer(os.Args[2:], env, home, host))
+		case "setup":
+			os.Exit(runSetup(os.Args[2:]))
+		case "claude":
+			os.Exit(runClaude(os.Args[2:]))
 		case "agentd":
 			os.Exit(runDaemon(os.Args[2:], host))
 		case "mcp":
