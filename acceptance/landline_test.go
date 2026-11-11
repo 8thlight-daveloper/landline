@@ -52,7 +52,11 @@ type world struct {
 func build(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "landline")
-	cmd := exec.Command("go", "build", "-o", bin, "../binary")
+	release, err := os.ReadFile("../VERSION")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "build", "-ldflags", "-X main.version="+strings.TrimSpace(string(release)), "-o", bin, "../binary")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
@@ -530,7 +534,8 @@ func TestTheHubListensOnLocalhostOnlyByDefault(t *testing.T) {
 
 func TestVersionAndHelp(t *testing.T) {
 	w := start(t)
-	if got := w.must("", "version"); !strings.HasPrefix(got, "landline 0.1.0") {
+	release, _ := os.ReadFile("../VERSION")
+	if got := w.must("", "version"); !strings.HasPrefix(got, "landline "+strings.TrimSpace(string(release))) {
 		t.Fatalf("version: %q", got)
 	}
 	if out, err := w.run("", "help"); err == nil || !strings.Contains(out, "landline <command>") {

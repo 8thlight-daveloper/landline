@@ -10,12 +10,12 @@ default:
 
 # Build the landline binary into ./bin.
 build:
-    unset GOROOT; go build -o bin/landline ./binary
+    unset GOROOT; CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(tr -d '[:space:]' < VERSION)" -o bin/landline ./binary
 
 # Build and install landline into ~/.local/bin, or into prefix/bin when one is given.
 install prefix="~/.local":
     mkdir -p {{ prefix }}/bin
-    unset GOROOT; go build -o {{ prefix }}/bin/landline ./binary
+    unset GOROOT; CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(tr -d '[:space:]' < VERSION)" -o {{ prefix }}/bin/landline ./binary
     @echo "installed {{ prefix }}/bin/landline"
 
 # Everything CI runs.

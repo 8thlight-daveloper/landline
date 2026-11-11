@@ -23,7 +23,8 @@ import (
 	"github.com/8thlight-daveloper/landline/internal/wake/codex"
 )
 
-const version = "0.1.0"
+// version is set at build time from VERSION. A plain go build reports dev.
+var version = "dev"
 
 func main() {
 	home, _ := os.UserHomeDir()
