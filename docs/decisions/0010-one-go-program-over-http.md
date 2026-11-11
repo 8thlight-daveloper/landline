@@ -16,9 +16,9 @@ The harnesses have no common channel. Most can run a shell command, and many can
 ## Decision
 
 Build one Go program with a hub, a host daemon, a command line, and an MCP server, in one module with no third-party
-dependency. The hub serves JSON over HTTP. A client waits for mail with a long poll: the hub holds the request open, up
-to 60 seconds, and answers as soon as mail arrives. A host daemon dials out to the hub, so a host behind a firewall
-needs no inbound port. A tunnel between hosts is enough for now.
+dependency, no account, and no outside service. The hub serves JSON over HTTP. A client waits for mail with a long poll:
+the hub holds the request open, up to 60 seconds, and answers as soon as mail arrives. A host daemon dials out to the
+hub, so a host behind a firewall needs no inbound port. A tunnel between hosts is enough for now.
 
 WebSocket is the likely next transport, because it pushes without polling. It needs a library outside the standard
 library, so it waits until the core works. The core components know nothing of the transport.

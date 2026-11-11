@@ -283,19 +283,32 @@ func (s *Server) localTo(agent model.Agent) bool {
 }
 
 func (s *Server) wake(e model.Envelope, sender model.Agent, targets []model.Agent) []string {
-	woken := []string{}
 	text := model.Render(e, sender)
-	for _, target := range targets {
-		waker := s.cfg.Wakers[target.WakeKind]
-		if waker == nil {
-			continue
+	results := make([]bool, len(targets))
+	var group sync.WaitGroup
+	for i, target := range targets {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			waker := s.cfg.Wakers[target.WakeKind]
+			if waker == nil {
+				s.cfg.Notify(fmt.Sprintf("wake of %s failed: this hub has no wake method %s", target.Name, target.WakeKind))
+				return
+			}
+			if err := waker.Wake(target.WakeTarget, text); err != nil {
+				s.cfg.Notify(fmt.Sprintf("wake of %s failed: %v", target.Name, err))
+				return
+			}
+			s.cfg.Notify(fmt.Sprintf("woke %s (%s) for a message from %s, id %s", target.Name, target.WakeKind, e.From, e.ID))
+			results[i] = true
+		}()
+	}
+	group.Wait()
+	woken := []string{}
+	for i, target := range targets {
+		if results[i] {
+			woken = append(woken, target.Name)
 		}
-		if err := waker.Wake(target.WakeTarget, text); err != nil {
-			s.cfg.Notify(fmt.Sprintf("wake of %s failed: %v", target.Name, err))
-			continue
-		}
-		s.cfg.Notify(fmt.Sprintf("woke %s (%s) for a message from %s, id %s", target.Name, target.WakeKind, e.From, e.ID))
-		woken = append(woken, target.Name)
 	}
 	return woken
 }

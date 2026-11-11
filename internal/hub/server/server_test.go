@@ -685,3 +685,65 @@ func TestAStateFileThatIsNotReadableIsReportedAndIgnored(t *testing.T) {
 		t.Fatalf("notes %v", notes)
 	}
 }
+
+type slowWaker struct {
+	delay time.Duration
+	mu    sync.Mutex
+	calls int
+}
+
+func (w *slowWaker) Wake(string, string) error {
+	time.Sleep(w.delay)
+	w.mu.Lock()
+	w.calls++
+	w.mu.Unlock()
+	return nil
+}
+
+func TestWakesToSeveralLocalAgentsRunAtTheSameTimeNotOneAfterAnother(t *testing.T) {
+	t.Parallel()
+	log, _ := store.Open(filepath.Join(t.TempDir(), "log.jsonl"))
+	defer log.Close()
+	slow := &slowWaker{delay: 400 * time.Millisecond}
+	hub, err := New(Config{Secret: secret, Wakers: map[string]Waker{"codex": slow}}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(hub.Handler())
+	defer srv.Close()
+	h := &harness{t: t, srv: srv, waker: &fakeWaker{}, now: time.Now()}
+	alpha := h.register("alpha", "", "")
+	for _, name := range []string{"bravo", "charlie", "delta", "echo"} {
+		h.register(name, "codex", "t-"+name)
+	}
+	started := time.Now()
+	_, raw := h.call("POST", "/v1/send", alpha, model.SendBody{To: "all", Body: "wake everyone"})
+	var out model.SendResponse
+	json.Unmarshal(raw, &out)
+	if len(out.Woken) != 4 || time.Since(started) > 1200*time.Millisecond {
+		t.Fatalf("woken %v after %v", out.Woken, time.Since(started))
+	}
+}
+
+func TestAWakeForAnAgentWhoseMethodTheHubLacksIsPrinted(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	log, _ := store.Open(filepath.Join(dir, "log.jsonl"))
+	defer log.Close()
+	state := filepath.Join(dir, "state.json")
+	first, _ := New(Config{Secret: secret, StatePath: state, Wakers: map[string]Waker{"codex": &fakeWaker{}}}, log)
+	srv := httptest.NewServer(first.Handler())
+	h := &harness{t: t, srv: srv, waker: &fakeWaker{}, now: time.Now()}
+	alpha := h.register("alpha", "", "")
+	h.register("bravo", "codex", "t")
+	srv.Close()
+	var notes []string
+	second, _ := New(Config{Secret: secret, StatePath: state, Notify: func(s string) { notes = append(notes, s) }}, log)
+	srv = httptest.NewServer(second.Handler())
+	defer srv.Close()
+	h.srv = srv
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "x"})
+	if len(notes) != 1 || !strings.Contains(notes[0], "no wake method codex") {
+		t.Fatalf("notes %v", notes)
+	}
+}

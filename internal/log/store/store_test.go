@@ -74,3 +74,20 @@ func TestTheLogFileIsPrivate(t *testing.T) {
 		t.Fatalf("mode %v", info.Mode().Perm())
 	}
 }
+
+func TestAnExistingLooseLogFileIsMadePrivate(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", info.Mode().Perm())
+	}
+}

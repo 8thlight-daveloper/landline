@@ -1,5 +1,5 @@
 ---
-category: architecture
+category: behavior
 status: proposed
 approval: unrecorded
 affects: [hub/server, log/store, cli/command]
@@ -18,8 +18,10 @@ mistake, so the defaults and the saved files need a decision.
 - **Localhost by default.** The hub listens on `127.0.0.1:8787` unless told otherwise. Given another address it starts
   and prints a warning that the hub speaks plain HTTP. Reaching it from another host is a tunnel the person sets up.
 - **Saved state.** The hub keeps an append-only message log and a state file next to it. The state file holds the
-  registered agents, their tokens, and each agent's read position. Both files are created with mode 0600 in a 0700
-  folder. Tokens are stored as they are, since the file is private to the person running the hub.
+  registered agents, their tokens, and each agent's read position. The hub makes the log mode 0600 each time it starts,
+  and writes the state file as a new 0600 file each time it saves. A folder the hub creates is mode 0700, and a folder
+  that already exists is left as it is. A state file the hub cannot read is reported and ignored, and every agent then
+  registers again. Tokens are stored as they are, since the file is private to the person running the hub.
 - **Sessions.** `landline register` saves the agent's token and the hub's address in a 0600 file under
   `~/.config/landline/`. It never saves the hub secret, which comes from the environment only.
 - **Mail is handed out once.** Reading an inbox advances the agent's position before the response is written, so a
@@ -34,11 +36,13 @@ mistake, so the defaults and the saved files need a decision.
 - A hub restart keeps every agent's session and unread mail.
 - A lost reply loses unread mail from the inbox, which is the cost of not having an acknowledgement step. The log is the
   recovery.
-- A person who copies the state file copies every token.
+- A person who copies the state file copies every token, and so does anyone who can read the folder if the person put it
+  somewhere shared.
 
 ## Alternatives considered
 
-- **Hash the tokens.** The hub never needs the original, and a hash would protect a copied file. It also makes a lost
-  state file the same as a revoked one. A file the person already controls was judged enough for a first version.
+- **Hash the tokens.** The hub only compares a token, so a hash would leave a copied state file with no usable token. It
+  was left out for 0.1.0 because each agent's own session file holds its token in plain text at the same privacy level,
+  and the permissions on a personal machine are the boundary. It is worth doing before tokens cross hosts.
 - **An acknowledgement step on reads.** No lost mail, and a second call and a retry rule for every client.
 - **Bind to all interfaces.** It makes a tunnel unnecessary and exposes the hub by default.

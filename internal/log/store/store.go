@@ -25,6 +25,10 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open the log: %w", err)
 	}
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("make the log private: %w", err)
+	}
 	s := &Store{file: file}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*model.MaxBodyBytes)

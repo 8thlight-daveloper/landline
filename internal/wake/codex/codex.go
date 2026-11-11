@@ -22,7 +22,9 @@ func withTimeout(limit time.Duration) Waker {
 	return Waker{run: func(name string, args ...string) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), limit)
 		defer cancel()
-		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+		command := exec.CommandContext(ctx, name, args...)
+		command.WaitDelay = 2 * time.Second
+		return command.CombinedOutput()
 	}}
 }
 
