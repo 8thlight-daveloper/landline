@@ -401,3 +401,11 @@ func TestEveryKindOfUnicodeWhiteSpaceAloneIsAnEmptyBody(t *testing.T) {
 		}
 	}
 }
+
+func TestADuplicateNameInTheAgentListIsOneRecipient(t *testing.T) {
+	t.Parallel()
+	got, err := send(t, "alpha", model.SendRequest{To: model.Broadcast, Body: "x"}, "alpha", "bravo", "bravo", "charlie", "bravo")
+	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"bravo", "charlie"}) {
+		t.Fatalf("got %v, %v", got.Recipients, err)
+	}
+}

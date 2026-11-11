@@ -366,3 +366,34 @@ func TestRegisterStoresEveryFieldAsGiven(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", got[0], want)
 	}
 }
+
+func TestAHarnessOfOnlyWhiteSpaceOfAnyKindIsRefusedAsNoHarnessBeforeTheFieldRules(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []string{"", " ", "   ", "\t", "\u00a0", "\u2003", " \u00a0\t ", "\n"} {
+		entry := agent("alpha")
+		entry.Harness = harness
+		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrNoHarness) {
+			t.Errorf("%q: %v", harness, err)
+		}
+		entry.Host = "bad\nhost"
+		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrNoHarness) {
+			t.Errorf("%q with a bad host: %v", harness, err)
+		}
+	}
+}
+
+func TestFaultsAreCheckedNameThenHarnessThenFields(t *testing.T) {
+	t.Parallel()
+	both := agent("BAD NAME")
+	both.Harness = ""
+	both.Host = "bad\nhost"
+	if _, err := newImpl().Register(nil, both, t0); !errors.Is(err, model.ErrBadName) {
+		t.Fatalf("name and harness: %v", err)
+	}
+	noHarness := agent("alpha")
+	noHarness.Harness = ""
+	noHarness.Session = "bad\nsession"
+	if _, err := newImpl().Register(nil, noHarness, t0); !errors.Is(err, model.ErrNoHarness) {
+		t.Fatalf("harness and field: %v", err)
+	}
+}

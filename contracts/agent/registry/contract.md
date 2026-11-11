@@ -14,7 +14,11 @@ Holds the list of registered agents as a value. Every call takes the list and re
 - A name is 1 to 32 lowercase letters, digits, `-` or `_`, starts with a letter or digit, and is not `all`. Anything
   else is `model.ErrBadName`. An agent with no harness is `model.ErrNoHarness`.
 - A name is checked as ASCII only, 32 characters at most.
-- A harness that is empty or only spaces is `model.ErrNoHarness`.
+- Faults are checked in this order, and the first one found is the error returned: the name, then the harness, then the
+  other fields.
+- A harness that is empty after trimming Unicode white space (the Unicode White_Space property, so a zero-width space is
+  not white space), such as a space, a tab, a no-break space, or an em space, is `model.ErrNoHarness`. That check comes
+  before the field rules, so a harness of only a tab is `model.ErrNoHarness`.
 - The harness, host, session, wake method, and wake target are each at most 64 bytes, counted in bytes. They hold no
   control character, no line or paragraph separator, and no invisible formatting character such as a right-to-left
   override, which are the Unicode categories Cc, Zl, Zp, and Cf. So none of them can break onto a new line or reorder
@@ -51,6 +55,9 @@ None.
 
 ## Not covered
 
+- Whether the 64 byte limit on the harness applies before or after trimming. The stored value is never trimmed, and the
+  limit is measured on it as stored.
+- A harness of only a zero-width space or only a control character that is not white space. It is `model.ErrBadField`.
 - Duplicate names in the list passed in. The registry never creates one.
 - What `Online` returns for an empty list. It is an empty list or nil, and a caller may not rely on which.
 

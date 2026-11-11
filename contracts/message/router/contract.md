@@ -29,6 +29,7 @@ authenticated sender, a new id and sequence number, and the time.
   kept exactly as sent, spaces included.
 - An empty recipient, and a recipient with spaces or a line break around it, is `model.ErrUnknownRecipient`. The list of
   agents passed in is never reordered or changed.
+- A name that appears more than once in the agent list is one recipient, so a broadcast never names an agent twice.
 - A direct message has one recipient. A broadcast has every registered agent except the sender, sorted by name whatever
   the order of the list it was given, and may have none.
 - A thread is ASCII only. Every one of the model's four kinds is accepted.
@@ -61,6 +62,8 @@ None.
 
 ## Not covered
 
+- The sender listed more than once, or an agent with an empty name, in the list passed in. The registry never creates
+  either, and a rebuild may treat them like any other name.
 - Whether the sender is among the agents that were last heard from. The caller decides who is registered.
 
 ## Wrong implementations tried

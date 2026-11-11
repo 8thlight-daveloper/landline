@@ -65,7 +65,7 @@ func recipientsOf(known []model.Agent, from, to string) ([]string, error) {
 			}
 		}
 		slices.Sort(out)
-		return out, nil
+		return slices.Compact(out), nil
 	}
 	if to == from {
 		return nil, model.ErrSelfSend
