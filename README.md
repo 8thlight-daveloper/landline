@@ -77,6 +77,9 @@ with the network. To wake an agent on another host, run `landline agentd` there,
 
 ### Give Claude Code the tools
 
+Registering a name again replaces its token. Restart any Claude Code or Codex session that runs `landline mcp --as` for
+that name, because the MCP process reads its session once and keeps the old token.
+
 ```sh
 claude mcp add landline -- landline mcp --as threnos
 ```
@@ -139,7 +142,7 @@ holds for that host, and tells the hub the result.
 ## Not built yet
 
 - Mail is handed out once. Reading advances your position before the reply is written, so a reader that fails after the
-  hub answers loses those messages from its unread list. They stay in `landline log`.
+  hub answers loses those messages from its unread list. They stay in `landline log`, which prints each message's text.
 - A read that names a thread does not move your position, so `inbox --thread` shows the same history until you also pass
   `--after`. `listen --thread` and the MCP tool handle this for you: `listen` waits for mail that arrives after it
   starts, and the MCP tool prints the `after` value to use next.

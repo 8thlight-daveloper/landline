@@ -23,13 +23,13 @@ func (s *Server) loadState() {
 	raw, err := os.ReadFile(s.cfg.StatePath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			s.cfg.Notify("the saved state could not be read, so every agent must register again: " + err.Error())
+			s.cfg.Notify("the saved state could not be read, so every agent must register again. A re-registered agent starts at the end of the log, so its unread mail is skipped and stays in the log: " + err.Error())
 		}
 		return
 	}
 	var snap snapshot
 	if json.Unmarshal(raw, &snap) != nil {
-		s.cfg.Notify("the saved state could not be read, so every agent must register again")
+		s.cfg.Notify("the saved state could not be read, so every agent must register again. A re-registered agent starts at the end of the log, so its unread mail is skipped and stays in the log")
 		return
 	}
 	s.agents = snap.Agents

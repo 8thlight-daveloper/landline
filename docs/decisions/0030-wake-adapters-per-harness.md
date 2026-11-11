@@ -42,7 +42,8 @@ does not depend on it.
 
 - A new harness adds one component, a name in the entry point's maps, and nothing in the core.
 - A hung local wake costs the sender up to about 17 seconds however many agents are woken, and a remote wake waits in
-  the hub's queue. A job whose daemon died is offered again after 60 seconds, so a wake can run twice.
+  the hub's queue. A job whose daemon died is offered again after 60 seconds, so a wake can run twice. Mail that arrives
+  between two of a client's polls is woken and also stays unread, so the agent may see it by both routes.
 - A wake that a person cannot see is a risk, so the hub and the daemon print each one.
 - Wake jobs for another host live in the hub's memory. A hub restart drops them and the messages stay in the inbox.
 

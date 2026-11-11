@@ -210,3 +210,23 @@ func TestAFolderTheStoreCreatesIsPrivate(t *testing.T) {
 		t.Fatalf("the folder is %v", info.Mode().Perm())
 	}
 }
+
+func TestALineThatParsesButIsNotAnEnvelopeIsSkipped(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	first, _ := Open(path)
+	first.Append(envelope(1))
+	first.Append(envelope(2))
+	first.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString("null\n{}\n{\"seq\":0,\"id\":\"x\"}\n[]\n")
+	f.Close()
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	if got := again.All(); len(got) != 2 || again.LastSeq() != 2 {
+		t.Fatalf("got %d envelopes, last seq %d", len(got), again.LastSeq())
+	}
+}

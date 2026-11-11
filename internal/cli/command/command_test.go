@@ -328,3 +328,40 @@ func TestInboxKeepsEmojiSequencesAndNonLatinJoinersWhileStrippingBidiControls(t 
 		t.Errorf("a bidi control survived: %q", out)
 	}
 }
+
+func TestLogPrintsEachMessagesTextSoLostMailCanBeRecovered(t *testing.T) {
+	t.Parallel()
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]model.Envelope{{Seq: 1, ID: "m-1", From: "alpha", To: "bravo", Thread: "main", Kind: model.KindChat, Body: "first line\nsecond \x1b[31mline"}})
+	}))
+	defer hub.Close()
+	r := do(t, t.TempDir(), hub.URL, "", "log")
+	out := r.out.String()
+	if r.code != 0 || !strings.Contains(out, "alpha -> bravo") || !strings.Contains(out, "    first line\n") || !strings.Contains(out, "second  [31mline") || strings.ContainsRune(out, 0x1b) {
+		t.Fatalf("%d %q", r.code, out)
+	}
+}
+
+func TestHubFieldsPrintedByLogSendAndAgentsCarryNoControlSequences(t *testing.T) {
+	t.Parallel()
+	evil := "\x1b]0;PWNED\x07\x1b[2J"
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/register":
+			json.NewEncoder(w).Encode(model.RegisterResponse{Name: "alpha", Token: "t"})
+		case "/v1/send":
+			json.NewEncoder(w).Encode(model.SendResponse{ID: evil, Seq: 1, Recipients: []string{evil}, Woken: []string{evil}, Queued: []string{evil}})
+		case "/v1/agents":
+			json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "alpha", Harness: "h", Host: "m", WakeKind: evil, Online: true}})
+		}
+	}))
+	defer hub.Close()
+	dir := t.TempDir()
+	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	for _, args := range [][]string{{"send", "--as", "alpha", "--to", "bravo", "hi"}, {"agents", "--as", "alpha"}} {
+		r := do(t, dir, hub.URL, "", args...)
+		if strings.ContainsAny(r.out.String(), "\x1b\x07") {
+			t.Errorf("%v printed a control sequence: %q", args, r.out.String())
+		}
+	}
+}

@@ -1100,3 +1100,23 @@ func TestEveryKindIsDeliveredWithTheMarkerFirst(t *testing.T) {
 		}
 	}
 }
+
+func TestASecondJSONValueInARequestIsRefused(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	h.register("bravo", "", "")
+	req, _ := http.NewRequest("POST", h.srv.URL+"/v1/send", strings.NewReader(`{"to":"bravo","body":"one"}{"to":"bravo","body":"two"}`))
+	req.Header.Set("Authorization", "Bearer "+alpha)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if status, raw := h.call("GET", "/v1/log", secret, nil); status != 200 || strings.Contains(string(raw), "one") {
+		t.Fatalf("a message from a refused request was logged: %d %s", status, raw)
+	}
+}

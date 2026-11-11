@@ -167,7 +167,7 @@ func agents(args []string, env Env) error {
 		return err
 	}
 	for _, a := range list {
-		wake := a.WakeKind
+		wake := printable(a.WakeKind)
 		if wake == "" {
 			wake = "none"
 		}
@@ -205,12 +205,12 @@ func send(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "sent %s (seq %d) to %s", out.ID, out.Seq, strings.Join(out.Recipients, ", "))
+	fmt.Fprintf(env.Stdout, "sent %s (seq %d) to %s", printable(out.ID), out.Seq, printable(strings.Join(out.Recipients, ", ")))
 	if len(out.Woken) > 0 {
-		fmt.Fprintf(env.Stdout, "; woke %s", strings.Join(out.Woken, ", "))
+		fmt.Fprintf(env.Stdout, "; woke %s", printable(strings.Join(out.Woken, ", ")))
 	}
 	if len(out.Queued) > 0 {
-		fmt.Fprintf(env.Stdout, "; wake waiting for the host daemon of %s", strings.Join(out.Queued, ", "))
+		fmt.Fprintf(env.Stdout, "; wake waiting for the host daemon of %s", printable(strings.Join(out.Queued, ", ")))
 	}
 	fmt.Fprintln(env.Stdout)
 	return nil
@@ -336,7 +336,10 @@ func logRead(args []string, env Env) error {
 		return err
 	}
 	for _, e := range entries {
-		fmt.Fprintf(env.Stdout, "%d\t%s\t%s -> %s\t%s\t%s\n", e.Seq, e.Time.Format("2006-01-02T15:04:05Z07:00"), e.From, e.To, e.Thread, e.Kind)
+		fmt.Fprintf(env.Stdout, "%d\t%s\t%s -> %s\t%s\t%s\n", e.Seq, e.Time.Format("2006-01-02T15:04:05Z07:00"), printable(string(e.From)), printable(e.To), printable(e.Thread), printable(string(e.Kind)))
+		for _, line := range strings.Split(printable(e.Body), "\n") {
+			fmt.Fprintf(env.Stdout, "    %s\n", line)
+		}
 	}
 	return nil
 }

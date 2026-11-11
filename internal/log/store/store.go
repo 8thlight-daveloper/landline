@@ -35,7 +35,7 @@ func Open(path string) (*Store, error) {
 	for {
 		line, err := reader.ReadBytes('\n')
 		var e model.Envelope
-		if len(line) > 0 && json.Unmarshal(line, &e) == nil {
+		if len(line) > 0 && json.Unmarshal(line, &e) == nil && e.Seq > 0 && e.ID != "" {
 			s.log = append(s.log, e)
 		}
 		if err == io.EOF {

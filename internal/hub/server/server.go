@@ -177,6 +177,10 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 		fail(w, http.StatusBadRequest, "bad request: "+err.Error())
 		return false
 	}
+	if decoder.More() {
+		fail(w, http.StatusBadRequest, "bad request: more than one JSON value")
+		return false
+	}
 	return true
 }
 
