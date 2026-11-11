@@ -397,3 +397,93 @@ func TestFaultsAreCheckedNameThenHarnessThenFields(t *testing.T) {
 		t.Fatalf("harness and field: %v", err)
 	}
 }
+
+func TestNamesMayStartWithADigitAndHoldHyphensAndUnderscores(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"9lives", "0", "a-b", "a_b", "all-x", "all_x", "1-2_3"} {
+		if _, err := newImpl().Register(nil, agent(name), t0); err != nil {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+}
+
+func setField(entry *model.Agent, field, value string) {
+	switch field {
+	case "Harness":
+		entry.Harness = value
+	case "Host":
+		entry.Host = value
+	case "Session":
+		entry.Session = value
+	case "WakeKind":
+		entry.WakeKind = value
+	case "WakeTarget":
+		entry.WakeTarget = value
+	}
+}
+
+func TestEveryFieldAcceptsExactlySixtyFourBytesAndRefusesTheUnicodeLineBreaks(t *testing.T) {
+	t.Parallel()
+	for _, field := range []string{"Harness", "Host", "Session", "WakeKind", "WakeTarget"} {
+		entry := agent("alpha")
+		setField(&entry, field, strings.Repeat("h", 64))
+		if _, err := newImpl().Register(nil, entry, t0); err != nil {
+			t.Errorf("%s at 64 bytes: %v", field, err)
+		}
+		setField(&entry, field, strings.Repeat("h", 65))
+		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
+			t.Errorf("%s at 65 bytes: %v", field, err)
+		}
+		for _, bad := range []string{"a\u202eb", "a\u2028b", "a\u2029b", "a\u200bb", "a\u0085b", "a\x00b"} {
+			setField(&entry, field, bad)
+			if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
+				t.Errorf("%s %q: %v", field, bad, err)
+			}
+		}
+	}
+}
+
+func TestAPaddedHarnessIsStoredAsGivenAndNotRefused(t *testing.T) {
+	t.Parallel()
+	entry := agent("alpha")
+	entry.Harness = "  codex  "
+	got, err := newImpl().Register(nil, entry, t0)
+	if err != nil || got[0].Harness != "  codex  " {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestResultsNeverShareStorageWithTheCallersSpareCapacity(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	base := make([]model.Agent, 2, 10)
+	base[0], base[1] = agent("alpha"), agent("bravo")
+	first, _ := r.Register(base, agent("charlie"), t0)
+	snapshot := append([]model.Agent(nil), first...)
+	r.Register(base, agent("delta"), t0)
+	if !reflect.DeepEqual(first, snapshot) {
+		t.Fatalf("a later call changed an earlier result: %+v then %+v", snapshot, first)
+	}
+}
+
+func TestOnlineWithAWindowOfZeroKeepsOnlyThoseHeardFromNow(t *testing.T) {
+	t.Parallel()
+	agents := []model.Agent{{Name: "alpha", Harness: "h", LastSeen: t0}, {Name: "bravo", Harness: "h", LastSeen: t0.Add(-time.Nanosecond)}}
+	if got := names(newImpl().Online(agents, t0, 0)); !reflect.DeepEqual(got, []string{"alpha"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestReRegisteringWithEmptyOptionalFieldsReplacesTheOldValues(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	first := agent("alpha")
+	first.WakeKind, first.WakeTarget = "codex", "thread-1"
+	agents, _ := r.Register(nil, first, t0)
+	second := agent("alpha")
+	second.Host, second.Session, second.WakeKind, second.WakeTarget = "", "", "", ""
+	got, err := r.Register(agents, second, t0.Add(time.Second))
+	if err != nil || len(got) != 1 || got[0].WakeKind != "" || got[0].WakeTarget != "" || got[0].Host != "" || got[0].Session != "" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}

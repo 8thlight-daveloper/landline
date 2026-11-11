@@ -1033,3 +1033,70 @@ func TestAnIdleAgentWithAWakeMethodIsStillListedAfterMoreThanADay(t *testing.T) 
 		t.Fatalf("got %v", names)
 	}
 }
+
+func TestTheDefaultIdleWindowIsOneDay(t *testing.T) {
+	t.Parallel()
+	log, _ := store.Open(filepath.Join(t.TempDir(), "log.jsonl"))
+	defer log.Close()
+	hub, err := New(Config{Secret: secret}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hub.cfg.IdleWindow != 24*time.Hour || hub.cfg.Window != 90*time.Second {
+		t.Fatalf("idle %v active %v", hub.cfg.IdleWindow, hub.cfg.Window)
+	}
+}
+
+func TestTheSecretMustMatchExactlyNotByPrefixOrAsAnAgentWithAnAsParameter(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	h.register("alpha", "", "")
+	for _, token := range []string{secret + "junk", secret[:len(secret)-1], strings.ToUpper(secret)} {
+		if status, _ := h.call("GET", "/v1/log", token, nil); status != 401 {
+			t.Errorf("token %q: %d", token, status)
+		}
+	}
+	if status, _ := h.call("GET", "/v1/inbox?as=alpha", secret, nil); status != 401 {
+		t.Errorf("the secret with ?as= read an inbox: %d", status)
+	}
+}
+
+func TestASenderHeaderIsIgnoredAndTheTokenDecides(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	bravo := h.register("bravo", "", "")
+	body, _ := json.Marshal(model.SendBody{To: "bravo", Body: "who sent this"})
+	req, _ := http.NewRequest("POST", h.srv.URL+"/v1/send", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+alpha)
+	req.Header.Set("X-Landline-From", "bravo")
+	req.Header.Set("X-Sender", "bravo")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	got := h.inbox(bravo, "")
+	if len(got.Messages) != 1 || got.Messages[0].From != "alpha" {
+		t.Fatalf("got %+v", got.Messages)
+	}
+}
+
+func TestEveryKindIsDeliveredWithTheMarkerFirst(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	bravo := h.register("bravo", "", "")
+	for _, kind := range []model.Kind{"", model.KindChat, model.KindTask, model.KindReply, model.KindReview} {
+		h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Kind: kind, Body: "x"})
+	}
+	got := h.inbox(bravo, "")
+	if len(got.Messages) != 5 {
+		t.Fatalf("got %d", len(got.Messages))
+	}
+	for _, m := range got.Messages {
+		if !strings.HasPrefix(m.Text, "[landline] "+model.Marker+"\n") {
+			t.Errorf("kind %q: %q", m.Kind, m.Text)
+		}
+	}
+}

@@ -409,3 +409,62 @@ func TestADuplicateNameInTheAgentListIsOneRecipient(t *testing.T) {
 		t.Fatalf("got %v, %v", got.Recipients, err)
 	}
 }
+
+func TestReplyTokensMayStartWithPunctuation(t *testing.T) {
+	t.Parallel()
+	for _, token := range []string{"-a", ".a", "_a", "---", "..."} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: token, Body: "x"}, "alpha", "bravo"); err != nil {
+			t.Errorf("%q: %v", token, err)
+		}
+	}
+}
+
+func TestTheSizeLimitIsMeasuredOnTheBodyAsSentNotTheTrimmedBody(t *testing.T) {
+	t.Parallel()
+	body := strings.Repeat("x", model.MaxBodyBytes) + " "
+	if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: body}, "alpha", "bravo"); !errors.Is(err, model.ErrBodyTooLarge) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAZeroWidthSpaceIsNotWhiteSpaceSoAloneItIsAValidBodyKeptAsSent(t *testing.T) {
+	t.Parallel()
+	got, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: "\u200b"}, "alpha", "bravo")
+	if err != nil || got.Envelope.Body != "\u200b" {
+		t.Fatalf("got %q, %v", got.Envelope.Body, err)
+	}
+}
+
+func TestABroadcastKeepsItsKindAndInReplyToAndReachesEveryoneBeyondFive(t *testing.T) {
+	t.Parallel()
+	agents := []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "sender"}
+	got, err := send(t, "sender", model.SendRequest{To: model.Broadcast, Kind: model.KindReview, InReplyTo: "m-9", Body: "x"}, agents...)
+	if err != nil || len(got.Recipients) != 8 {
+		t.Fatalf("recipients %v, %v", got.Recipients, err)
+	}
+	if got.Envelope.Kind != model.KindReview || got.Envelope.InReplyTo != "m-9" {
+		t.Fatalf("envelope %+v", got.Envelope)
+	}
+}
+
+func TestASenderThatDiffersOnlyByCaseIsUnknownAndBlankThreadsAndKindsAreRefused(t *testing.T) {
+	t.Parallel()
+	if _, err := send(t, "ALPHA", model.SendRequest{To: "bravo", Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownSender) {
+		t.Errorf("sender: %v", err)
+	}
+	if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Thread: " ", Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrBadThread) {
+		t.Errorf("thread: %v", err)
+	}
+	if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Kind: " ", Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrBadKind) {
+		t.Errorf("kind: %v", err)
+	}
+}
+
+func TestTheBodyIsKeptByteForByteIncludingCarriageReturns(t *testing.T) {
+	t.Parallel()
+	body := "line one\r\nline two\r\n\ttabbed \u00a0 \n"
+	got, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: body}, "alpha", "bravo")
+	if err != nil || got.Envelope.Body != body {
+		t.Fatalf("got %q, %v", got.Envelope.Body, err)
+	}
+}

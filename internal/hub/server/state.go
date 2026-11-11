@@ -58,6 +58,7 @@ func (s *Server) saveLocked() {
 	}
 	if err == nil {
 		temp := s.cfg.StatePath + ".tmp"
+		os.Remove(temp)
 		if err = os.WriteFile(temp, raw, 0o600); err == nil {
 			if err = os.Chmod(temp, 0o600); err == nil {
 				err = os.Rename(temp, s.cfg.StatePath)

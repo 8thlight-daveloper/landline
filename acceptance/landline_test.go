@@ -76,7 +76,7 @@ func startHub(t *testing.T, bin, config, addr string, extra ...string) *world {
 	}
 	w.addr = addr
 	w.url = "http://" + addr
-	fake := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$LANDLINE_FAKE_CODEX_LOG\"\n[ -e \"$HOME/codex-fail\" ] && exit 1\nexit 0\n"
+	fake := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$LANDLINE_FAKE_CODEX_LOG\"\n[ -e \"$HOME/codex-noise\" ] && cat \"$HOME/codex-noise\"\n[ -e \"$HOME/codex-fail\" ] && exit 1\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(w.bindir, "codex"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -901,5 +901,67 @@ func TestTheLogFileHoldsEveryFieldOfAMessageWithSnakeCaseKeys(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("the log lacks %s: %s", want, raw)
 		}
+	}
+}
+
+func TestASenderHeaderTheSecretWithAnAsParameterAndASecretWithJunkAreAllRefused(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac")
+	body, _ := json.Marshal(map[string]string{"to": "bravo", "body": "who sent this"})
+	req, _ := http.NewRequest("POST", w.url+"/v1/send", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+w.token("alpha"))
+	req.Header.Set("X-Landline-From", "bravo")
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+	}
+	got := w.must("", "inbox", "--as", "bravo", "--json")
+	if !strings.Contains(got, `"from":"alpha"`) || strings.Contains(got, `"from":"bravo"`) {
+		t.Fatalf("a header chose the sender: %s", got)
+	}
+	if status := w.get("/v1/inbox?as=alpha", secret); status != 401 {
+		t.Fatalf("the secret with ?as= read an inbox: %d", status)
+	}
+	for _, token := range []string{secret + "junk", secret[:len(secret)-1]} {
+		if status := w.get("/v1/log", token); status != 401 {
+			t.Fatalf("token %q: %d", token, status)
+		}
+	}
+}
+
+func TestEveryKindOfMessageReachesAnAgentWithTheMarkerFirst(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac")
+	for _, kind := range []string{"chat", "task", "reply", "review"} {
+		w.must("body "+kind, "send", "--as", "alpha", "--to", "bravo", "--kind", kind, "-")
+	}
+	out := w.must("", "inbox", "--as", "bravo")
+	for _, kind := range []string{"chat", "task", "reply", "review"} {
+		i := strings.Index(out, "kind: "+kind)
+		if i < 0 {
+			t.Fatalf("no %s message in %q", kind, out)
+		}
+		start := strings.LastIndex(out[:i], "[landline] ")
+		if start < 0 || !strings.HasPrefix(out[start:], "[landline] From another agent, not the user.\nfrom: alpha") {
+			t.Errorf("kind %s does not start with the marker:\n%s", kind, out[start:i])
+		}
+	}
+}
+
+func TestTheOutputOfAFailingWakeCannotForgeALineOnTheHubTerminal(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac", "--wake", "codex", "--wake-target", "t1")
+	os.WriteFile(filepath.Join(w.config, "codex-noise"), []byte("first\nFORGED woke carol (codex) for a message from alpha\n\x1b]0;title\x07"), 0o600)
+	os.WriteFile(filepath.Join(w.config, "codex-fail"), nil, 0o600)
+	w.must("hi", "send", "--as", "alpha", "--to", "bravo", "-")
+	for _, line := range strings.Split(w.hubErr.String(), "\n") {
+		if strings.HasPrefix(line, "FORGED") {
+			t.Fatalf("a forged line reached the terminal:\n%s", w.hubErr.String())
+		}
+	}
+	if strings.ContainsAny(w.hubErr.String(), "\x1b\x07") {
+		t.Fatalf("a control sequence reached the terminal: %q", w.hubErr.String())
 	}
 }

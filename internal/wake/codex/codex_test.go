@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+func TestTheWakeTimeoutIsFifteenSeconds(t *testing.T) {
+	t.Parallel()
+	if wakeTimeout != 15*time.Second {
+		t.Fatalf("%v", wakeTimeout)
+	}
+}
+
 func TestWakeRunsCodexQueueWithTheThreadAndMessage(t *testing.T) {
 	t.Parallel()
 	var got []string

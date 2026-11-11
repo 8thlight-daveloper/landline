@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/model"
 )
@@ -130,5 +131,12 @@ func TestAnInboxPageOfSeveralMegabytesIsReadInFull(t *testing.T) {
 	out, err := c.Inbox(0, "", 0)
 	if err != nil || len(out.Messages) != 40 {
 		t.Fatalf("%d messages, %v", len(out.Messages), err)
+	}
+}
+
+func TestTheClientWaitsLongerThanAFullLongPoll(t *testing.T) {
+	t.Parallel()
+	if New("http://x", "t").http.Timeout <= 60*time.Second {
+		t.Fatalf("timeout %v is not longer than the 60 second poll limit", New("http://x", "t").http.Timeout)
 	}
 }

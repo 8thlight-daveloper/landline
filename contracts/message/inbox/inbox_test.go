@@ -3,6 +3,7 @@ package inbox
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/model"
 )
@@ -277,6 +278,67 @@ func TestAnEmptyThreadNameInTheFilterMatchesNothingRatherThanEverything(t *testi
 	t.Parallel()
 	l := []model.Envelope{env(1, "bravo", "alpha", "main")}
 	if got := newImpl().Select(l, "alpha", 0, []string{""}, 0); len(got.Messages) != 0 {
+		t.Fatalf("got %v", seqs(got))
+	}
+}
+
+func manyMessages(count int) []model.Envelope {
+	out := make([]model.Envelope, count)
+	for i := range out {
+		out[i] = env(int64(i+1), "bravo", "alpha", "main")
+	}
+	return out
+}
+
+func TestRemainingCountsOnlyMessagesAfterTheCursor(t *testing.T) {
+	t.Parallel()
+	l := manyMessages(10)
+	got := newImpl().Select(l, "alpha", 4, nil, 2)
+	if !reflect.DeepEqual(seqs(got), []int64{5, 6}) || got.Remaining != 4 || got.Next != 6 {
+		t.Fatalf("got %v remaining %d next %d", seqs(got), got.Remaining, got.Next)
+	}
+}
+
+func TestADuplicateThreadNameInTheFilterDoesNotDuplicateMessages(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{env(1, "bravo", "alpha", "deploy")}
+	if got := newImpl().Select(l, "alpha", 0, []string{"deploy", "deploy", "deploy"}, 0); !reflect.DeepEqual(seqs(got), []int64{1}) {
+		t.Fatalf("got %v", seqs(got))
+	}
+}
+
+func TestReturnedMessagesAreTheOriginalsUnchanged(t *testing.T) {
+	t.Parallel()
+	original := model.Envelope{Seq: 3, ID: "m-3", Time: time.Date(2031, 1, 2, 3, 4, 5, 6, time.UTC), Thread: "", From: "bravo", To: "alpha", Kind: model.KindReview, Body: "  padded body \n", InReplyTo: "m-2"}
+	got := newImpl().Select([]model.Envelope{original}, "alpha", 0, nil, 0)
+	if len(got.Messages) != 1 || got.Messages[0] != original {
+		t.Fatalf("got %+v", got.Messages)
+	}
+}
+
+func TestThereIsNoCapOnTheLimitOrOnTheLengthOfTheLog(t *testing.T) {
+	t.Parallel()
+	l := manyMessages(1500)
+	if got := newImpl().Select(l, "alpha", 0, nil, 1200); len(got.Messages) != 1200 || got.Remaining != 300 {
+		t.Fatalf("limit 1200: %d messages remaining %d", len(got.Messages), got.Remaining)
+	}
+	if got := newImpl().Select(l, "alpha", 0, nil, 0); len(got.Messages) != 1500 || got.Next != 1500 {
+		t.Fatalf("no limit: %d messages next %d", len(got.Messages), got.Next)
+	}
+}
+
+func TestANegativeCursorIsReturnedAsItIsWhenNothingMatches(t *testing.T) {
+	t.Parallel()
+	got := newImpl().Select(nil, "alpha", -5, nil, 0)
+	if got.Next != -5 || len(got.Messages) != 0 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestThreadNamesInTheFilterAreNotTrimmed(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{env(1, "bravo", "alpha", "deploy")}
+	if got := newImpl().Select(l, "alpha", 0, []string{" deploy", "deploy "}, 0); len(got.Messages) != 0 {
 		t.Fatalf("got %v", seqs(got))
 	}
 }

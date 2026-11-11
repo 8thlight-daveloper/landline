@@ -91,3 +91,13 @@ func TestEveryFieldThatReachesTheHeaderIsFlattenedToOneLine(t *testing.T) {
 		}
 	}
 }
+
+func TestTheMarkerLeadsTheTextOfEveryKind(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []Kind{KindChat, KindTask, KindReply, KindReview, ""} {
+		got := Render(Envelope{ID: "m-1", Thread: "main", From: "alpha", Kind: kind, Body: "b"}, Agent{Harness: "h", Host: "x"})
+		if !strings.HasPrefix(got, "[landline] "+Marker+"\n") {
+			t.Errorf("kind %q: %q", kind, got)
+		}
+	}
+}
