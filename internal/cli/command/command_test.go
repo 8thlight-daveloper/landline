@@ -1,0 +1,152 @@
+package command
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/8thlight-daveloper/landline/internal/model"
+)
+
+type run struct {
+	out, err bytes.Buffer
+	code     int
+}
+
+func do(t *testing.T, dir, url string, stdin string, args ...string) run {
+	t.Helper()
+	var r run
+	env := Env{
+		Stdin: strings.NewReader(stdin), Stdout: &r.out, Stderr: &r.err, ConfigDir: dir, Host: "mac",
+		Getenv: func(k string) string {
+			return map[string]string{"LANDLINE_URL": url, "LANDLINE_SECRET": "s3cret-s3cret-s3cret"}[k]
+		},
+	}
+	r.code = Run(args, env)
+	return r
+}
+
+func fakeHub(t *testing.T, seen *[]string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/register", func(w http.ResponseWriter, r *http.Request) {
+		var req model.RegisterRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		*seen = append(*seen, "register "+req.Name+" "+req.Host+" "+r.Header.Get("Authorization"))
+		json.NewEncoder(w).Encode(model.RegisterResponse{Name: req.Name, Token: "tok-" + req.Name})
+	})
+	mux.HandleFunc("/v1/send", func(w http.ResponseWriter, r *http.Request) {
+		var req model.SendBody
+		json.NewDecoder(r.Body).Decode(&req)
+		*seen = append(*seen, "send "+req.To+" "+req.Body+" "+r.Header.Get("Authorization"))
+		json.NewEncoder(w).Encode(model.SendResponse{ID: "m-1", Seq: 3, Recipients: []string{req.To}, Woken: []string{req.To}})
+	})
+	mux.HandleFunc("/v1/inbox", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nhello"}}, Remaining: 2})
+	})
+	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "bravo", Harness: "codex", Host: "mac", WakeKind: "codex"}, {Name: "alpha", Harness: "claude-code", Host: "linux"}})
+	})
+	s := httptest.NewServer(mux)
+	t.Cleanup(s.Close)
+	return s
+}
+
+func TestRegisterSavesAPrivateSessionAndSendUsesIt(t *testing.T) {
+	t.Parallel()
+	var seen []string
+	hub := fakeHub(t, &seen)
+	dir := t.TempDir()
+	if r := do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex"); r.code != 0 || !strings.Contains(r.out.String(), "registered alpha") {
+		t.Fatalf("register: %d %s %s", r.code, r.out.String(), r.err.String())
+	}
+	info, err := os.Stat(filepath.Join(dir, "session-alpha.json"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("session file: %v %v", info, err)
+	}
+	r := do(t, dir, hub.URL, "", "send", "--as", "alpha", "--to", "bravo", "hello", "there")
+	if r.code != 0 || !strings.Contains(r.out.String(), "sent m-1 (seq 3) to bravo; woke bravo") {
+		t.Fatalf("send: %d %s %s", r.code, r.out.String(), r.err.String())
+	}
+	if want := "send bravo hello there Bearer tok-alpha"; seen[1] != want {
+		t.Fatalf("seen %v", seen)
+	}
+	if !strings.HasSuffix(seen[0], "Bearer s3cret-s3cret-s3cret") || !strings.Contains(seen[0], "alpha mac") {
+		t.Fatalf("register call %q", seen[0])
+	}
+}
+
+func TestSendReadsTheBodyFromStandardInputForADash(t *testing.T) {
+	t.Parallel()
+	var seen []string
+	hub := fakeHub(t, &seen)
+	dir := t.TempDir()
+	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	do(t, dir, hub.URL, "piped body", "send", "--as", "alpha", "--to", "bravo", "-")
+	if seen[1] != "send bravo piped body Bearer tok-alpha" {
+		t.Fatalf("seen %v", seen)
+	}
+}
+
+func TestInboxPrintsTheRenderedTextAndTheRemainingCount(t *testing.T) {
+	t.Parallel()
+	var seen []string
+	hub := fakeHub(t, &seen)
+	dir := t.TempDir()
+	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	r := do(t, dir, hub.URL, "", "inbox", "--as", "alpha")
+	if r.code != 0 || !strings.Contains(r.out.String(), "[landline] marker\n\nhello") || !strings.Contains(r.err.String(), "2 more unread") {
+		t.Fatalf("%d out %q err %q", r.code, r.out.String(), r.err.String())
+	}
+	j := do(t, dir, hub.URL, "", "inbox", "--as", "alpha", "--json")
+	var parsed model.InboxResponse
+	if err := json.Unmarshal(j.out.Bytes(), &parsed); err != nil || len(parsed.Messages) != 1 {
+		t.Fatalf("json %q: %v", j.out.String(), err)
+	}
+}
+
+func TestAgentsListsOnePerLine(t *testing.T) {
+	t.Parallel()
+	var seen []string
+	hub := fakeHub(t, &seen)
+	dir := t.TempDir()
+	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	r := do(t, dir, hub.URL, "", "agents", "--as", "alpha")
+	if !strings.Contains(r.out.String(), "bravo\tcodex\tmac\twake: codex\n") || !strings.Contains(r.out.String(), "alpha\tclaude-code\tlinux\twake: none\n") {
+		t.Fatalf("got %q", r.out.String())
+	}
+}
+
+func TestMissingPiecesGiveClearErrors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"send", "--to", "bravo", "x"}, "say who you are"},
+		{[]string{"send", "--as", "alpha", "--to", "bravo", "x"}, "no session here"},
+		{[]string{"send", "--as", "../etc", "--to", "bravo", "x"}, "bad agent name"},
+		{[]string{"register", "--name", "alpha", "--harness", "codex"}, "LANDLINE_URL"},
+	} {
+		r := do(t, dir, "", "", c.args...)
+		if r.code != 1 || !strings.Contains(r.err.String(), c.want) {
+			t.Errorf("%v: %d %q", c.args, r.code, r.err.String())
+		}
+	}
+}
+
+func TestUnknownCommandsAndNoArgumentsShowUsage(t *testing.T) {
+	t.Parallel()
+	if r := do(t, t.TempDir(), "", ""); r.code != 2 || !strings.Contains(r.err.String(), "landline <command>") {
+		t.Fatalf("%d %q", r.code, r.err.String())
+	}
+	if r := do(t, t.TempDir(), "", "", "frobnicate"); r.code != 2 || !strings.Contains(r.err.String(), "unknown command") {
+		t.Fatalf("%d %q", r.code, r.err.String())
+	}
+}

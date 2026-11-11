@@ -1,0 +1,380 @@
+package server
+
+import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/8thlight-daveloper/landline/internal/agent/registry"
+	"github.com/8thlight-daveloper/landline/internal/message/inbox"
+	"github.com/8thlight-daveloper/landline/internal/message/router"
+	"github.com/8thlight-daveloper/landline/internal/model"
+)
+
+type Store interface {
+	Append(model.Envelope) error
+	All() []model.Envelope
+	LastSeq() int64
+}
+
+type Waker interface {
+	Wake(target, text string) error
+}
+
+type Config struct {
+	Secret   string
+	Host     string
+	Window   time.Duration
+	Now      func() time.Time
+	NewID    func() string
+	NewToken func() string
+	Wakers   map[string]Waker
+	Notify   func(string)
+}
+
+type Server struct {
+	cfg     Config
+	store   Store
+	reg     registry.Registry
+	rt      router.Router
+	in      inbox.Inbox
+	mu      sync.Mutex
+	agents  []model.Agent
+	tokens  map[string]string
+	cursors map[string]int64
+	waiting map[string]int
+	seq     int64
+	changed chan struct{}
+}
+
+const maxRequestBytes = 2 * model.MaxBodyBytes
+
+func New(cfg Config, store Store) (*Server, error) {
+	if len(cfg.Secret) < 16 {
+		return nil, errors.New("the hub secret must be at least 16 characters")
+	}
+	if cfg.Window == 0 {
+		cfg.Window = 90 * time.Second
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.NewID == nil {
+		cfg.NewID = func() string { return "m-" + randomHex(8) }
+	}
+	if cfg.NewToken == nil {
+		cfg.NewToken = func() string { return randomHex(24) }
+	}
+	if cfg.Notify == nil {
+		cfg.Notify = func(string) {}
+	}
+	return &Server{
+		cfg: cfg, store: store,
+		tokens: map[string]string{}, cursors: map[string]int64{}, waiting: map[string]int{},
+		seq: store.LastSeq(), changed: make(chan struct{}),
+	}, nil
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/register", s.register)
+	mux.HandleFunc("POST /v1/send", s.send)
+	mux.HandleFunc("GET /v1/inbox", s.inbox)
+	mux.HandleFunc("GET /v1/agents", s.list)
+	mux.HandleFunc("GET /v1/log", s.logRead)
+	return mux
+}
+
+func bearer(r *http.Request) string {
+	value := r.Header.Get("Authorization")
+	if len(value) > 7 && strings.EqualFold(value[:7], "bearer ") {
+		return strings.TrimSpace(value[7:])
+	}
+	return ""
+}
+
+func (s *Server) isSecret(r *http.Request) bool {
+	return subtle.ConstantTimeCompare([]byte(bearer(r)), []byte(s.cfg.Secret)) == 1
+}
+
+func (s *Server) agentFor(r *http.Request) (string, bool) {
+	token := bearer(r)
+	if token == "" {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	name, ok := s.tokens[token]
+	if !ok {
+		return "", false
+	}
+	if agent, found := s.reg.Find(s.agents, name); found {
+		if updated, err := s.reg.Register(s.agents, agent, s.cfg.Now()); err == nil {
+			s.agents = updated
+		}
+	}
+	return name, true
+}
+
+func write(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(value)
+}
+
+func fail(w http.ResponseWriter, status int, message string) {
+	write(w, status, model.ErrorResponse{Error: message})
+}
+
+func decode(w http.ResponseWriter, r *http.Request, into any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(into); err != nil {
+		fail(w, http.StatusBadRequest, "bad request: "+err.Error())
+		return false
+	}
+	return true
+}
+
+func (s *Server) register(w http.ResponseWriter, r *http.Request) {
+	if !s.isSecret(r) {
+		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
+		return
+	}
+	var body model.RegisterRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.WakeKind != "" && s.cfg.Wakers[body.WakeKind] == nil {
+		fail(w, http.StatusBadRequest, "this hub has no wake method "+body.WakeKind)
+		return
+	}
+	if body.WakeKind != "" && strings.TrimSpace(body.WakeTarget) == "" {
+		fail(w, http.StatusBadRequest, "a wake method needs a wake_target")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := model.Agent{Name: body.Name, Harness: body.Harness, Host: body.Host, Session: body.Session, WakeKind: body.WakeKind, WakeTarget: body.WakeTarget}
+	updated, err := s.reg.Register(s.agents, entry, s.cfg.Now())
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.agents = updated
+	for token, name := range s.tokens {
+		if name == body.Name {
+			delete(s.tokens, token)
+		}
+	}
+	token := s.cfg.NewToken()
+	s.tokens[token] = body.Name
+	if _, seen := s.cursors[body.Name]; !seen {
+		s.cursors[body.Name] = s.store.LastSeq()
+	}
+	write(w, http.StatusOK, model.RegisterResponse{Name: body.Name, Token: token})
+}
+
+func (s *Server) send(w http.ResponseWriter, r *http.Request) {
+	from, ok := s.agentFor(r)
+	if !ok {
+		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
+		return
+	}
+	var body model.SendBody
+	if !decode(w, r, &body) {
+		return
+	}
+	s.mu.Lock()
+	decision, err := s.rt.Route(s.agents, from, model.SendRequest(body), s.cfg.NewID(), s.seq+1, s.cfg.Now())
+	if err != nil {
+		s.mu.Unlock()
+		fail(w, statusOf(err), err.Error())
+		return
+	}
+	if err := s.store.Append(decision.Envelope); err != nil {
+		s.mu.Unlock()
+		fail(w, http.StatusInternalServerError, "could not record the message")
+		return
+	}
+	s.seq = decision.Envelope.Seq
+	sender, _ := s.reg.Find(s.agents, from)
+	targets := s.wakeTargets(decision.Recipients)
+	close(s.changed)
+	s.changed = make(chan struct{})
+	s.mu.Unlock()
+
+	woken := s.wake(decision.Envelope, sender, targets)
+	write(w, http.StatusOK, model.SendResponse{ID: decision.Envelope.ID, Seq: decision.Envelope.Seq, Recipients: decision.Recipients, Woken: woken})
+}
+
+func statusOf(err error) int {
+	switch {
+	case errors.Is(err, model.ErrUnknownRecipient):
+		return http.StatusNotFound
+	case errors.Is(err, model.ErrBodyTooLarge):
+		return http.StatusRequestEntityTooLarge
+	default:
+		return http.StatusUnprocessableEntity
+	}
+}
+
+func (s *Server) wakeTargets(recipients []string) []model.Agent {
+	out := []model.Agent{}
+	for _, name := range recipients {
+		agent, found := s.reg.Find(s.agents, name)
+		if found && agent.WakeKind != "" && s.waiting[name] == 0 && s.localTo(agent) {
+			out = append(out, agent)
+		}
+	}
+	return out
+}
+
+func (s *Server) localTo(agent model.Agent) bool {
+	return s.cfg.Host == "" || agent.Host == s.cfg.Host
+}
+
+func (s *Server) wake(e model.Envelope, sender model.Agent, targets []model.Agent) []string {
+	woken := []string{}
+	text := model.Render(e, sender)
+	for _, target := range targets {
+		waker := s.cfg.Wakers[target.WakeKind]
+		if waker == nil {
+			continue
+		}
+		if err := waker.Wake(target.WakeTarget, text); err != nil {
+			s.cfg.Notify(fmt.Sprintf("wake of %s failed: %v", target.Name, err))
+			continue
+		}
+		s.cfg.Notify(fmt.Sprintf("woke %s (%s) for a message from %s, id %s", target.Name, target.WakeKind, e.From, e.ID))
+		woken = append(woken, target.Name)
+	}
+	return woken
+}
+
+func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
+	name, ok := s.agentFor(r)
+	if !ok {
+		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
+		return
+	}
+	query := r.URL.Query()
+	wait := clamp(intOf(query.Get("wait")), 0, 60)
+	limit := clamp(intOf(query.Get("limit")), 0, 200)
+	if limit == 0 {
+		limit = 50
+	}
+	var threads []string
+	if raw := query.Get("thread"); raw != "" {
+		threads = strings.Split(raw, ",")
+	}
+	deadline := time.NewTimer(time.Duration(wait) * time.Second)
+	defer deadline.Stop()
+	s.mu.Lock()
+	s.waiting[name]++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.waiting[name]--
+		s.mu.Unlock()
+	}()
+	for {
+		s.mu.Lock()
+		cursor := s.cursors[name]
+		if len(threads) > 0 {
+			cursor = int64(intOf(query.Get("after")))
+		}
+		page := s.in.Select(s.store.All(), name, cursor, threads, limit)
+		changed := s.changed
+		if len(page.Messages) > 0 && len(threads) == 0 {
+			s.cursors[name] = page.Next
+		}
+		senders := map[string]model.Agent{}
+		for _, each := range page.Messages {
+			if a, found := s.reg.Find(s.agents, each.From); found {
+				senders[each.From] = a
+			}
+		}
+		s.mu.Unlock()
+		if len(page.Messages) > 0 || wait == 0 {
+			write(w, http.StatusOK, toWire(page, senders))
+			return
+		}
+		select {
+		case <-changed:
+		case <-deadline.C:
+			write(w, http.StatusOK, toWire(page, senders))
+			return
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func toWire(page model.Page, senders map[string]model.Agent) model.InboxResponse {
+	out := model.InboxResponse{Messages: []model.WireEnvelope{}, Next: page.Next, Remaining: page.Remaining}
+	for _, e := range page.Messages {
+		sender := senders[e.From]
+		out.Messages = append(out.Messages, model.WireEnvelope{
+			Seq: e.Seq, ID: e.ID, Time: e.Time, Thread: e.Thread, From: e.From,
+			FromInfo: fmt.Sprintf("%s on %s", sender.Harness, sender.Host),
+			To:       e.To, Kind: e.Kind, Body: e.Body, InReplyTo: e.InReplyTo, Text: model.Render(e, sender),
+		})
+	}
+	return out
+}
+
+func (s *Server) list(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.agentFor(r); !ok {
+		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
+		return
+	}
+	s.mu.Lock()
+	online := s.reg.Online(s.agents, s.cfg.Now(), s.cfg.Window)
+	s.mu.Unlock()
+	out := []model.AgentInfo{}
+	for _, a := range online {
+		out = append(out, model.AgentInfo{Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, WakeKind: a.WakeKind, LastSeen: a.LastSeen})
+	}
+	write(w, http.StatusOK, out)
+}
+
+func (s *Server) logRead(w http.ResponseWriter, r *http.Request) {
+	if !s.isSecret(r) {
+		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
+		return
+	}
+	after := int64(intOf(r.URL.Query().Get("after")))
+	out := []model.Envelope{}
+	for _, e := range s.store.All() {
+		if e.Seq > after {
+			out = append(out, e)
+		}
+	}
+	write(w, http.StatusOK, out)
+}
+
+func intOf(raw string) int {
+	n, _ := strconv.Atoi(raw)
+	return n
+}
+
+func clamp(n, lo, hi int) int {
+	return max(lo, min(n, hi))
+}

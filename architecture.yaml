@@ -26,7 +26,9 @@ libraries:
 drivers:
   - log/store
   - wake/codex
+  - client/http
   - hub/server
+  - cli/command
 
 # A component may depend only on components at an earlier position, and on
 # the model. Two components at one position may not depend on each other.
@@ -46,9 +48,15 @@ components:
   - name: wake/codex
     position: 2
     depends_on: []
+  - name: client/http
+    position: 2
+    depends_on: []
   - name: hub/server
     position: 3
     depends_on: [agent/registry, message/router, message/inbox, log/store, wake/codex]
+  - name: cli/command
+    position: 3
+    depends_on: [client/http]
 
 contracts:
   may_import: [model, contracts/harness]
