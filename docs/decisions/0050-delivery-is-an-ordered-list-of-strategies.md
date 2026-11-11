@@ -60,9 +60,10 @@ protocols fall back to.
   `content` is the same rendered text that every delivery uses, so its first line is the marker of
   [0020](0020-messages-carry-no-user-authority.md). The `meta` carries `from`, `thread`, `kind`, and `id`, using only
   letters, digits, and underscores in the keys, as the protocol requires.
-- The server marks a message read after it has written the notification, and not before. A notification that Claude Code
-  drops is lost from the unread list and stays in the log, as with any read that fails after the hub answers
-  ([0040](0040-hub-defaults-and-saved-state.md)).
+- The hub marks a message read when it hands the message to the server, and the server then writes the notification. A
+  notification that Claude Code drops is lost from the unread list and stays in the log, as with any read that fails
+  after the hub answers ([0040](0040-hub-defaults-and-saved-state.md)). If the hub cannot be reached, the server prints
+  the error, waits with growing delays up to 30 seconds, and tries again.
 - The `send`, `inbox`, and `agents` tools stay available in channel mode.
 
 **Rules every strategy keeps.**
@@ -75,7 +76,8 @@ protocols fall back to.
 - Strategy names and the details of each protocol live in one component per mechanism, so replacing one touches no core
   component. Each keeps pinned examples of the exact messages it sends, so a change in a vendor's format fails a test
   here before it surprises a person.
-- A hub-side strategy that succeeds marks the message read for that agent, so a woken message is not also left unread.
+- A hub-side strategy that succeeds should mark the message read for that agent, so a woken message is not also left
+  unread. Today only the Codex wake exists, and it does not do this yet.
 
 **The socket strategy waits.** Its message format is not documented. If it is documented, it becomes a hub-side
 strategy. A `SessionStart` hook would register the socket path and token with the hub, and the hub would keep the token

@@ -167,7 +167,16 @@ func runDaemon(args []string, host string) int {
 }
 
 func runMCP(args []string, env command.Env) int {
-	values, err := flagValues(args, "--as")
+	channel := false
+	filtered := args[:0:0]
+	for _, each := range args {
+		if each == "--channel" {
+			channel = true
+			continue
+		}
+		filtered = append(filtered, each)
+	}
+	values, err := flagValues(filtered, "--as")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline mcp:", err)
 		return 2
@@ -177,7 +186,7 @@ func runMCP(args []string, env command.Env) int {
 		fmt.Fprintln(os.Stderr, "landline mcp:", err)
 		return 1
 	}
-	if err := mcp.Serve(os.Stdin, os.Stdout, c); err != nil {
+	if err := mcp.ServeWith(os.Stdin, os.Stdout, c, mcp.Options{Channel: channel, Notify: notifyToStderr}); err != nil {
 		fmt.Fprintln(os.Stderr, "landline mcp:", err)
 		return 1
 	}

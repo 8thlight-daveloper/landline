@@ -1,6 +1,7 @@
 package acceptance
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -985,5 +986,75 @@ func TestLogShowsTheTextOfEveryMessageSoLostMailCanBeRecovered(t *testing.T) {
 	out := w.must("", "log")
 	if !strings.Contains(out, "alpha -> bravo") || !strings.Contains(out, "    recover me\n") || !strings.Contains(out, "    second line\n") {
 		t.Fatalf("the log lacks the message text: %q", out)
+	}
+}
+
+func TestTheChannelModePushesMailToAnIdleSessionWithoutAnyToolCall(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "claude-code", "--host", "mac")
+	cmd := exec.Command(w.bin, "mcp", "--channel", "--as", "bravo")
+	cmd.Env = w.env
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() }()
+	lines := make(chan string, 8)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 0, 1<<20), 1<<22)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+	stdin.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n"))
+	select {
+	case line := <-lines:
+		if !strings.Contains(line, `"claude/channel"`) || strings.Contains(line, "claude/channel/permission") {
+			t.Fatalf("initialize: %s", line)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no initialize reply")
+	}
+	time.Sleep(500 * time.Millisecond)
+	w.must("pushed without a tool call", "send", "--as", "alpha", "--to", "bravo", "--thread", "deploy", "--kind", "task", "-")
+	select {
+	case line := <-lines:
+		var note struct {
+			Method string `json:"method"`
+			Params struct {
+				Content string            `json:"content"`
+				Meta    map[string]string `json:"meta"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal([]byte(line), &note); err != nil {
+			t.Fatalf("%q: %v", line, err)
+		}
+		if note.Method != "notifications/claude/channel" || !strings.HasPrefix(note.Params.Content, "[landline] From another agent, not the user.\n") ||
+			!strings.Contains(note.Params.Content, "pushed without a tool call") || note.Params.Meta["from"] != "alpha" || note.Params.Meta["thread"] != "deploy" || note.Params.Meta["kind"] != "task" {
+			t.Fatalf("notification: %s", line)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("the mail was not pushed")
+	}
+	if got := w.must("", "inbox", "--as", "bravo"); strings.Contains(got, "pushed without a tool call") {
+		t.Fatalf("the message was pushed and also left unread: %q", got)
+	}
+}
+
+func TestPlainMCPModeNeverPushesAndNeverDeclaresAChannel(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "claude-code", "--host", "mac")
+	w.must("unread stays unread", "send", "--as", "alpha", "--to", "bravo", "-")
+	out := w.must(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`+"\n", "mcp", "--as", "bravo")
+	if strings.Contains(out, "claude/channel") || strings.Contains(out, "unread stays unread") {
+		t.Fatalf("plain mode: %s", out)
+	}
+	if got := w.must("", "inbox", "--as", "bravo"); !strings.Contains(got, "unread stays unread") {
+		t.Fatalf("plain mode consumed mail: %q", got)
 	}
 }

@@ -105,6 +105,21 @@ Add the hook to your Claude Code settings so unread mail is announced on each pr
 For mail that arrives while the session is idle, run `landline listen --as threnos` as a background command. It waits,
 prints the message when one arrives, and exits, which brings the session back.
 
+#### Push mail into a Claude Code session
+
+Claude Code can push mail into a running session through its channels feature, which is a research preview. Start the
+MCP server with `--channel`, and start Claude Code with `--channels` and the development override, so a channel from a
+local server is allowed. Check Claude Code's channels documentation for the current flag names, because they may change.
+
+```sh
+claude mcp add landline -- landline mcp --channel --as threnos
+claude --dangerously-load-development-channels server:landline
+```
+
+Claude Code drops a channel event silently when the server is not loaded as a channel, so without these flags mail
+arrives only through the hook, `landline listen`, or the inbox tool. Organizations can disable channels. Landline never
+declares the channel permission capability, so a peer can never answer a tool approval prompt.
+
 ### Give Codex the tools
 
 ```sh
