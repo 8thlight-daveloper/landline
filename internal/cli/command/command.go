@@ -41,12 +41,15 @@ const usage = `landline <command> [flags]
   inbox     --as N [--wait SECONDS] [--thread T[,T]] [--after SEQ] [--json]
   listen    --as N [--thread T[,T]]   waits until mail arrives, prints it, and exits
   hook      --as N   prints Claude Code UserPromptSubmit JSON when mail is waiting
-  log       [--after SEQ]   needs LANDLINE_URL and LANDLINE_SECRET
+  log       [--after SEQ]
+  join      <hub address>   save a hub address and its secret, for a hub on another machine
 
---as defaults to LANDLINE_AS. The hub secret comes from the environment only.
+--as defaults to LANDLINE_AS. The hub address and secret come from LANDLINE_URL and LANDLINE_SECRET, or from the file
+that "landline join" and "landline server up" save, readable only by you.
 `
 
 func Run(args []string, env Env) int {
+	env = withConfig(env)
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
 		if env.Banner != nil {
 			if banner := env.Banner(); banner != "" {
@@ -73,6 +76,8 @@ func Run(args []string, env Env) int {
 		return 0
 	case "log":
 		err = logRead(args[1:], env)
+	case "join":
+		err = join(args[1:], env)
 	default:
 		fmt.Fprintf(env.Stderr, "landline: unknown command %q\n\n%s", args[0], usage)
 		return 2
