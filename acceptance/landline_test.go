@@ -1299,3 +1299,132 @@ func TestAnAgentCannotAttachAThreadItWasNotToldTheCodeFor(t *testing.T) {
 		t.Fatalf("a wake method appeared without a proven code: %s", out)
 	}
 }
+
+func isolatedEnv(home string) []string {
+	var out []string
+	for _, pair := range os.Environ() {
+		if strings.HasPrefix(pair, "LANDLINE_") || strings.HasPrefix(pair, "HOME=") || strings.HasPrefix(pair, "NO_COLOR=") {
+			continue
+		}
+		out = append(out, pair)
+	}
+	return append(out, "HOME="+home, "NO_COLOR=1")
+}
+
+func runIn(t *testing.T, bin string, env []string, dir string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Env, cmd.Dir = env, dir
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err := cmd.Run()
+	return out.String(), err
+}
+
+func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConfig(t *testing.T) {
+	bin, home := build(t), t.TempDir()
+	env := isolatedEnv(home)
+	addr := freeAddr(t)
+	t.Cleanup(func() { runIn(t, bin, env, home, "server", "down") })
+	out, err := runIn(t, bin, env, home, "server", "up", "--addr", addr)
+	if err != nil || !strings.Contains(out, "the hub is running") {
+		t.Fatalf("up: %v %s", err, out)
+	}
+	config := filepath.Join(home, ".config", "landline", "config.json")
+	info, statErr := os.Stat(config)
+	raw, _ := os.ReadFile(config)
+	var saved struct{ URL, Secret string }
+	json.Unmarshal(raw, &saved)
+	if statErr != nil || info.Mode().Perm() != 0o600 || saved.URL != "http://"+addr || len(saved.Secret) != 32 {
+		t.Fatalf("config %v %v %s", info, statErr, raw)
+	}
+	if again, _ := runIn(t, bin, env, home, "server", "up", "--addr", addr); !strings.Contains(again, "already running") {
+		t.Fatalf("a second up: %s", again)
+	}
+	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "is running") {
+		t.Fatalf("status: %s", status)
+	}
+	dir := filepath.Join(t.TempDir(), "found-by-config")
+	os.MkdirAll(dir, 0o755)
+	cmd := exec.Command(bin, "mcp")
+	cmd.Env, cmd.Dir = env, dir
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	p := &mcpProcess{t: t, stdin: stdin, lines: make(chan string, 16)}
+	t.Cleanup(func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() })
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			p.lines <- scanner.Text()
+		}
+		close(p.lines)
+	}()
+	p.initialize("claude-code", "2.1.296")
+	if agents := p.tool("landline_agents", `{}`); !strings.Contains(agents, "found-by-config-") || !strings.Contains(agents, "folder: found-by-config") {
+		t.Fatalf("the process did not register through the saved config: %s", agents)
+	}
+	if hubOut, _ := os.ReadFile(filepath.Join(home, ".local", "share", "landline", "hub.out")); !strings.Contains(string(hubOut), "listening on "+addr) {
+		t.Fatalf("hub.out: %s", hubOut)
+	}
+	if info, _ := os.Stat(filepath.Join(home, ".local", "share", "landline", "hub.out")); info.Mode().Perm() != 0o600 {
+		t.Fatalf("hub.out mode %v", info.Mode().Perm())
+	}
+	if down, err := runIn(t, bin, env, home, "server", "down"); err != nil || !strings.Contains(down, "the hub stopped") {
+		t.Fatalf("down: %v %s", err, down)
+	}
+	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "no hub") {
+		t.Fatalf("status after down: %s", status)
+	}
+	if refused := p.tool("landline_agents", `{}`); !strings.Contains(refused, "landline server up") {
+		t.Fatalf("with the hub down: %s", refused)
+	}
+}
+
+func TestServerInstallWritesTheLoginServiceFileWithoutTheSecretAndWithoutLoadingIt(t *testing.T) {
+	bin, home := build(t), t.TempDir()
+	env := isolatedEnv(home)
+	out, err := runIn(t, bin, env, home, "server", "install")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	var path string
+	for _, candidate := range []string{
+		filepath.Join(home, "Library", "LaunchAgents", "dev.landline.hub.plist"),
+		filepath.Join(home, ".config", "systemd", "user", "landline-hub.service"),
+	} {
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			path = candidate
+		}
+	}
+	if path == "" {
+		t.Fatalf("no service file under %s: %s", home, out)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), bin) || !strings.Contains(string(raw), "server") || strings.Contains(string(raw), "secret") {
+		t.Fatalf("service file:\n%s", raw)
+	}
+	if !strings.Contains(out, "launchctl") && !strings.Contains(out, "systemctl") {
+		t.Fatalf("the load command was not printed: %s", out)
+	}
+	config, _ := os.ReadFile(filepath.Join(home, ".config", "landline", "config.json"))
+	if !strings.Contains(string(config), "secret") {
+		t.Fatalf("install did not create the hub secret: %s", config)
+	}
+}
+
+func TestServerJoinSavesAnotherMachinesHubAndServerUpRefusesToStartASecondHub(t *testing.T) {
+	bin, home := build(t), t.TempDir()
+	env := isolatedEnv(home)
+	cmd := exec.Command(bin, "server", "join", "http://tailnet-mac:8787")
+	cmd.Env, cmd.Dir = append(env, "LANDLINE_SECRET=a-long-enough-secret-1"), home
+	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "joined the hub at http://tailnet-mac:8787") {
+		t.Fatalf("join: %v %s", err, out)
+	}
+	out, err := runIn(t, bin, env, home, "server", "up", "--addr", freeAddr(t))
+	if err == nil || !strings.Contains(out, "joined the hub at http://tailnet-mac:8787") {
+		t.Fatalf("up after join: %v %s", err, out)
+	}
+}

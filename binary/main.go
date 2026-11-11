@@ -36,7 +36,9 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "hub":
-			os.Exit(runHub(os.Args[2:], home, host))
+			os.Exit(runHub(os.Args[2:], env, home, host))
+		case "server":
+			os.Exit(runServer(os.Args[2:], env, home, host))
 		case "agentd":
 			os.Exit(runDaemon(os.Args[2:], host))
 		case "mcp":
@@ -94,7 +96,7 @@ func notifyToStderr(line string) {
 	fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), plain)
 }
 
-func runHub(args []string, home, host string) int {
+func runHub(args []string, env command.Env, home, host string) int {
 	values, err := flagValues(args, "--addr", "--log", "--host", "--state", "--window")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
@@ -120,8 +122,16 @@ func runHub(args []string, home, host string) int {
 		return 1
 	}
 	defer log.Close()
+	secret := os.Getenv("LANDLINE_SECRET")
+	if secret == "" {
+		secret = command.LoadConfig(env).Secret
+	}
+	if secret == "" {
+		fmt.Fprintln(os.Stderr, "landline hub: there is no hub secret. Run landline server up, or set LANDLINE_SECRET")
+		return 1
+	}
 	hub, err := server.New(server.Config{
-		Secret: os.Getenv("LANDLINE_SECRET"), Host: host, StatePath: statePath, Window: window,
+		Secret: secret, Host: host, StatePath: statePath, Window: window,
 		Wakers: map[string]server.Waker{"codex": codex.New()},
 		Notify: notifyToStderr,
 	}, log)
