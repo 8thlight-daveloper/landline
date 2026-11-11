@@ -1,0 +1,7 @@
+.direnv/
+.scratch/
+output/
+.DS_Store
+.idea/
+.claude/worktrees/
+.claude/settings.local.json

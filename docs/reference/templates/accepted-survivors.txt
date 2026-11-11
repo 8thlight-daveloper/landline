@@ -1,0 +1,3 @@
+# Mutants of <component> that a person checked and accepted: the change alters no behavior the contract allows.
+# Each line: key | file | change | why it alters nothing, in terms of the contract. Only a person adds a line.
+# The key hashes the file name, the mutator, the original and mutated text, and the line's text, so an edited line comes back for review.

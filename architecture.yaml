@@ -1,0 +1,60 @@
+# The dependency rules, as data. A checker compares this with a graph that a
+# language adapter extracts from the code. Protected like a contract.
+
+components_root: internal
+model: internal/model
+contracts_root: contracts
+entry_point: binary
+
+naming:
+  component_path: "<noun>/<role>"
+  segment_pattern: "^[a-z][a-z0-9]*$"
+
+banned_in_core:
+  - filesystem
+  - network
+  - process
+  - terminal
+  - clock
+  - randomness
+  - environment
+
+libraries:
+  terminal: []
+
+# Drivers do input and output, so the banned list does not apply to them.
+drivers:
+  - log/store
+  - wake/codex
+  - hub/server
+
+# A component may depend only on components at an earlier position, and on
+# the model. Two components at one position may not depend on each other.
+components:
+  - name: agent/registry
+    position: 1
+    depends_on: []
+  - name: message/router
+    position: 1
+    depends_on: []
+  - name: message/inbox
+    position: 1
+    depends_on: []
+  - name: log/store
+    position: 2
+    depends_on: []
+  - name: wake/codex
+    position: 2
+    depends_on: []
+  - name: hub/server
+    position: 3
+    depends_on: [agent/registry, message/router, message/inbox, log/store, wake/codex]
+
+contracts:
+  may_import: [model, contracts/harness]
+  wiring_test_may_import: own_component
+
+# Scenarios are Go code that start the built binary and drive it from outside.
+acceptance:
+  scenarios: code
+  may_import: []

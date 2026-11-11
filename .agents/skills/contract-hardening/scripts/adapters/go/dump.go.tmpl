@@ -1,0 +1,94 @@
+package main
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"os"
+	"reflect"
+	"sort"
+	"strings"
+)
+
+func main() {
+	var encoded []string
+	if err := json.NewDecoder(os.Stdin).Decode(&encoded); err != nil {
+		panic(err)
+	}
+	results := make([]string, 0, len(encoded))
+	for _, item := range encoded {
+		data, _ := base64.StdEncoding.DecodeString(item)
+		results = append(results, run(data))
+	}
+	json.NewEncoder(os.Stdout).Encode(results)
+}
+
+func run(data []byte) (out string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			out = fmt.Sprintf("PANIC %v", recovered)
+		}
+	}()
+	value, problems := callComponent(data)
+	var builder strings.Builder
+	dump(&builder, reflect.ValueOf(value))
+	out = builder.String() + "\n"
+	for _, problem := range problems {
+		out += fmt.Sprintf("%s|%s|%s|%v\n", problem.Code, problem.Severity, problem.Detail["path"], problem.Detail)
+	}
+	return out
+}
+
+func dump(builder *strings.Builder, value reflect.Value) {
+	switch value.Kind() {
+	case reflect.Ptr:
+		if value.IsNil() {
+			builder.WriteString("nil")
+			return
+		}
+		builder.WriteString("&")
+		dump(builder, value.Elem())
+	case reflect.Interface:
+		if value.IsNil() {
+			builder.WriteString("nil")
+			return
+		}
+		fmt.Fprintf(builder, "%s:", value.Elem().Type())
+		dump(builder, value.Elem())
+	case reflect.Struct:
+		builder.WriteString("{")
+		for i := 0; i < value.NumField(); i++ {
+			fmt.Fprintf(builder, "%s=", value.Type().Field(i).Name)
+			dump(builder, value.Field(i))
+			builder.WriteString(" ")
+		}
+		builder.WriteString("}")
+	case reflect.Slice:
+		if value.IsNil() {
+			builder.WriteString("nil[]")
+			return
+		}
+		builder.WriteString("[")
+		for i := 0; i < value.Len(); i++ {
+			dump(builder, value.Index(i))
+			builder.WriteString(", ")
+		}
+		builder.WriteString("]")
+	case reflect.Map:
+		if value.IsNil() {
+			builder.WriteString("nilmap")
+			return
+		}
+		keys := value.MapKeys()
+		sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+		builder.WriteString("map{")
+		for _, key := range keys {
+			fmt.Fprintf(builder, "%q:", key.String())
+			dump(builder, value.MapIndex(key))
+			builder.WriteString(", ")
+		}
+		builder.WriteString("}")
+	default:
+		fmt.Fprintf(builder, "%#v", value.Interface())
+	}
+}

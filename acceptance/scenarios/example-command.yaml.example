@@ -1,0 +1,10 @@
+name: example-command
+description: A plan file that does not exist is reported, and no document is written.
+source: docs/reference/commands.md
+steps:
+  - run: [program, assemble, --plan, nothing.yaml, --out, out.md]
+    expect:
+      exit: 1
+      stderr: {contains: nothing.yaml}
+      files:
+        out.md: {absent: true}

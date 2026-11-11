@@ -1,0 +1,14 @@
+name: example-protocol
+description: An answer the plan accepts is stored, and the plan reports no problems.
+source: docs/decisions/0010-plan-editor.md
+steps:
+  - run: [program, stdio, --plan, plan.yaml]
+    files:
+      plan.yaml: {from: docs/reference/examples/example/plan.yaml}
+    talk:
+      - send: {command: questions}
+        expect: {ok: true}
+      - send: {command: submit, question: plan.team_state, value: established}
+        expect: {ok: true, problems: []}
+    expect:
+      exit: 0

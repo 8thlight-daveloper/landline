@@ -1,0 +1,31 @@
+[
+  {
+    "name": "is-and-is-not",
+    "source": "docs/reference/conditions.md",
+    "input": "is-and-is-not.input.json",
+    "checks": [
+      {
+        "name": "the same text",
+        "argument": {"is": "software"},
+        "expect": true
+      },
+      {
+        "name": "text that differs only in case",
+        "argument": {"is": "Software"},
+        "expect": false
+      }
+    ]
+  },
+  {
+    "name": "absent-answer",
+    "source": "docs/decisions/0035-settled-and-deferred-answers.md",
+    "input": "absent-answer.input.json",
+    "checks": [
+      {
+        "name": "a negated test on no answer is false",
+        "argument": {"isNot": "software"},
+        "expect": false
+      }
+    ]
+  }
+]

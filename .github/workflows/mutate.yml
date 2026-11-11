@@ -1,0 +1,114 @@
+# Template. Copy to .github/workflows/mutate.yml. It calls only the recipes in
+# process/task-recipes.md, so it holds no language, layout, or tool logic.
+# Keep the action versions pinned to full commits.
+name: mutate
+
+on:
+  workflow_dispatch:
+    inputs:
+      components:
+        description: Components to mutate, comma separated. Empty runs every component, or the changed ones on a scheduled run.
+        required: false
+        default: ""
+  # Enable a nightly run once the cost and the repository's visibility allow it.
+  # schedule:
+  #   - cron: "17 5 * * *"
+
+permissions:
+  contents: read
+
+env:
+  THRESHOLD_MINUTES: 120
+
+concurrency:
+  group: mutate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      components: ${{ steps.pick.outputs.components }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          summarize: false
+      - name: Pick the components to mutate
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REQUESTED: ${{ github.event.inputs.components }}
+        run: |
+          if [ -n "$REQUESTED" ]; then
+            components="$(echo "$REQUESTED" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | jq -R . | jq -sc .)"
+          else
+            base=""
+            if [ "$EVENT" = "schedule" ]; then
+              base="$(gh api "repos/${{ github.repository }}/actions/workflows/mutate.yml/runs?status=success&event=schedule&branch=${{ github.event.repository.default_branch }}&per_page=1" --jq '.workflow_runs[0].head_sha // empty')"
+            fi
+            echo "base: ${base:-none}"
+            components="$(nix develop --quiet --command just mutate-plan "$base")"
+          fi
+          echo "components: $components"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+
+  mutate:
+    needs: plan
+    if: needs.plan.outputs.components != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(needs.plan.outputs.components) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          summarize: false
+      - name: Start the timer
+        run: echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Mutate the component
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -o pipefail
+          nix develop --quiet --command just mutate "$COMPONENT" --workers 4 2>&1 | tee mutation.log
+      - name: Write the job summary
+        if: always()
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          seconds=$(( $(date +%s) - STARTED ))
+          nix develop --quiet --command just mutate-summary "$COMPONENT" mutation.log "$seconds" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mutation-${{ strategy.job-index }}
+          path: |
+            mutation.log
+            result.json
+          retention-days: 90
+
+  report:
+    needs: [plan, mutate]
+    if: always() && needs.plan.outputs.components != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          summarize: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mutation-*
+          path: results
+      - name: Write the run report
+        run: nix develop --quiet --command just mutate-report results >> "$GITHUB_STEP_SUMMARY"

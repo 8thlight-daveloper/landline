@@ -1,0 +1,50 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1793735720,
+        "narHash": "sha256-smoxPKrzAhdGuFd2LLnG4m8P6IrZuW95DVyzjnlab7w=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "9d3b8db48266c17be0b5f9c6360c3ecfbac3d1f5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": [
+          "threnos",
+          "nixpkgs"
+        ],
+        "threnos": "threnos"
+      }
+    },
+    "threnos": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1794363765,
+        "narHash": "sha256-DeJlXtKaEsrOCs8I9+5gPASQ7hdeBpc4bxEz7YeAIwg=",
+        "ref": "main",
+        "rev": "c5aafaeda320c2e23cda6bacced96c8e2faf12aa",
+        "revCount": 71,
+        "type": "git",
+        "url": "file:///Users/daveloper/Projects/threnos"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "file:///Users/daveloper/Projects/threnos"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

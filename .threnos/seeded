@@ -1,0 +1,24 @@
+# Paths that sync has seeded or found in place. Sync does not seed them again.
+# Remove a line and run sync to restore that file if it is missing.
+.github/ISSUE_TEMPLATE/build.md
+.github/ISSUE_TEMPLATE/contract.md
+.github/ISSUE_TEMPLATE/decision.md
+.github/ISSUE_TEMPLATE/integration.md
+.github/workflows/check.yml
+.github/workflows/mutate.yml
+AGENTS.md
+CLAUDE.md
+acceptance/scenarios/example-command.yaml.example
+acceptance/scenarios/example-protocol.yaml.example
+docs/decisions/README.md
+docs/reference/acceptance-scenarios.md
+docs/reference/decision-record-front-matter.md
+docs/reference/templates/accepted-survivors.txt
+docs/reference/templates/adr.md
+docs/reference/templates/contract/cases.json
+docs/reference/templates/contract/contract.md
+docs/reference/templates/issue-sizing.md
+docs/reference/templates/product-principles.md
+docs/reference/templates/stack-topic.md
+docs/stack/osv-scanner.md
+docs/stack/repowise.md

@@ -1,0 +1,33 @@
+# Which Threnos files this project takes. Run `nix run .#sync` after a change.
+#
+#   on       Sync installs the skill read-only and keeps it current.
+#   off      Sync removes it, and the project has none.
+#   ejected  Sync leaves the files alone. The project owns and edits them.
+#
+# A skill with no line here takes its default from Threnos, which is on for all.
+
+[rules]
+regenerative = "on"
+# Repository context rules and the Repowise guide. Set to "off" to leave them out. Run sync after a change.
+# repository_context = "off"
+# Who runs mutation testing. "nightly": CI runs it and agents read the latest result. "local": agents run it.
+mutation_cadence = "nightly"
+
+# Who may approve a gate: "person", "agent", or both. The default is ["person"]. A person may replace a list for their
+# own work in .threnos/local.toml, which is gitignored. The records check always uses this file, so what merges is
+# the project's choice.
+# The gates are principles, decisions, contracts, acceptance, architecture, model, and build. A project that adopts
+# .threnos/approvals.yaml has each protected unit approved there. independence says what must differ between an agent
+# approver and the author: "session" (the default) or "harness".
+# [approvals]
+# principles = ["person"]
+# contracts = ["person", "agent"]
+# independence = "session"
+
+# Seeds are written once and recorded in .threnos/seeded. To keep one out from the first sync, list its path.
+# [seeds]
+# skip = ["docs/stack/osv-scanner.md"]
+
+[skills]
+# behavior-judge = "off"
+# ux-designer = "off"
