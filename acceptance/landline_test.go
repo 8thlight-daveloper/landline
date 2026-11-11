@@ -168,7 +168,7 @@ func TestTwoAgentsTalkAndAnIdleOneIsWoken(t *testing.T) {
 	if got := w.must("", "inbox", "--as", "alpha", "--wait", "2"); !strings.Contains(got, "looks good") || !strings.Contains(got, "in-reply-to: m-x") {
 		t.Fatalf("reply: %q", got)
 	}
-	if log := w.must("", "log"); strings.Count(log, "\n") != 2 {
+	if log := w.must("", "log"); logEntries(log) != 2 {
 		t.Fatalf("log: %q", log)
 	}
 }
@@ -708,7 +708,7 @@ func TestAMessageThatEncodesToAHugeLogLineDoesNotStopTheHubRestarting(t *testing
 	first.must(strings.Repeat("\x01", 60000), "send", "--as", "alpha", "--to", "bravo", "-")
 	first.stop()
 	second := startHub(t, bin, config, first.addr)
-	if got := second.must("", "log"); strings.Count(got, "\n") != 2 {
+	if got := second.must("", "log"); logEntries(got) != 2 {
 		t.Fatalf("the log after the restart: %q", got)
 	}
 }
@@ -963,5 +963,27 @@ func TestTheOutputOfAFailingWakeCannotForgeALineOnTheHubTerminal(t *testing.T) {
 	}
 	if strings.ContainsAny(w.hubErr.String(), "\x1b\x07") {
 		t.Fatalf("a control sequence reached the terminal: %q", w.hubErr.String())
+	}
+}
+
+func logEntries(output string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		if line != "" && line[0] >= '0' && line[0] <= '9' {
+			count++
+		}
+	}
+	return count
+}
+
+func TestLogShowsTheTextOfEveryMessageSoLostMailCanBeRecovered(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac")
+	w.must("recover me\nsecond line", "send", "--as", "alpha", "--to", "bravo", "-")
+	w.must("", "inbox", "--as", "bravo")
+	out := w.must("", "log")
+	if !strings.Contains(out, "alpha -> bravo") || !strings.Contains(out, "    recover me\n") || !strings.Contains(out, "    second line\n") {
+		t.Fatalf("the log lacks the message text: %q", out)
 	}
 }
