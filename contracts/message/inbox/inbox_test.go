@@ -239,3 +239,44 @@ func TestAnAgentNamedAsAPrefixOfAnotherSeesOnlyItsOwnMail(t *testing.T) {
 		t.Fatalf("alphabet got %v", seqs(got))
 	}
 }
+
+func TestNamesAndThreadsMatchWholeNotBySuffixOrCase(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{
+		env(1, "bravo", "xalpha", "main"),
+		env(2, "bravo", "Alpha", "main"),
+		env(3, "xalpha", model.Broadcast, "main"),
+		env(4, "ALPHA", model.Broadcast, "main"),
+		env(5, "bravo", "alpha", "xdeploy"),
+		env(6, "bravo", "alpha", "Deploy"),
+		env(7, "bravo", "alpha", "deploy"),
+	}
+	if got := newImpl().Select(l, "alpha", 0, nil, 0); !reflect.DeepEqual(seqs(got), []int64{3, 4, 5, 6, 7}) {
+		t.Fatalf("no filter: %v", seqs(got))
+	}
+	if got := newImpl().Select(l, "alpha", 0, []string{"deploy"}, 0); !reflect.DeepEqual(seqs(got), []int64{7}) {
+		t.Fatalf("filter: %v", seqs(got))
+	}
+}
+
+func TestTheLimitIsHonouredWithAThreadFilterToo(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{
+		env(1, "bravo", "alpha", "deploy"),
+		env(2, "bravo", "alpha", "deploy"),
+		env(3, "bravo", "alpha", "deploy"),
+		env(4, "bravo", "alpha", "main"),
+	}
+	got := newImpl().Select(l, "alpha", 0, []string{"deploy"}, 2)
+	if !reflect.DeepEqual(seqs(got), []int64{1, 2}) || got.Remaining != 1 || got.Next != 2 {
+		t.Fatalf("got %v remaining %d next %d", seqs(got), got.Remaining, got.Next)
+	}
+}
+
+func TestAnEmptyThreadNameInTheFilterMatchesNothingRatherThanEverything(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{env(1, "bravo", "alpha", "main")}
+	if got := newImpl().Select(l, "alpha", 0, []string{""}, 0); len(got.Messages) != 0 {
+		t.Fatalf("got %v", seqs(got))
+	}
+}

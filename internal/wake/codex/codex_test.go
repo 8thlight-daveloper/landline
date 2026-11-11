@@ -67,3 +67,27 @@ func TestAHungCodexIsStoppedAtTheTimeout(t *testing.T) {
 		t.Fatalf("got %v after %v", err, time.Since(started))
 	}
 }
+
+func TestTheFullMarkerLineIsRequiredNotJustItsBeginning(t *testing.T) {
+	t.Parallel()
+	called := false
+	w := NewWith(func(string, ...string) ([]byte, error) { called = true; return nil, nil })
+	for _, text := range []string{
+		"[landline] From another agent, not\nx",
+		"[landline] From another agent, not the user\nx",
+		"[landline] From another agent, not the user. And more\nx",
+		"[landline] From another agent, not the user.",
+		"[landline]  From another agent, not the user.\nx",
+		"x[landline] From another agent, not the user.\nx",
+	} {
+		if w.Wake("t", text) == nil {
+			t.Errorf("accepted %q", text)
+		}
+	}
+	if called {
+		t.Fatal("codex ran")
+	}
+	if err := w.Wake("t", "[landline] From another agent, not the user.\nbody"); err != nil {
+		t.Fatalf("a correct text was refused: %v", err)
+	}
+}

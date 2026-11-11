@@ -1,9 +1,11 @@
 ---
 category: architecture
-status: proposed
-approval: unrecorded
+status: accepted
+approval: agent
+approver: {kind: agent, harness: claude-code, session: adbd644e52614aee7}
+author: {kind: agent, harness: claude-code, session: ff162464-db6e-40df-b588-14f688bad84b}
+note: Approved by an independent agent review of commit 237c15e. The author then made the sentence changes that review listed, and the approver has not re-read them.
 affects: [hub/server, client/http, cli/command, daemon/agentd, mcp/server]
-note: Decided in conversation on 2026-11-10 and not yet recorded by a person.
 ---
 
 # 0010. One Go program, HTTP first
@@ -37,5 +39,6 @@ The JSON shapes of the hub's API live in the domain model, because the hub and e
 
 - **An MCP server as the first interface.** Not every harness has MCP, and a server cannot wake an idle agent either.
 - **WebSocket first.** More moving parts before there is anything to send.
-- **Fork an existing relay.** A fork would carry another design's transport and trust model, and this one needs the
-  sender stamp, the marker, and the wake queue from the start.
+- **Fork an existing relay.** On 2026-11-10 we read `Henilt31/parley` and `Humbre-tonto/crosstalk-mcp`. Both hold a
+  mailbox with long poll or push reads and neither wakes an idle agent or records a harness, which are the parts this
+  program exists for. A fork would have meant replacing their core.

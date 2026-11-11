@@ -70,12 +70,16 @@ var kindPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
 const maxQueuedWakes = 200
 
+const maxWaitSeconds = 60
+
+const minSecretLength = 16
+
 const maxPageBytes = 2 << 20
 
 const maxRequestBytes = 6*model.MaxBodyBytes + 4096
 
 func New(cfg Config, store Store) (*Server, error) {
-	if len(cfg.Secret) < 16 {
+	if len(cfg.Secret) < minSecretLength {
 		return nil, errors.New("the hub secret must be at least 16 characters")
 	}
 	if cfg.Window == 0 {
@@ -343,7 +347,7 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 		write(w, http.StatusOK, model.InboxResponse{Messages: []model.WireEnvelope{}, Next: cursor, Remaining: len(unread.Messages), Head: s.store.LastSeq()})
 		return
 	}
-	wait := clamp(intOf(query.Get("wait")), 0, 60)
+	wait := clamp(intOf(query.Get("wait")), 0, maxWaitSeconds)
 	limit := clamp(intOf(query.Get("limit")), 0, 200)
 	if limit == 0 {
 		limit = 50
@@ -529,7 +533,7 @@ func (s *Server) wakePoll(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "a wake poll needs a host")
 		return
 	}
-	wait := clamp(intOf(query.Get("wait")), 0, 60)
+	wait := clamp(intOf(query.Get("wait")), 0, maxWaitSeconds)
 	deadline := time.NewTimer(time.Duration(wait) * time.Second)
 	defer deadline.Stop()
 	for {

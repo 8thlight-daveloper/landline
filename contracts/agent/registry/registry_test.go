@@ -327,3 +327,42 @@ func TestAnAgentHeardFromAfterNowCountsAsOnline(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestRegisterStampsTheGivenTimeExactlyAndIgnoresACallerSuppliedLastSeen(t *testing.T) {
+	t.Parallel()
+	exact := time.Date(2031, 2, 3, 4, 5, 6, 789012345, time.UTC)
+	entry := agent("alpha")
+	entry.LastSeen = time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC)
+	got, err := newImpl().Register(nil, entry, exact)
+	if err != nil || !got[0].LastSeen.Equal(exact) || got[0].LastSeen.Nanosecond() != 789012345 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestNamesAreLowercaseOnlyAndOnlyTheExactNameAllIsReserved(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"aLpha", "alphA", "ALPHA", "a-B"} {
+		if _, err := newImpl().Register(nil, agent(name), t0); !errors.Is(err, model.ErrBadName) {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+	for _, name := range []string{"allied", "all2", "alloy", "ball", "al"} {
+		if _, err := newImpl().Register(nil, agent(name), t0); err != nil {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+}
+
+func TestRegisterStoresEveryFieldAsGiven(t *testing.T) {
+	t.Parallel()
+	entry := model.Agent{Name: "alpha", Harness: "Codex CLI", Host: " mac book ", Session: " s 1 ", WakeKind: "", WakeTarget: "left over"}
+	got, err := newImpl().Register(nil, entry, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := entry
+	want.LastSeen = t0
+	if got[0] != want {
+		t.Fatalf("got %+v, want %+v", got[0], want)
+	}
+}

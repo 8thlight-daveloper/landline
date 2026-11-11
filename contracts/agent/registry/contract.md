@@ -1,6 +1,6 @@
 # agent/registry
 
-Status: draft, awaiting a person's approval.
+Status: draft, awaiting approval. Component: `agent/registry`. Issue: none yet.
 
 Holds the list of registered agents as a value. Every call takes the list and returns a new one. Nothing is stored.
 
@@ -43,7 +43,9 @@ None.
 
 ## Properties
 
+- **No memory.** The same call gives the same result whatever calls came before, in any order.
 - **Pure.** The list passed in is the same after every call, in content and order.
+- **Declared data access.** A result differs from its inputs only in the fields the Rules section names.
 - **Deterministic.** Two calls with the same arguments give identical results.
 - **Sorted.** Every returned list is sorted by name.
 

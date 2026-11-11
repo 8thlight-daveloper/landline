@@ -180,3 +180,33 @@ func TestTheLogUsesSnakeCaseKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestAnExistingFolderKeepsItsMode(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(dir, 0o755)
+	s, err := Open(filepath.Join(dir, "log.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o755 {
+		t.Fatalf("the folder became %v", info.Mode().Perm())
+	}
+}
+
+func TestAFolderTheStoreCreatesIsPrivate(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "new", "deeper")
+	s, err := Open(filepath.Join(dir, "log.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o700 {
+		t.Fatalf("the folder is %v", info.Mode().Perm())
+	}
+}

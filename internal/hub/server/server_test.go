@@ -973,3 +973,63 @@ func TestNoWakeIsLostWhenASendLandsAsALongPollEnds(t *testing.T) {
 		}
 	}
 }
+
+func TestTheSecretMinimumIsSixteenCharactersExactly(t *testing.T) {
+	t.Parallel()
+	log, _ := store.Open(filepath.Join(t.TempDir(), "log.jsonl"))
+	defer log.Close()
+	if _, err := New(Config{Secret: strings.Repeat("s", 15)}, log); err == nil {
+		t.Fatal("15 characters accepted")
+	}
+	if _, err := New(Config{Secret: strings.Repeat("s", 16)}, log); err != nil {
+		t.Fatalf("16 characters refused: %v", err)
+	}
+}
+
+func TestThePollLimitAndTheQueueLimitAreTheDocumentedNumbers(t *testing.T) {
+	t.Parallel()
+	if maxWaitSeconds != 60 || maxQueuedWakes != 200 || minSecretLength != 16 {
+		t.Fatalf("wait %d queue %d secret %d", maxWaitSeconds, maxQueuedWakes, minSecretLength)
+	}
+}
+
+func TestAFullWakeQueueDropsTheOldestAndKeepsTheNewest(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	alpha := h.register("alpha", "", "")
+	h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: "bravo", Harness: "x", Host: "linux", Session: "s", WakeKind: "codex", WakeTarget: "t"})
+	total := maxQueuedWakes + 7
+	for i := 0; i < total; i++ {
+		h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: fmt.Sprintf("n%d", i)})
+	}
+	_, raw := h.call("GET", "/v1/wakes?host=linux", secret, nil)
+	var jobs []model.WakeJob
+	json.Unmarshal(raw, &jobs)
+	if len(jobs) != maxQueuedWakes {
+		t.Fatalf("%d jobs", len(jobs))
+	}
+	if !strings.Contains(jobs[0].Text, "n7") || !strings.Contains(jobs[len(jobs)-1].Text, fmt.Sprintf("n%d", total-1)) {
+		t.Fatalf("the queue kept the wrong end: first %q last %q", jobs[0].Text, jobs[len(jobs)-1].Text)
+	}
+}
+
+func TestAnIdleAgentWithAWakeMethodIsStillListedAfterMoreThanADay(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	h.register("bravo", "codex", "t")
+	h.register("charlie", "", "")
+	h.mu.Lock()
+	h.now = h.now.Add(30 * 24 * time.Hour)
+	h.mu.Unlock()
+	status, raw := h.call("GET", "/v1/agents", alpha, nil)
+	var out []model.AgentInfo
+	json.Unmarshal(raw, &out)
+	names := map[string]bool{}
+	for _, a := range out {
+		names[a.Name] = true
+	}
+	if status != 200 || !names["alpha"] || !names["bravo"] || names["charlie"] {
+		t.Fatalf("got %v", names)
+	}
+}

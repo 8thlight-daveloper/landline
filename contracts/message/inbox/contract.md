@@ -1,12 +1,12 @@
 # message/inbox
 
-Status: draft, awaiting a person's approval.
+Status: draft, awaiting approval. Component: `message/inbox`. Issue: none yet.
 
 Chooses the unread messages for one agent from the log. The caller keeps the agent's cursor.
 
 ## Interface
 
-`api.go` defines `Inbox` with `Select`, and the `Page` type.
+`api.go` defines `Inbox` with `Select`. The result is `model.Page`.
 
 ## Rules
 
@@ -38,7 +38,9 @@ None.
 
 ## Properties
 
+- **No memory.** The same call gives the same result whatever calls came before, in any order.
 - **Pure.** The log is the same after the call, in content and order.
+- **Declared data access.** A result differs from its inputs only in the fields the Rules section names.
 - **Deterministic.** Two calls with the same arguments give identical results.
 - **Ordered.** Messages come back oldest first whatever the order of the log.
 

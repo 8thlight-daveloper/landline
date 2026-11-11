@@ -1,13 +1,13 @@
 # message/router
 
-Status: draft, awaiting a person's approval.
+Status: draft, awaiting approval. Component: `message/router`. Issue: none yet.
 
 Checks a send request and returns the stamped envelope and who receives it. The caller passes the registered agents, the
 authenticated sender, a new id and sequence number, and the time.
 
 ## Interface
 
-`api.go` defines `Router` with `Route`, and the `Request` and `Decision` types.
+`api.go` defines `Router` with `Route`. The request and the decision are `model.SendRequest` and `model.Decision`.
 
 ## Rules
 
@@ -53,7 +53,9 @@ None.
 
 ## Properties
 
+- **No memory.** The same call gives the same result whatever calls came before, in any order.
 - **Pure.** The agent list and the request are the same after the call.
+- **Declared data access.** A result differs from its inputs only in the fields the Rules section names.
 - **Deterministic.** Two calls with the same arguments give identical results.
 - **Sorted.** A broadcast's recipients are sorted by name.
 

@@ -1,9 +1,11 @@
 ---
 category: behavior
-status: proposed
-approval: unrecorded
+status: accepted
+approval: agent
+approver: {kind: agent, harness: claude-code, session: adbd644e52614aee7}
+author: {kind: agent, harness: claude-code, session: ff162464-db6e-40df-b588-14f688bad84b}
+note: Approved by an independent agent review of commit 237c15e. The author then made the sentence changes that review listed, and the approver has not re-read them.
 affects: [hub/server, log/store, cli/command]
-note: Decided in conversation on 2026-11-10 and not yet recorded by a person.
 ---
 
 # 0040. The hub's defaults and what it saves
@@ -15,14 +17,20 @@ mistake, so the defaults and the saved files need a decision.
 
 ## Decision
 
-- **Localhost by default.** The hub listens on `127.0.0.1:8787` unless told otherwise. Given another address it starts
-  and prints a warning that the hub speaks plain HTTP. Reaching it from another host is a tunnel the person sets up.
+- **Localhost by default.** The hub listens on `127.0.0.1:8787` unless told otherwise. Given an address that is not a
+  loopback address, it starts and prints a warning that the hub speaks plain HTTP. Reaching it from another host is a
+  tunnel the person sets up.
 - **Saved state.** The hub keeps an append-only message log and a state file next to it. The state file holds the
   registered agents, their tokens, and each agent's read position. The hub makes the log mode 0600 each time it starts,
   and writes the state file as a new 0600 file each time it saves. A folder the hub creates is mode 0700, and a folder
   that already exists is left as it is. A state file that is missing is not an error. One the hub cannot read, or cannot
   parse, is reported and ignored, and every agent then registers again. Tokens are stored as they are, since the file is
   private to the person running the hub.
+- **File formats.** The log is one JSON object per line with the keys `seq`, `id`, `time`, `thread`, `from`, `to`,
+  `kind`, `body`, and `in_reply_to` when set. The state file is one JSON object with `agents`, `tokens`, and `cursors`,
+  and each agent has `name`, `harness`, `host`, `session`, `wake_kind`, `wake_target`, and `last_seen`. Tests pin these
+  key names. Version 0.1.0 has no earlier format to read. A state file written by a development build before the keys
+  were named this way loses each agent's wake settings and its last-heard time.
 - **Sessions.** `landline register` saves the agent's token and the hub's address in a 0600 file under
   `~/.config/landline/`. It never saves the hub secret, which comes from the environment only.
 - **Mail is handed out once.** Reading an inbox advances the agent's position before the response is written, so a

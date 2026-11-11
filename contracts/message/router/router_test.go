@@ -358,3 +358,46 @@ func TestABroadcastNeverNamesTheSenderAmongItsRecipients(t *testing.T) {
 		}
 	}
 }
+
+func TestAnUnregisteredSenderIsRefusedWhateverItSends(t *testing.T) {
+	t.Parallel()
+	for _, to := range []string{model.Broadcast, "bravo", "ghost"} {
+		if _, err := send(t, "ghost", model.SendRequest{To: to, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownSender) {
+			t.Errorf("to %q: %v", to, err)
+		}
+	}
+}
+
+func TestOnlyTheExactNameAllIsABroadcast(t *testing.T) {
+	t.Parallel()
+	got, err := send(t, "alpha", model.SendRequest{To: "allied", Body: "x"}, "alpha", "allied", "bravo")
+	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"allied"}) || got.Envelope.To != "allied" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestInReplyToIsKeptWhateverTheKind(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []model.Kind{"", model.KindChat, model.KindTask, model.KindReply, model.KindReview} {
+		got, err := send(t, "alpha", model.SendRequest{To: "bravo", Kind: kind, InReplyTo: "m-7", Body: "x"}, "alpha", "bravo")
+		if err != nil || got.Envelope.InReplyTo != "m-7" {
+			t.Errorf("kind %q: %+v, %v", kind, got.Envelope, err)
+		}
+	}
+}
+
+func TestARecipientThatDiffersFromTheSenderOnlyByCaseIsUnknownNotSelf(t *testing.T) {
+	t.Parallel()
+	if _, err := send(t, "alpha", model.SendRequest{To: "ALPHA", Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownRecipient) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestEveryKindOfUnicodeWhiteSpaceAloneIsAnEmptyBody(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{"\r\n", "\u2003", "\u2028", "\u3000", "\v\f", "\u0085", "\u00a0\t"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: body}, "alpha", "bravo"); !errors.Is(err, model.ErrEmptyBody) {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+}

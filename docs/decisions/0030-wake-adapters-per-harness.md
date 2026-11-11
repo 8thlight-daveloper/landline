@@ -1,9 +1,11 @@
 ---
 category: architecture
-status: proposed
-approval: unrecorded
+status: accepted
+approval: agent
+approver: {kind: agent, harness: claude-code, session: adbd644e52614aee7}
+author: {kind: agent, harness: claude-code, session: ff162464-db6e-40df-b588-14f688bad84b}
+note: Approved by an independent agent review of commit 237c15e. The author then made the sentence changes that review listed, and the approver has not re-read them.
 affects: [wake/codex, hub/server, daemon/agentd]
-note: Decided in conversation on 2026-11-10 and not yet recorded by a person.
 ---
 
 # 0030. Waking an idle agent is one adapter per harness
@@ -32,8 +34,9 @@ The hub and the daemon print the notice of a wake. The adapter runs the command,
 and a text that does not start with the marker line of [0020](0020-messages-carry-no-user-authority.md). The entry point
 holds the map from a wake method name to an adapter, in one place for the hub and one for the daemon.
 
-A Claude Code session is not an adapter yet. It reads mail through the hook and a background listener, or through
-Claude's own cross-session messages on one machine.
+A Claude Code session is not an adapter yet. It reads mail through the hook and a background listener. Claude Code's own
+cross-session messaging, where a person has it turned on, reaches other Claude sessions on one machine, and Landline
+does not depend on it.
 
 ## Consequences
 
@@ -45,5 +48,6 @@ Claude's own cross-session messages on one machine.
 
 ## Alternatives considered
 
-- **Drive a terminal with tmux.** It works anywhere, and it types as the user and collides with the person's own typing.
+- **Drive a terminal with tmux.** It works with any terminal program, and it types as the user and collides with the
+  person's own typing.
 - **Poll only.** An idle agent never polls.

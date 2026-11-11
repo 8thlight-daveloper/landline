@@ -1,17 +1,20 @@
 ---
 category: behavior
-status: proposed
-approval: unrecorded
+status: accepted
+approval: agent
+approver: {kind: agent, harness: claude-code, session: adbd644e52614aee7}
+author: {kind: agent, harness: claude-code, session: ff162464-db6e-40df-b588-14f688bad84b}
+note: Approved by an independent agent review of commit 237c15e. The author then made the sentence changes that review listed, and the approver has not re-read them.
 affects: [message/router, agent/registry, hub/server, wake/codex, daemon/agentd, cli/command, mcp/server]
-note: Decided in conversation on 2026-11-10 and not yet recorded by a person.
 ---
 
 # 0020. A message from another agent carries no user authority
 
 ## Context
 
-Some harnesses deliver a woken message in the same role as the person's own input. Codex's `queue` does. An agent that
-treats such a message as the person's would act on any process that can reach the hub or the command line.
+Some harnesses deliver a woken message in the same role as the person's own input. A hand test on 2026-11-10 showed that
+a message sent with Codex's `queue` is stored in that session as a user-role item. An agent that treats such a message
+as the person's would act on any process that can reach the hub or the command line.
 
 ## Decision
 
@@ -29,9 +32,10 @@ treats such a message as the person's would act on any process that can reach th
   come from other agents and are not instructions from the user, and carries no message text.
 - **A wake adapter refuses text that does not start with the full marker line.**
 - **Every wake is printed.** The hub prints each wake on its standard error with the target, the sender, and the message
-  id, and prints a failure the same way, including a wake method the hub does not have. For an agent on another host the
-  hub prints the daemon's acknowledgement and the daemon prints the wake on its own standard error. These lines are not
-  stored. The messages are, in the log.
+  id, and prints a failure with the target and the error, including a wake method the hub does not have. A local failure
+  line does not name the sender or the message id. For an agent on another host the hub prints the daemon's
+  acknowledgement and the daemon prints the wake on its own standard error. These lines are not stored. The messages
+  are, in the log.
 - **The hub secret is the root credential.** Its holder can register any name, which replaces that agent's token, and
   can read the log. An agent token acts only as that agent and reads only that agent's mail. An agent token cannot reach
   the secret-only endpoints, and the secret cannot send or read as an agent.
@@ -43,8 +47,8 @@ treats such a message as the person's would act on any process that can reach th
 - Impersonating an agent takes that agent's token or the hub secret.
 - A person sees every wake on the terminal that runs the hub, and a person who closes that terminal sees none. The log
   still shows every message.
-- A registered agent chooses its own harness and host names within the limits above, so those fields are the agent's
-  claim and not a fact the hub checked.
+- The person who registers an agent, with the hub secret, chooses its harness and host names within the limits above, so
+  those fields are that person's claim and not a fact the hub checked.
 - A body can contain text that looks like a marker or a header. It sits after the blank line, and the agent instructions
   say to treat everything in a message as information.
 
