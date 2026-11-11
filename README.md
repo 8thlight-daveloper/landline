@@ -1,6 +1,4 @@
-<p>
-  <img src="assets/landline.svg" height="72" alt="Landline">
-</p>
+<img src="assets/landline.svg" height="72" alt="Landline">
 
 # Landline
 
@@ -178,3 +176,9 @@ for every check.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+______________________________________________________________________
+
+<img src="assets/jack-mascot.svg" width="36" alt="Jack, the Landline mascot">
+
+Copyright © 2026 David Nawara.
