@@ -535,22 +535,18 @@ func TestVersionAndHelp(t *testing.T) {
 	}
 }
 
-func TestAnIdleAgentThatCanBeWokenStaysInTheListAndIsMarkedIdle(t *testing.T) {
+func TestIdleAgentsStayInTheListMarkedIdle(t *testing.T) {
 	w := startHub(t, build(t), t.TempDir(), "", "--window", "1s")
 	w.must("", "register", "--name", "alpha", "--harness", "claude-code", "--host", "mac")
 	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac", "--wake", "codex", "--wake-target", "t1")
-	w.must("", "register", "--name", "charlie", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "charlie", "--harness", "claude-code", "--host", "mac")
 	time.Sleep(1500 * time.Millisecond)
 	w.must("", "agents", "--as", "alpha")
 	got := w.must("", "agents", "--as", "alpha")
-	if !strings.Contains(got, "bravo\tcodex\tmac\twake: codex, idle\n") {
-		t.Fatalf("an idle wakeable agent is missing or unmarked: %q", got)
-	}
-	if strings.Contains(got, "charlie") {
-		t.Fatalf("an idle agent that cannot be woken is still listed: %q", got)
-	}
-	if !strings.Contains(got, "alpha\tclaude-code\tmac\twake: none\n") {
-		t.Fatalf("the caller is not listed as online: %q", got)
+	for _, want := range []string{"bravo\tcodex\tmac\twake: codex, idle\n", "charlie\tclaude-code\tmac\twake: none, idle\n", "alpha\tclaude-code\tmac\twake: none\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the list lacks %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -700,5 +696,43 @@ func TestAThreadReadDoesNotMoveThePosition(t *testing.T) {
 	}
 	if got := w.must("", "inbox", "--as", "bravo"); !strings.Contains(got, "deploy note") {
 		t.Fatalf("a thread read moved the position: %q", got)
+	}
+}
+
+func TestAMessageThatEncodesToAHugeLogLineDoesNotStopTheHubRestarting(t *testing.T) {
+	bin, config := build(t), t.TempDir()
+	first := startHub(t, bin, config, "")
+	first.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	first.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac")
+	first.must(strings.Repeat("<", 60000), "send", "--as", "alpha", "--to", "bravo", "-")
+	first.must(strings.Repeat("\x01", 60000), "send", "--as", "alpha", "--to", "bravo", "-")
+	first.stop()
+	second := startHub(t, bin, config, first.addr)
+	if got := second.must("", "log"); strings.Count(got, "\n") != 2 {
+		t.Fatalf("the log after the restart: %q", got)
+	}
+}
+
+func TestAPageOfLargeMessagesIsReadWithoutLosingAny(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac")
+	for i := 0; i < 10; i++ {
+		w.must(strings.Repeat("a", 30000), "send", "--as", "alpha", "--to", "bravo", "-")
+	}
+	read := 0
+	for round := 0; round < 10 && read < 10; round++ {
+		out := w.must("", "inbox", "--as", "bravo", "--json")
+		var page struct {
+			Messages  []json.RawMessage `json:"messages"`
+			Remaining int               `json:"remaining"`
+		}
+		if err := json.Unmarshal([]byte(out), &page); err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		read += len(page.Messages)
+	}
+	if read != 10 {
+		t.Fatalf("read %d of 10 messages", read)
 	}
 }

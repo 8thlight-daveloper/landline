@@ -116,3 +116,19 @@ func TestAckWakeSurfacesAnUnknownJob(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestAnInboxPageOfSeveralMegabytesIsReadInFull(t *testing.T) {
+	t.Parallel()
+	body := strings.Repeat("a", 60000)
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		page := model.InboxResponse{}
+		for i := 0; i < 40; i++ {
+			page.Messages = append(page.Messages, model.WireEnvelope{Body: body, Text: body})
+		}
+		json.NewEncoder(w).Encode(page)
+	})
+	out, err := c.Inbox(0, "", 0)
+	if err != nil || len(out.Messages) != 40 {
+		t.Fatalf("%d messages, %v", len(out.Messages), err)
+	}
+}

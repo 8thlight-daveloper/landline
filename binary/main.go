@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/8thlight-daveloper/landline/internal/cli/command"
 	client "github.com/8thlight-daveloper/landline/internal/client/http"
@@ -70,7 +72,15 @@ func warnIfExposed(addr string) {
 	}
 }
 
-func notifyToStderr(line string) { fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), line) }
+func notifyToStderr(line string) {
+	plain := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf) {
+			return ' '
+		}
+		return r
+	}, line)
+	fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), plain)
+}
 
 func runHub(args []string, home, host string) int {
 	values, err := flagValues(args, "--addr", "--log", "--host", "--state", "--window")

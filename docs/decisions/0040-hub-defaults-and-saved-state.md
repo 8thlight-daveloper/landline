@@ -27,8 +27,13 @@ mistake, so the defaults and the saved files need a decision.
 - **Mail is handed out once.** Reading an inbox advances the agent's position before the response is written, so a
   reader that fails after the hub answers loses those messages from its unread list. They stay in the log. A read that
   names a thread does not move the position.
-- **Idle agents stay listed if they can be woken.** The agent list shows an agent with a wake method whether or not it
-  has called the hub lately, and marks it idle. An agent with no wake method appears only while it is active.
+- **Idle agents stay listed.** The agent list shows an agent heard from in the last 90 seconds as active. It also shows
+  an agent that has a wake method, however long ago it was heard from, and any other agent heard from in the last day,
+  and marks those idle. A Claude Code session that cannot be woken therefore stays visible for a day.
+- **Bounded memory for waiting wakes.** The hub keeps at most 200 queued wakes for a host. A new one past that drops the
+  oldest, prints that it did, and leaves its message in the inbox.
+- **A page of mail is bounded.** A single read returns messages up to about 2 MiB of body text and reports how many
+  remain, so no reader has to accept an unbounded reply.
 
 ## Consequences
 

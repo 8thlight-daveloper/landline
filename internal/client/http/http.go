@@ -45,7 +45,7 @@ func (c *Client) do(method, path string, in, out any) error {
 		return err
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8*model.MaxBodyBytes))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if resp.StatusCode != nethttp.StatusOK {
 		var e model.ErrorResponse
 		if json.Unmarshal(data, &e) == nil && e.Error != "" {

@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,5 +90,30 @@ func TestAnExistingLooseLogFileIsMadePrivate(t *testing.T) {
 	info, _ := os.Stat(path)
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", info.Mode().Perm())
+	}
+}
+
+func TestAnEnvelopeWhoseEncodedLineIsHugeStillLoads(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := Open(path)
+	big := envelope(1)
+	big.Body = strings.Repeat("<", model.MaxBodyBytes)
+	if err := s.Append(big); err != nil {
+		t.Fatal(err)
+	}
+	control := envelope(2)
+	control.Body = strings.Repeat("\x01", model.MaxBodyBytes)
+	if err := s.Append(control); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	if got := again.All(); len(got) != 2 || got[1].Seq != 2 || len(got[0].Body) != model.MaxBodyBytes {
+		t.Fatalf("got %d envelopes", len(got))
 	}
 }

@@ -353,7 +353,7 @@ func TestAThreadFilterReadsWithoutMovingTheCursor(t *testing.T) {
 	}
 }
 
-func TestAgentsListsOnlyThoseHeardFromWithinTheWindow(t *testing.T) {
+func TestAgentsMarksTheOnesNotHeardFromRecentlyIdleAndDropsThemAfterADay(t *testing.T) {
 	t.Parallel()
 	h := start(t)
 	alpha := h.register("alpha", "", "")
@@ -361,14 +361,27 @@ func TestAgentsListsOnlyThoseHeardFromWithinTheWindow(t *testing.T) {
 	h.mu.Lock()
 	h.now = h.now.Add(2 * time.Minute)
 	h.mu.Unlock()
-	status, raw := h.call("GET", "/v1/agents", alpha, nil)
-	if status != 200 {
-		t.Fatalf("status %d", status)
+	list := func() map[string]bool {
+		status, raw := h.call("GET", "/v1/agents", alpha, nil)
+		if status != 200 {
+			t.Fatalf("status %d", status)
+		}
+		var out []model.AgentInfo
+		json.Unmarshal(raw, &out)
+		online := map[string]bool{}
+		for _, a := range out {
+			online[a.Name] = a.Online
+		}
+		return online
 	}
-	var out []model.AgentInfo
-	json.Unmarshal(raw, &out)
-	if len(out) != 1 || out[0].Name != "alpha" {
-		t.Fatalf("got %+v", out)
+	if got := list(); len(got) != 2 || !got["alpha"] || got["bravo"] {
+		t.Fatalf("after two minutes: %v", got)
+	}
+	h.mu.Lock()
+	h.now = h.now.Add(25 * time.Hour)
+	h.mu.Unlock()
+	if got := list(); len(got) != 1 || !got["alpha"] {
+		t.Fatalf("after a day: %v", got)
 	}
 }
 
@@ -745,5 +758,87 @@ func TestAWakeForAnAgentWhoseMethodTheHubLacksIsPrinted(t *testing.T) {
 	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "x"})
 	if len(notes) != 1 || !strings.Contains(notes[0], "no wake method codex") {
 		t.Fatalf("notes %v", notes)
+	}
+}
+
+func TestAThreadFilteredWaitDoesNotSuppressAWakeForAnotherThread(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	bravo := h.register("bravo", "codex", "thread-9")
+	done := make(chan struct{})
+	go func() { h.inbox(bravo, "?thread=dev&wait=2"); close(done) }()
+	time.Sleep(200 * time.Millisecond)
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Thread: "main", Body: "x"})
+	<-done
+	if h.waker.count() != 1 {
+		t.Fatalf("the wake was suppressed: %d calls", h.waker.count())
+	}
+}
+
+func TestAPageOfLargeMessagesIsCappedAndNothingIsSkipped(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	bravo := h.register("bravo", "", "")
+	body := strings.Repeat("a", 60000)
+	for i := 0; i < 40; i++ {
+		if status, raw := h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: body}); status != 200 {
+			t.Fatalf("send %d: %d %s", i, status, raw)
+		}
+	}
+	total, reads := 0, 0
+	for total < 40 && reads < 40 {
+		got := h.inbox(bravo, "")
+		reads++
+		if len(got.Messages) == 0 {
+			break
+		}
+		if len(got.Messages) > 20 {
+			t.Fatalf("a page held %d messages of 60 KB", len(got.Messages))
+		}
+		total += len(got.Messages)
+		if want := 40 - total; got.Remaining != want {
+			t.Fatalf("remaining %d, want %d", got.Remaining, want)
+		}
+	}
+	if total != 40 {
+		t.Fatalf("read %d of 40 messages in %d pages", total, reads)
+	}
+}
+
+func TestTheWakeQueueForAHostWithNoDaemonIsBounded(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	alpha := h.register("alpha", "", "")
+	if status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: "bravo", Harness: "x", Host: "linux", Session: "s", WakeKind: "codex", WakeTarget: "t"}); status != 200 {
+		t.Fatalf("%d %s", status, raw)
+	}
+	for i := 0; i < maxQueuedWakes+25; i++ {
+		h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "x"})
+	}
+	status, raw := h.call("GET", "/v1/wakes?host=linux", secret, nil)
+	var jobs []model.WakeJob
+	json.Unmarshal(raw, &jobs)
+	if status != 200 || len(jobs) != maxQueuedWakes {
+		t.Fatalf("status %d with %d jobs", status, len(jobs))
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.notes) == 0 || !strings.Contains(h.notes[0], "queue for host linux is full") {
+		t.Fatalf("notes %v", h.notes)
+	}
+}
+
+func TestSendNamesTheAgentsWhoseWakeIsWaitingForAHostDaemon(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	alpha := h.register("alpha", "", "")
+	h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: "bravo", Harness: "x", Host: "linux", Session: "s", WakeKind: "codex", WakeTarget: "t"})
+	_, raw := h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "x"})
+	var out model.SendResponse
+	json.Unmarshal(raw, &out)
+	if len(out.Queued) != 1 || out.Queued[0] != "bravo" || len(out.Woken) != 0 {
+		t.Fatalf("%+v", out)
 	}
 }

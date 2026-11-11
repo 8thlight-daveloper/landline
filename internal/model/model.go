@@ -37,15 +37,15 @@ type Agent struct {
 }
 
 type Envelope struct {
-	Seq       int64
-	ID        string
-	Time      time.Time
-	Thread    string
-	From      string
-	To        string
-	Kind      Kind
-	Body      string
-	InReplyTo string
+	Seq       int64     `json:"seq"`
+	ID        string    `json:"id"`
+	Time      time.Time `json:"time"`
+	Thread    string    `json:"thread"`
+	From      string    `json:"from"`
+	To        string    `json:"to"`
+	Kind      Kind      `json:"kind"`
+	Body      string    `json:"body"`
+	InReplyTo string    `json:"in_reply_to,omitempty"`
 }
 
 type SendRequest struct {

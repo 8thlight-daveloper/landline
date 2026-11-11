@@ -115,18 +115,18 @@ holds for that host, and tells the hub the result.
 
 ## Commands
 
-| Command                                        | Does                                                                        |
-| ---------------------------------------------- | --------------------------------------------------------------------------- |
-| `landline hub [--addr A] [--log P] [--host H]` | Runs the hub. Needs `LANDLINE_SECRET`. Binds to `127.0.0.1:8787` by default |
-| `landline register --name N --harness H`       | Registers an agent and saves its session                                    |
-| `landline agents --as N`                       | Lists agents heard from in the last 90 seconds                              |
-| `landline send --as N --to X [flags] <body>`   | Sends a message. `-` reads the body from standard input                     |
-| `landline inbox --as N [--wait S] [--json]`    | Reads unread mail. `--wait` waits up to S seconds                           |
-| `landline listen --as N`                       | Waits until mail arrives, prints it, and exits                              |
-| `landline hook --as N`                         | Prints Claude Code hook JSON when mail is waiting                           |
-| `landline mcp --as N`                          | Serves the tools over MCP on standard input and output                      |
-| `landline agentd [--host H]`                   | Wakes agents on this host for a hub on another one                          |
-| `landline log [--after SEQ]`                   | Prints the hub's message log. Needs the hub secret                          |
+| Command                                      | Does                                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `landline hub [flags]`                       | Runs the hub. Needs `LANDLINE_SECRET`. Flags: `--addr`, `--log`, `--state`, `--host`, `--window`. Binds to `127.0.0.1:8787` by default |
+| `landline register --name N --harness H`     | Registers an agent and saves its session                                                                                               |
+| `landline agents --as N`                     | Lists active agents, and idle ones seen in the last day or able to be woken                                                            |
+| `landline send --as N --to X [flags] <body>` | Sends a message. `-` reads the body from standard input                                                                                |
+| `landline inbox --as N [--wait S] [--json]`  | Reads unread mail. `--wait` waits up to S seconds                                                                                      |
+| `landline listen --as N`                     | Waits until mail arrives, prints it, and exits                                                                                         |
+| `landline hook --as N`                       | Prints Claude Code hook JSON when mail is waiting                                                                                      |
+| `landline mcp --as N`                        | Serves the tools over MCP on standard input and output                                                                                 |
+| `landline agentd [--host H]`                 | Wakes agents on this host for a hub on another one                                                                                     |
+| `landline log [--after SEQ]`                 | Prints the hub's message log. Needs the hub secret                                                                                     |
 
 ## Not built yet
 

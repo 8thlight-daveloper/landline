@@ -212,3 +212,58 @@ func TestListenKeepsWaitingUntilMailArrivesThenPrintsItAndExits(t *testing.T) {
 		t.Fatalf("code %d calls %d out %q err %q", r.code, calls, r.out.String(), r.err.String())
 	}
 }
+
+func TestRegisterRefusesAHubThatReturnsADifferentNameAndWritesNothing(t *testing.T) {
+	t.Parallel()
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(model.RegisterResponse{Name: "../../../../victim/pwned", Token: "stolen"})
+	}))
+	defer hub.Close()
+	root := t.TempDir()
+	dir := filepath.Join(root, "a", "b", "config")
+	r := do(t, dir, hub.URL, "", "register", "--name", "innocent", "--harness", "codex")
+	if r.code != 1 || !strings.Contains(r.err.String(), "not the name that was asked for") {
+		t.Fatalf("%d %q", r.code, r.err.String())
+	}
+	var found []string
+	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			found = append(found, path)
+		}
+		return nil
+	})
+	if len(found) != 0 {
+		t.Fatalf("files were written: %v", found)
+	}
+}
+
+func TestRegisterTightensAnExistingLooseSessionFile(t *testing.T) {
+	t.Parallel()
+	var seen []string
+	hub := fakeHub(t, &seen)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-alpha.json")
+	os.WriteFile(path, []byte("{}"), 0o644)
+	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", info.Mode().Perm())
+	}
+}
+
+func TestSendSaysWhenAWakeIsWaitingForAHostDaemon(t *testing.T) {
+	t.Parallel()
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/register" {
+			json.NewEncoder(w).Encode(model.RegisterResponse{Name: "alpha", Token: "t"})
+			return
+		}
+		json.NewEncoder(w).Encode(model.SendResponse{ID: "m-1", Seq: 1, Recipients: []string{"bravo"}, Queued: []string{"bravo"}})
+	}))
+	defer hub.Close()
+	dir := t.TempDir()
+	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	r := do(t, dir, hub.URL, "", "send", "--as", "alpha", "--to", "bravo", "hi")
+	if !strings.Contains(r.out.String(), "wake waiting for the host daemon of bravo") {
+		t.Fatalf("%q", r.out.String())
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -30,18 +31,20 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("make the log private: %w", err)
 	}
 	s := &Store{file: file}
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*model.MaxBodyBytes)
-	for scanner.Scan() {
+	reader := bufio.NewReader(file)
+	for {
+		line, err := reader.ReadBytes('\n')
 		var e model.Envelope
-		if json.Unmarshal(scanner.Bytes(), &e) != nil {
-			continue
+		if len(line) > 0 && json.Unmarshal(line, &e) == nil {
+			s.log = append(s.log, e)
 		}
-		s.log = append(s.log, e)
-	}
-	if err := scanner.Err(); err != nil {
-		file.Close()
-		return nil, fmt.Errorf("read the log: %w", err)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("read the log: %w", err)
+		}
 	}
 	return s, nil
 }

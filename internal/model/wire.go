@@ -29,6 +29,7 @@ type SendResponse struct {
 	Seq        int64    `json:"seq"`
 	Recipients []string `json:"recipients"`
 	Woken      []string `json:"woken"`
+	Queued     []string `json:"queued"`
 }
 
 type WireEnvelope struct {

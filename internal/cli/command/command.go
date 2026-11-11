@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -103,6 +104,9 @@ func register(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	if out.Name != *name {
+		return fmt.Errorf("the hub registered %q and not the name that was asked for. Nothing was saved", out.Name)
+	}
 	if err := saveSession(env, out.Name, session{URL: url, Token: out.Token}); err != nil {
 		return err
 	}
@@ -110,12 +114,21 @@ func register(args []string, env Env) error {
 	return nil
 }
 
+var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
 func saveSession(env Env, name string, s session) error {
+	if !namePattern.MatchString(name) {
+		return errors.New("bad agent name")
+	}
 	if err := os.MkdirAll(env.ConfigDir, 0o700); err != nil {
 		return err
 	}
 	raw, _ := json.Marshal(s)
-	return os.WriteFile(filepath.Join(env.ConfigDir, "session-"+name+".json"), raw, 0o600)
+	path := filepath.Join(env.ConfigDir, "session-"+name+".json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
 
 func Connect(as string, env Env) (*client.Client, error) { return connect(as, env) }
@@ -194,6 +207,9 @@ func send(args []string, env Env) error {
 	fmt.Fprintf(env.Stdout, "sent %s (seq %d) to %s", out.ID, out.Seq, strings.Join(out.Recipients, ", "))
 	if len(out.Woken) > 0 {
 		fmt.Fprintf(env.Stdout, "; woke %s", strings.Join(out.Woken, ", "))
+	}
+	if len(out.Queued) > 0 {
+		fmt.Fprintf(env.Stdout, "; wake waiting for the host daemon of %s", strings.Join(out.Queued, ", "))
 	}
 	fmt.Fprintln(env.Stdout)
 	return nil

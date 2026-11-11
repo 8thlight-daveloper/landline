@@ -31,15 +31,16 @@ type Waker interface {
 }
 
 type Config struct {
-	Secret    string
-	Host      string
-	Window    time.Duration
-	Now       func() time.Time
-	NewID     func() string
-	NewToken  func() string
-	Wakers    map[string]Waker
-	Notify    func(string)
-	StatePath string
+	Secret     string
+	Host       string
+	Window     time.Duration
+	IdleWindow time.Duration
+	Now        func() time.Time
+	NewID      func() string
+	NewToken   func() string
+	Wakers     map[string]Waker
+	Notify     func(string)
+	StatePath  string
 }
 
 type Server struct {
@@ -67,6 +68,10 @@ const wakeLease = 60 * time.Second
 
 var kindPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
+const maxQueuedWakes = 200
+
+const maxPageBytes = 2 << 20
+
 const maxRequestBytes = 6*model.MaxBodyBytes + 4096
 
 func New(cfg Config, store Store) (*Server, error) {
@@ -75,6 +80,9 @@ func New(cfg Config, store Store) (*Server, error) {
 	}
 	if cfg.Window == 0 {
 		cfg.Window = 90 * time.Second
+	}
+	if cfg.IdleWindow == 0 {
+		cfg.IdleWindow = 24 * time.Hour
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -236,13 +244,13 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	}
 	s.seq = decision.Envelope.Seq
 	sender, _ := s.reg.Find(s.agents, from)
-	targets := s.wakeTargets(decision.Envelope, sender, decision.Recipients)
+	targets, queued := s.wakeTargets(decision.Envelope, sender, decision.Recipients)
 	close(s.changed)
 	s.changed = make(chan struct{})
 	s.mu.Unlock()
 
 	woken := s.wake(decision.Envelope, sender, targets)
-	write(w, http.StatusOK, model.SendResponse{ID: decision.Envelope.ID, Seq: decision.Envelope.Seq, Recipients: decision.Recipients, Woken: woken})
+	write(w, http.StatusOK, model.SendResponse{ID: decision.Envelope.ID, Seq: decision.Envelope.Seq, Recipients: decision.Recipients, Woken: woken, Queued: queued})
 }
 
 func statusOf(err error) int {
@@ -256,8 +264,9 @@ func statusOf(err error) int {
 	}
 }
 
-func (s *Server) wakeTargets(e model.Envelope, sender model.Agent, recipients []string) []model.Agent {
+func (s *Server) wakeTargets(e model.Envelope, sender model.Agent, recipients []string) ([]model.Agent, []string) {
 	out := []model.Agent{}
+	queued := []string{}
 	for _, name := range recipients {
 		agent, found := s.reg.Find(s.agents, name)
 		if !found || agent.WakeKind == "" || s.waiting[name] != 0 {
@@ -270,8 +279,14 @@ func (s *Server) wakeTargets(e model.Envelope, sender model.Agent, recipients []
 		s.wakes[agent.Host] = append(s.wakes[agent.Host], &queuedWake{job: model.WakeJob{
 			ID: e.ID + "-" + agent.Name, From: e.From, Agent: agent.Name, Kind: agent.WakeKind, Target: agent.WakeTarget, Text: model.Render(e, sender),
 		}})
+		queued = append(queued, agent.Name)
+		if len(s.wakes[agent.Host]) > maxQueuedWakes {
+			dropped := s.wakes[agent.Host][0].job
+			s.wakes[agent.Host] = s.wakes[agent.Host][1:]
+			s.cfg.Notify(fmt.Sprintf("the wake queue for host %s is full, so the oldest wake, for %s, was dropped. The message is still in its inbox", agent.Host, dropped.Agent))
+		}
 	}
-	return out
+	return out, queued
 }
 
 func (s *Server) localHost(host string) bool {
@@ -339,21 +354,23 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 	}
 	deadline := time.NewTimer(time.Duration(wait) * time.Second)
 	defer deadline.Stop()
-	s.mu.Lock()
-	s.waiting[name]++
-	s.mu.Unlock()
-	defer func() {
+	if len(threads) == 0 {
 		s.mu.Lock()
-		s.waiting[name]--
+		s.waiting[name]++
 		s.mu.Unlock()
-	}()
+		defer func() {
+			s.mu.Lock()
+			s.waiting[name]--
+			s.mu.Unlock()
+		}()
+	}
 	for {
 		s.mu.Lock()
 		cursor := s.cursors[name]
 		if len(threads) > 0 {
 			cursor = int64(intOf(query.Get("after")))
 		}
-		page := s.in.Select(s.store.All(), name, cursor, threads, limit)
+		page := capPage(s.in.Select(s.store.All(), name, cursor, threads, limit))
 		changed := s.changed
 		if len(page.Messages) > 0 && len(threads) == 0 {
 			s.cursors[name] = page.Next
@@ -381,6 +398,20 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func capPage(page model.Page) model.Page {
+	total := 0
+	for i, each := range page.Messages {
+		total += 2*len(each.Body) + 512
+		if total > maxPageBytes && i > 0 {
+			page.Remaining += len(page.Messages) - i
+			page.Messages = page.Messages[:i]
+			page.Next = page.Messages[i-1].Seq
+			return page
+		}
+	}
+	return page
+}
+
 func toWire(page model.Page, senders map[string]model.Agent) model.InboxResponse {
 	out := model.InboxResponse{Messages: []model.WireEnvelope{}, Next: page.Next, Remaining: page.Remaining}
 	for _, e := range page.Messages {
@@ -405,10 +436,11 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		online[a.Name] = true
 	}
 	listed := append([]model.Agent(nil), s.agents...)
+	now := s.cfg.Now()
 	s.mu.Unlock()
 	out := []model.AgentInfo{}
 	for _, a := range listed {
-		if online[a.Name] || a.WakeKind != "" {
+		if online[a.Name] || a.WakeKind != "" || now.Sub(a.LastSeen) <= s.cfg.IdleWindow {
 			out = append(out, model.AgentInfo{Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, WakeKind: a.WakeKind, Online: online[a.Name], LastSeen: a.LastSeen})
 		}
 	}
