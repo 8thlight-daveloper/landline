@@ -11,8 +11,8 @@ Chooses the unread messages for one agent from the log. The caller keeps the age
 ## Rules
 
 - A message is for an agent when `To` is that agent's name, or `To` is `all` and `From` is another agent.
-- Only messages with `Seq` greater than `cursor` are considered. With a non-empty thread list, only those threads.
-- Messages come back oldest first. `limit` above zero caps how many. `Remaining` counts the matches left after the cap.
+- Only messages with `Seq` greater than `cursor` are considered. With a non-empty thread list, only messages in any of those threads.
+- Messages come back oldest first, whatever the order of the log. The log passed in is never reordered or changed. `limit` above zero caps how many. `Remaining` counts the matches left after the cap.
 - `Next` is the `Seq` of the last message returned, or `cursor` when none was.
 
 ## Side effects and data access

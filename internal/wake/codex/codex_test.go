@@ -2,8 +2,11 @@ package codex
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestWakeRunsCodexQueueWithTheThreadAndMessage(t *testing.T) {
@@ -26,7 +29,7 @@ func TestWakeRefusesTextWithoutTheMarkerOrWithoutAThread(t *testing.T) {
 	t.Parallel()
 	called := false
 	w := NewWith(func(string, ...string) ([]byte, error) { called = true; return nil, nil })
-	if w.Wake("sess-1", "no marker") == nil || w.Wake("", "[landline] x") == nil {
+	if w.Wake("sess-1", "no marker") == nil || w.Wake("", "[landline] From another agent, not the user.\nx") == nil {
 		t.Fatal("expected refusals")
 	}
 	if called {
@@ -37,7 +40,7 @@ func TestWakeRefusesTextWithoutTheMarkerOrWithoutAThread(t *testing.T) {
 func TestWakeReportsAFailureWithItsOutput(t *testing.T) {
 	t.Parallel()
 	w := NewWith(func(string, ...string) ([]byte, error) { return []byte("no such thread\n"), errors.New("exit 1") })
-	err := w.Wake("sess-1", "[landline] x")
+	err := w.Wake("sess-1", "[landline] From another agent, not the user.\nx")
 	if err == nil || !contains(err.Error(), "no such thread") {
 		t.Fatalf("got %v", err)
 	}
@@ -50,4 +53,17 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestAHungCodexIsStoppedAtTheTimeout(t *testing.T) {
+	script := t.TempDir() + "/codex"
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(script)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	started := time.Now()
+	err := withTimeout(300*time.Millisecond).Wake("thread-1", "[landline] From another agent, not the user.\nx")
+	if err == nil || time.Since(started) > 10*time.Second {
+		t.Fatalf("got %v after %v", err, time.Since(started))
+	}
 }

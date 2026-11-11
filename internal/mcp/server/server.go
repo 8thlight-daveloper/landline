@@ -253,6 +253,9 @@ func runAgents(hub Hub) (any, *rpcError) {
 		if wake == "" {
 			wake = "none"
 		}
+		if !agent.Online {
+			wake += ", idle"
+		}
 		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\twake: %s", agent.Name, agent.Harness, agent.Host, wake))
 	}
 	return textResult(strings.Join(lines, "\n"), false), nil

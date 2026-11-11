@@ -12,4 +12,6 @@ var (
 	ErrBadKind          = errors.New("kind must be chat, task, reply, or review")
 	ErrEmptyBody        = errors.New("a message needs a body")
 	ErrBodyTooLarge     = errors.New("the body is larger than 64 KiB")
+	ErrBadReplyTo       = errors.New("in_reply_to must be 1 to 64 letters, digits, . - or _")
+	ErrBadField         = errors.New("harness, host, session, and wake fields must be 1 to 64 printable characters on one line")
 )

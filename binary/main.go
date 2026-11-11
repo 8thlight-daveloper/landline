@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/cli/command"
@@ -58,10 +60,20 @@ func flagValues(args []string, allowed ...string) (map[string]string, error) {
 	return values, nil
 }
 
+func warnIfExposed(addr string) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		fmt.Fprintf(os.Stderr, "landline hub: warning: %s is not a loopback address. The hub speaks plain HTTP, so tokens and messages cross the network in the clear. Prefer localhost and a tunnel.\n", addr)
+	}
+}
+
 func notifyToStderr(line string) { fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), line) }
 
 func runHub(args []string, home, host string) int {
-	values, err := flagValues(args, "--addr", "--log", "--host", "--state")
+	values, err := flagValues(args, "--addr", "--log", "--host", "--state", "--window")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
 		return 2
@@ -70,6 +82,16 @@ func runHub(args []string, home, host string) int {
 	logPath := or(values["--log"], filepath.Join(home, ".local", "share", "landline", "log.jsonl"))
 	statePath := or(values["--state"], filepath.Join(filepath.Dir(logPath), "state.json"))
 	host = or(values["--host"], host)
+	window := time.Duration(0)
+	if raw := values["--window"]; raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			fmt.Fprintln(os.Stderr, "landline hub: --window must be a duration such as 90s")
+			return 2
+		}
+		window = parsed
+	}
+	warnIfExposed(addr)
 	log, err := store.Open(logPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
@@ -77,7 +99,7 @@ func runHub(args []string, home, host string) int {
 	}
 	defer log.Close()
 	hub, err := server.New(server.Config{
-		Secret: os.Getenv("LANDLINE_SECRET"), Host: host, StatePath: statePath,
+		Secret: os.Getenv("LANDLINE_SECRET"), Host: host, StatePath: statePath, Window: window,
 		Wakers: map[string]server.Waker{"codex": codex.New()},
 		Notify: notifyToStderr,
 	}, log)
@@ -86,7 +108,7 @@ func runHub(args []string, home, host string) int {
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "landline hub listening on %s, host %q, log %s\n", addr, host, logPath)
-	srv := &http.Server{Addr: addr, Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: addr, Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
 	if err := srv.ListenAndServe(); err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
 		return 1
@@ -106,7 +128,7 @@ func runDaemon(args []string, host string) int {
 		return 2
 	}
 	host = or(values["--host"], host)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Fprintf(os.Stderr, "landline agentd waking agents on host %q for the hub at %s\n", host, url)
 	err = agentd.Run(ctx, client.New(url, secret), host, map[string]agentd.Waker{"codex": codex.New()}, notifyToStderr)

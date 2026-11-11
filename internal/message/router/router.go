@@ -2,12 +2,14 @@ package router
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/model"
 )
 
+var replyPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 var threadPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 type Router struct{}
@@ -31,6 +33,9 @@ func (Router) Route(known []model.Agent, from string, request model.SendRequest,
 	}
 	if !kind.Valid() {
 		return model.Decision{}, model.ErrBadKind
+	}
+	if request.InReplyTo != "" && !replyPattern.MatchString(request.InReplyTo) {
+		return model.Decision{}, model.ErrBadReplyTo
 	}
 	if strings.TrimSpace(request.Body) == "" {
 		return model.Decision{}, model.ErrEmptyBody
@@ -59,6 +64,7 @@ func recipientsOf(known []model.Agent, from, to string) ([]string, error) {
 				out = append(out, each.Name)
 			}
 		}
+		slices.Sort(out)
 		return out, nil
 	}
 	if to == from {

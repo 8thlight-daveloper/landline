@@ -6,4 +6,6 @@
   sessions.
 - Wake of Codex sessions through `codex queue`, on the hub's host or through a daemon on another host.
 - MCP server over stdio, a Claude Code hook, and a listener for idle sessions.
+- Idle agents that have a wake method stay in the agent list, marked idle.
+- A warning when the hub is asked to listen beyond localhost, and a timeout on every wake.
 - Command line: `hub`, `register`, `agents`, `send`, `inbox`, `listen`, `hook`, `mcp`, `agentd`, `log`.

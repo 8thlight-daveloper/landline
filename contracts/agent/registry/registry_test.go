@@ -3,6 +3,7 @@ package registry
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,5 +179,99 @@ func TestOnlineKeepsEveryFieldOfTheEntries(t *testing.T) {
 	got := r.Online(agents, t0, time.Minute)
 	if len(got) != 1 || got[0].WakeKind != "codex" || got[0].WakeTarget != "thread-1" || got[0].Host != "mac" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestReplacingAnEntryLeavesTheCallersListUnchanged(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	agents, _ := r.Register(nil, agent("alpha"), t0)
+	agents, _ = r.Register(agents, agent("bravo"), t0)
+	before := append([]model.Agent(nil), agents...)
+	moved := agent("alpha")
+	moved.Host = "linux"
+	got, err := r.Register(agents, moved, t0.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(agents, before) {
+		t.Fatalf("the input changed: %+v then %+v", before, agents)
+	}
+	if got[0].Host != "linux" || got[1].Name != "bravo" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestANameOfExactlyThirtyTwoCharactersIsValidAndThirtyThreeIsNot(t *testing.T) {
+	t.Parallel()
+	valid := "a" + strings.Repeat("b", 31)
+	if _, err := newImpl().Register(nil, agent(valid), t0); err != nil {
+		t.Fatalf("32 characters: %v", err)
+	}
+	if _, err := newImpl().Register(nil, agent(valid+"c"), t0); !errors.Is(err, model.ErrBadName) {
+		t.Fatalf("33 characters: %v", err)
+	}
+	for _, name := range []string{"-lead", "_lead", "has.dot", "Upper", "uni\u00e9"} {
+		if _, err := newImpl().Register(nil, agent(name), t0); !errors.Is(err, model.ErrBadName) {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+}
+
+func TestAHarnessOfOnlySpacesIsRefused(t *testing.T) {
+	t.Parallel()
+	blank := agent("alpha")
+	blank.Harness = "   "
+	if _, err := newImpl().Register(nil, blank, t0); !errors.Is(err, model.ErrNoHarness) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestFreeTextFieldsAreOneShortLineOfPrintableCharacters(t *testing.T) {
+	t.Parallel()
+	for _, field := range []string{"Harness", "Host", "Session", "WakeKind", "WakeTarget"} {
+		for _, bad := range []string{"two\nlines", "tab\there", "bell\a", strings.Repeat("x", 65)} {
+			entry := agent("alpha")
+			switch field {
+			case "Harness":
+				entry.Harness = bad
+			case "Host":
+				entry.Host = bad
+			case "Session":
+				entry.Session = bad
+			case "WakeKind":
+				entry.WakeKind = bad
+			case "WakeTarget":
+				entry.WakeTarget = bad
+			}
+			if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
+				t.Errorf("%s %q: %v", field, bad, err)
+			}
+		}
+	}
+	long := agent("alpha")
+	long.Host = strings.Repeat("h", 64)
+	if _, err := newImpl().Register(nil, long, t0); err != nil {
+		t.Fatalf("64 characters: %v", err)
+	}
+}
+
+func TestControlCharacterBoundaries(t *testing.T) {
+	t.Parallel()
+	allowed := []string{"a b", " ", "~", "café", "!", "\u0080"}
+	refused := []string{"\x00", "\x1f", "\x7f", "a\x1fb", "a\x7fb"}
+	for _, text := range allowed {
+		entry := agent("alpha")
+		entry.Host = text
+		if _, err := newImpl().Register(nil, entry, t0); err != nil {
+			t.Errorf("%q: %v", text, err)
+		}
+	}
+	for _, text := range refused {
+		entry := agent("alpha")
+		entry.Host = text
+		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
+			t.Errorf("%q: %v", text, err)
+		}
 	}
 }

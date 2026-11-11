@@ -13,7 +13,12 @@ Holds the list of registered agents as a value. Every call takes the list and re
 - `Register` adds an agent, or replaces the entry with the same name. It sets `LastSeen` to the `now` it was given.
 - A name is 1 to 32 lowercase letters, digits, `-` or `_`, starts with a letter or digit, and is not `all`. Anything else
   is `model.ErrBadName`. An agent with no harness is `model.ErrNoHarness`.
-- The returned list is sorted by name. The input list is never changed.
+- A name is checked as ASCII only, 32 characters at most.
+- A harness that is empty or only spaces is `model.ErrNoHarness`.
+- The harness, host, session, wake method, and wake target are each at most 64 bytes with no control characters, so
+  none of them can break onto a new line. Anything else is `model.ErrBadField`. An empty host, session, wake method, or
+  wake target is allowed.
+- The returned list is sorted by name. The input list is never changed, including when `Register` replaces an entry.
 - `Online` returns the agents whose `LastSeen` is no more than `window` before `now`, sorted by name.
 - `Find` returns the named agent and true, or false.
 

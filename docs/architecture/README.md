@@ -5,17 +5,11 @@ set of components. [architecture.yaml](../../architecture.yaml) holds the depend
 
 ## Components
 
-| Component        | Kind   | Does                                                                              |
-| ---------------- | ------ | --------------------------------------------------------------------------------- |
-| `agent/registry` | core   | Registers agents, lists them, and drops the ones not heard from                   |
-| `message/router` | core   | Checks a send request, stamps the sender, and chooses the recipients              |
-| `message/inbox`  | core   | Chooses the unread messages for one agent from the log                            |
-| `log/store`      | driver | Appends envelopes to a file and reads them back                                   |
-| `wake/codex`     | driver | Wakes a Codex session with `codex queue`                                          |
-| `hub/server`     | driver | Serves the HTTP API, joins the core components to the store and the wake adapters |
+[components.md](components.md) lists each component, its position, and its kind.
 
-The model in `internal/model` holds the agent and envelope types. Core components are pure: the caller passes the time
-and any identifier in.
+The model in `internal/model` holds the agent and envelope types, the message rendering, and the JSON shapes of the
+hub's API, which the hub and every client share. Core components are pure: the caller passes the time and any identifier
+in.
 
 ## Flow of one message
 

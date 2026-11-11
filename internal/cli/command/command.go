@@ -157,6 +157,9 @@ func agents(args []string, env Env) error {
 		if wake == "" {
 			wake = "none"
 		}
+		if !a.Online {
+			wake += ", idle"
+		}
 		fmt.Fprintf(env.Stdout, "%s\t%s\t%s\twake: %s\n", a.Name, a.Harness, a.Host, wake)
 	}
 	return nil

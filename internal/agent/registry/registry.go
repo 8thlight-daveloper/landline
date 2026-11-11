@@ -22,6 +22,11 @@ func (Registry) Register(agents []model.Agent, entry model.Agent, now time.Time)
 	if strings.TrimSpace(entry.Harness) == "" {
 		return nil, model.ErrNoHarness
 	}
+	for _, field := range []string{entry.Harness, entry.Host, entry.Session, entry.WakeKind, entry.WakeTarget} {
+		if !plainField(field) {
+			return nil, model.ErrBadField
+		}
+	}
 	entry.LastSeen = now
 	out := make([]model.Agent, 0, len(agents)+1)
 	for _, each := range agents {
@@ -52,6 +57,18 @@ func (Registry) Find(agents []model.Agent, name string) (model.Agent, bool) {
 		}
 	}
 	return model.Agent{}, false
+}
+
+func plainField(text string) bool {
+	if len(text) > 64 {
+		return false
+	}
+	for _, r := range text {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func sortByName(agents []model.Agent) {

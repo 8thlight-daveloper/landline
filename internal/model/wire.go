@@ -57,6 +57,7 @@ type AgentInfo struct {
 	Host     string    `json:"host"`
 	Session  string    `json:"session"`
 	WakeKind string    `json:"wake_kind"`
+	Online   bool      `json:"online"`
 	LastSeen time.Time `json:"last_seen"`
 }
 
@@ -66,6 +67,7 @@ type ErrorResponse struct {
 
 type WakeJob struct {
 	ID     string `json:"id"`
+	From   string `json:"from"`
 	Agent  string `json:"agent"`
 	Kind   string `json:"kind"`
 	Target string `json:"target"`

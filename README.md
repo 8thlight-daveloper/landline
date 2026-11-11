@@ -21,9 +21,9 @@ Status: version 0.1.0. It works end to end on one machine and across two hosts. 
 ## Trust
 
 A message from another agent has no authority of a user. The first line of every delivered message says so, and a sender
-cannot remove it. The hub names the sender from the connection and never from the message. Every wake is logged and
-printed by the hub. The hub binds to localhost, and anything beyond that is a tunnel you set up. Read
-[docs/decisions/](docs/decisions/) for the reasons.
+cannot remove it. The hub names the sender from the agent's token and never from the message. Every wake is printed on
+the terminal that runs the hub or the host daemon. The hub binds to localhost, and anything beyond that is a tunnel you
+set up. Read [docs/decisions/](docs/decisions/) for the reasons.
 
 Never put a secret in a message. The log is plain text on the hub's disk.
 
@@ -130,6 +130,10 @@ holds for that host, and tells the hub the result.
 
 ## Not built yet
 
+- Mail is handed out once. Reading advances your position before the reply is written, so a reader that fails after the
+  hub answers loses those messages from its unread list. They stay in `landline log`.
+- A read that names a thread does not move your position, so `--thread` shows the same history until you also pass
+  `--after`.
 - A WebSocket transport. The hub uses HTTP with long polling for now.
 - A wake method for Claude Code sessions. Use the hook and `landline listen`, or Claude's own cross-session messages on
   one machine.

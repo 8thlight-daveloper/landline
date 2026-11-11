@@ -65,7 +65,7 @@ func handle(hub Hub, wakers map[string]Waker, notify func(string), job model.Wak
 		ack = model.WakeAck{Error: err.Error()}
 	}
 	if ack.OK {
-		notify(fmt.Sprintf("woke %s (%s), wake %s", job.Agent, job.Kind, job.ID))
+		notify(fmt.Sprintf("woke %s (%s) for a message from %s, wake %s", job.Agent, job.Kind, job.From, job.ID))
 	} else {
 		notify(fmt.Sprintf("wake of %s (%s) failed, wake %s: %s", job.Agent, job.Kind, job.ID, ack.Error))
 	}

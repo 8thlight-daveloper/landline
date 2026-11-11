@@ -55,19 +55,19 @@ components:
     depends_on: []
   - name: hub/server
     position: 3
-    depends_on: [agent/registry, message/router, message/inbox, log/store, wake/codex]
+    depends_on: [agent/registry, message/router, message/inbox]
   - name: cli/command
     position: 3
     depends_on: [client/http]
   - name: daemon/agentd
     position: 3
-    depends_on: [client/http, wake/codex]
+    depends_on: []
   - name: mcp/server
     position: 3
-    depends_on: [client/http]
+    depends_on: []
 
 contracts:
-  may_import: [model, contracts/harness]
+  may_import: [model]
   wiring_test_may_import: own_component
 
 # Scenarios are Go code that start the built binary and drive it from outside.

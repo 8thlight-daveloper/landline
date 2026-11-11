@@ -67,7 +67,7 @@ const wakeLease = 60 * time.Second
 
 var kindPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
-const maxRequestBytes = 2 * model.MaxBodyBytes
+const maxRequestBytes = 6*model.MaxBodyBytes + 4096
 
 func New(cfg Config, store Store) (*Server, error) {
 	if len(cfg.Secret) < 16 {
@@ -268,7 +268,7 @@ func (s *Server) wakeTargets(e model.Envelope, sender model.Agent, recipients []
 			continue
 		}
 		s.wakes[agent.Host] = append(s.wakes[agent.Host], &queuedWake{job: model.WakeJob{
-			ID: e.ID + "-" + agent.Name, Agent: agent.Name, Kind: agent.WakeKind, Target: agent.WakeTarget, Text: model.Render(e, sender),
+			ID: e.ID + "-" + agent.Name, From: e.From, Agent: agent.Name, Kind: agent.WakeKind, Target: agent.WakeTarget, Text: model.Render(e, sender),
 		}})
 	}
 	return out
@@ -387,11 +387,17 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	online := s.reg.Online(s.agents, s.cfg.Now(), s.cfg.Window)
+	online := map[string]bool{}
+	for _, a := range s.reg.Online(s.agents, s.cfg.Now(), s.cfg.Window) {
+		online[a.Name] = true
+	}
+	listed := append([]model.Agent(nil), s.agents...)
 	s.mu.Unlock()
 	out := []model.AgentInfo{}
-	for _, a := range online {
-		out = append(out, model.AgentInfo{Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, WakeKind: a.WakeKind, LastSeen: a.LastSeen})
+	for _, a := range listed {
+		if online[a.Name] || a.WakeKind != "" {
+			out = append(out, model.AgentInfo{Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, WakeKind: a.WakeKind, Online: online[a.Name], LastSeen: a.LastSeen})
+		}
 	}
 	write(w, http.StatusOK, out)
 }
@@ -482,7 +488,7 @@ func (s *Server) wakeAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ack.OK {
-		s.cfg.Notify(fmt.Sprintf("host daemon woke %s (%s), wake %s", job.Agent, job.Kind, job.ID))
+		s.cfg.Notify(fmt.Sprintf("host daemon woke %s (%s) for a message from %s, wake %s", job.Agent, job.Kind, job.From, job.ID))
 	} else {
 		s.cfg.Notify(fmt.Sprintf("wake of %s failed on its host: %s", job.Agent, ack.Error))
 	}

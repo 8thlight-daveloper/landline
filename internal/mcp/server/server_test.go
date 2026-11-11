@@ -33,8 +33,9 @@ func (f *fakeHub) Inbox(waitSeconds int, threads string, after int64) (model.Inb
 
 func (f *fakeHub) Agents() ([]model.AgentInfo, error) {
 	return []model.AgentInfo{
-		{Name: "bravo", Harness: "codex", Host: "mac", WakeKind: "codex"},
-		{Name: "alpha", Harness: "claude-code", Host: "linux"},
+		{Name: "bravo", Harness: "codex", Host: "mac", WakeKind: "codex", Online: true},
+		{Name: "alpha", Harness: "claude-code", Host: "linux", Online: true},
+		{Name: "charlie", Harness: "codex", Host: "mac", WakeKind: "codex"},
 	}, f.agentsErr
 }
 
@@ -166,7 +167,7 @@ func TestToolsListNamesToolsAndRequiredFields(t *testing.T) {
 func TestAgentsPrintsOneLinePerAgent(t *testing.T) {
 	t.Parallel()
 	text, isError := resultText(t, one(t, &fakeHub{}, call("landline_agents", `{}`)))
-	want := "bravo\tcodex\tmac\twake: codex\nalpha\tclaude-code\tlinux\twake: none"
+	want := "bravo\tcodex\tmac\twake: codex\nalpha\tclaude-code\tlinux\twake: none\ncharlie\tcodex\tmac\twake: codex, idle"
 	if isError || text != want {
 		t.Fatalf("got %q", text)
 	}

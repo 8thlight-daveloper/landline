@@ -162,3 +162,27 @@ func TestALimitLargerThanTheMatchesReturnsAllOfThem(t *testing.T) {
 		t.Fatalf("got %v remaining %d next %d", seqs(got), got.Remaining, got.Next)
 	}
 }
+
+func TestEveryNamedThreadIsKept(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{
+		env(1, "bravo", "alpha", "main"),
+		env(2, "bravo", "alpha", "deploy"),
+		env(3, "bravo", "alpha", "review"),
+		env(4, "bravo", "alpha", "other"),
+	}
+	got := newImpl().Select(l, "alpha", 0, []string{"review", "main", "deploy"}, 0)
+	if want := []int64{1, 2, 3}; !reflect.DeepEqual(seqs(got), want) {
+		t.Fatalf("got %v, want %v", seqs(got), want)
+	}
+}
+
+func TestSelectNeverReordersTheCallersLog(t *testing.T) {
+	t.Parallel()
+	shuffled := []model.Envelope{env(3, "bravo", "alpha", "main"), env(1, "bravo", "alpha", "main"), env(2, "bravo", "alpha", "main")}
+	before := append([]model.Envelope(nil), shuffled...)
+	newImpl().Select(shuffled, "alpha", 0, nil, 0)
+	if !reflect.DeepEqual(shuffled, before) {
+		t.Fatalf("the log was reordered: %+v", shuffled)
+	}
+}

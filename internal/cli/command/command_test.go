@@ -54,7 +54,7 @@ func fakeHub(t *testing.T, seen *[]string) *httptest.Server {
 		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nhello"}}, Remaining: 2})
 	})
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "bravo", Harness: "codex", Host: "mac", WakeKind: "codex"}, {Name: "alpha", Harness: "claude-code", Host: "linux"}})
+		json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "bravo", Harness: "codex", Host: "mac", WakeKind: "codex", Online: true}, {Name: "alpha", Harness: "claude-code", Host: "linux", Online: true}, {Name: "charlie", Harness: "codex", Host: "mac", WakeKind: "codex"}})
 	})
 	s := httptest.NewServer(mux)
 	t.Cleanup(s.Close)
@@ -121,7 +121,7 @@ func TestAgentsListsOnePerLine(t *testing.T) {
 	dir := t.TempDir()
 	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
 	r := do(t, dir, hub.URL, "", "agents", "--as", "alpha")
-	if !strings.Contains(r.out.String(), "bravo\tcodex\tmac\twake: codex\n") || !strings.Contains(r.out.String(), "alpha\tclaude-code\tlinux\twake: none\n") {
+	if !strings.Contains(r.out.String(), "bravo\tcodex\tmac\twake: codex\n") || !strings.Contains(r.out.String(), "alpha\tclaude-code\tlinux\twake: none\n") || !strings.Contains(r.out.String(), "charlie\tcodex\tmac\twake: codex, idle\n") {
 		t.Fatalf("got %q", r.out.String())
 	}
 }
