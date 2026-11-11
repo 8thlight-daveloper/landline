@@ -82,6 +82,14 @@ func (c *Client) Inbox(waitSeconds int, threads string, after int64) (model.Inbo
 	return out, c.do("GET", "/v1/inbox?"+q.Encode(), nil, &out)
 }
 
+func (c *Client) Unread() (int, error) {
+	var out model.InboxResponse
+	if err := c.do("GET", "/v1/inbox?peek=1", nil, &out); err != nil {
+		return 0, err
+	}
+	return out.Remaining, nil
+}
+
 func (c *Client) Agents() ([]model.AgentInfo, error) {
 	var out []model.AgentInfo
 	return out, c.do("GET", "/v1/agents", nil, &out)
@@ -90,4 +98,18 @@ func (c *Client) Agents() ([]model.AgentInfo, error) {
 func (c *Client) Log(after int64) ([]model.Envelope, error) {
 	var out []model.Envelope
 	return out, c.do("GET", "/v1/log?after="+strconv.FormatInt(after, 10), nil, &out)
+}
+
+func (c *Client) Wakes(host string, waitSeconds int) ([]model.WakeJob, error) {
+	q := url.Values{}
+	q.Set("host", host)
+	if waitSeconds > 0 {
+		q.Set("wait", strconv.Itoa(waitSeconds))
+	}
+	var out []model.WakeJob
+	return out, c.do("GET", "/v1/wakes?"+q.Encode(), nil, &out)
+}
+
+func (c *Client) AckWake(id string, ack model.WakeAck) error {
+	return c.do("POST", "/v1/wakes/"+url.PathEscape(id)+"/ack", ack, nil)
 }

@@ -29,6 +29,8 @@ drivers:
   - client/http
   - hub/server
   - cli/command
+  - daemon/agentd
+  - mcp/server
 
 # A component may depend only on components at an earlier position, and on
 # the model. Two components at one position may not depend on each other.
@@ -55,6 +57,12 @@ components:
     position: 3
     depends_on: [agent/registry, message/router, message/inbox, log/store, wake/codex]
   - name: cli/command
+    position: 3
+    depends_on: [client/http]
+  - name: daemon/agentd
+    position: 3
+    depends_on: [client/http, wake/codex]
+  - name: mcp/server
     position: 3
     depends_on: [client/http]
 

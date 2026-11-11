@@ -1,45 +1,75 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/cli/command"
+	client "github.com/8thlight-daveloper/landline/internal/client/http"
+	"github.com/8thlight-daveloper/landline/internal/daemon/agentd"
 	"github.com/8thlight-daveloper/landline/internal/hub/server"
 	"github.com/8thlight-daveloper/landline/internal/log/store"
+	mcp "github.com/8thlight-daveloper/landline/internal/mcp/server"
 	"github.com/8thlight-daveloper/landline/internal/wake/codex"
 )
+
+const version = "0.1.0"
 
 func main() {
 	home, _ := os.UserHomeDir()
 	host, _ := os.Hostname()
-	if len(os.Args) > 1 && os.Args[1] == "hub" {
-		os.Exit(runHub(os.Args[2:], home, host))
-	}
-	os.Exit(command.Run(os.Args[1:], command.Env{
+	env := command.Env{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
 		ConfigDir: filepath.Join(home, ".config", "landline"), Host: host,
-	}))
-}
-
-func runHub(args []string, home, host string) int {
-	addr, logPath := "127.0.0.1:8787", filepath.Join(home, ".local", "share", "landline", "log.jsonl")
-	for i := 0; i+1 < len(args); i += 2 {
-		switch args[i] {
-		case "--addr":
-			addr = args[i+1]
-		case "--log":
-			logPath = args[i+1]
-		case "--host":
-			host = args[i+1]
-		default:
-			fmt.Fprintf(os.Stderr, "landline hub: unknown flag %s\n", args[i])
-			return 2
+	}
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "hub":
+			os.Exit(runHub(os.Args[2:], home, host))
+		case "agentd":
+			os.Exit(runDaemon(os.Args[2:], host))
+		case "mcp":
+			os.Exit(runMCP(os.Args[2:], env))
+		case "version":
+			fmt.Println("landline", version)
+			return
 		}
 	}
+	os.Exit(command.Run(os.Args[1:], env))
+}
+
+func flagValues(args []string, allowed ...string) (map[string]string, error) {
+	values := map[string]string{}
+	for i := 0; i < len(args); i += 2 {
+		known := false
+		for _, name := range allowed {
+			known = known || args[i] == name
+		}
+		if !known || i+1 >= len(args) {
+			return nil, fmt.Errorf("unknown or incomplete flag %s", args[i])
+		}
+		values[args[i]] = args[i+1]
+	}
+	return values, nil
+}
+
+func notifyToStderr(line string) { fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), line) }
+
+func runHub(args []string, home, host string) int {
+	values, err := flagValues(args, "--addr", "--log", "--host", "--state")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline hub:", err)
+		return 2
+	}
+	addr := or(values["--addr"], "127.0.0.1:8787")
+	logPath := or(values["--log"], filepath.Join(home, ".local", "share", "landline", "log.jsonl"))
+	statePath := or(values["--state"], filepath.Join(filepath.Dir(logPath), "state.json"))
+	host = or(values["--host"], host)
 	log, err := store.Open(logPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
@@ -47,9 +77,9 @@ func runHub(args []string, home, host string) int {
 	}
 	defer log.Close()
 	hub, err := server.New(server.Config{
-		Secret: os.Getenv("LANDLINE_SECRET"), Host: host,
+		Secret: os.Getenv("LANDLINE_SECRET"), Host: host, StatePath: statePath,
 		Wakers: map[string]server.Waker{"codex": codex.New()},
-		Notify: func(line string) { fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), line) },
+		Notify: notifyToStderr,
 	}, log)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
@@ -62,4 +92,52 @@ func runHub(args []string, home, host string) int {
 		return 1
 	}
 	return 0
+}
+
+func runDaemon(args []string, host string) int {
+	values, err := flagValues(args, "--host")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline agentd:", err)
+		return 2
+	}
+	url, secret := os.Getenv("LANDLINE_URL"), os.Getenv("LANDLINE_SECRET")
+	if url == "" || secret == "" {
+		fmt.Fprintln(os.Stderr, "landline agentd: set LANDLINE_URL and LANDLINE_SECRET")
+		return 2
+	}
+	host = or(values["--host"], host)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	fmt.Fprintf(os.Stderr, "landline agentd waking agents on host %q for the hub at %s\n", host, url)
+	err = agentd.Run(ctx, client.New(url, secret), host, map[string]agentd.Waker{"codex": codex.New()}, notifyToStderr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline agentd:", err)
+		return 1
+	}
+	return 0
+}
+
+func runMCP(args []string, env command.Env) int {
+	values, err := flagValues(args, "--as")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline mcp:", err)
+		return 2
+	}
+	c, err := command.Connect(or(values["--as"], os.Getenv("LANDLINE_AS")), env)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline mcp:", err)
+		return 1
+	}
+	if err := mcp.Serve(os.Stdin, os.Stdout, c); err != nil {
+		fmt.Fprintln(os.Stderr, "landline mcp:", err)
+		return 1
+	}
+	return 0
+}
+
+func or(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }

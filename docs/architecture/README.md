@@ -1,7 +1,7 @@
 # Architecture
 
-One Go program with four parts: a hub, a host daemon, a command line, and (later) an MCP server. They share one module
-and one set of components. [architecture.yaml](../../architecture.yaml) holds the dependency rules.
+One Go program with four parts: a hub, a host daemon, a command line, and an MCP server. They share one module and one
+set of components. [architecture.yaml](../../architecture.yaml) holds the dependency rules.
 
 ## Components
 

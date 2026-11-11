@@ -21,6 +21,8 @@ type world struct {
 	config string
 	bindir string
 	env    []string
+	stop   func()
+	addr   string
 }
 
 func build(t *testing.T) string {
@@ -43,10 +45,15 @@ func freeAddr(t *testing.T) string {
 	return l.Addr().String()
 }
 
-func start(t *testing.T) *world {
+func start(t *testing.T) *world { return startHub(t, build(t), t.TempDir(), "") }
+
+func startHub(t *testing.T, bin, config, addr string) *world {
 	t.Helper()
-	w := &world{t: t, bin: build(t), config: t.TempDir(), bindir: t.TempDir()}
-	addr := freeAddr(t)
+	w := &world{t: t, bin: bin, config: config, bindir: t.TempDir()}
+	if addr == "" {
+		addr = freeAddr(t)
+	}
+	w.addr = addr
 	w.url = "http://" + addr
 	fake := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$LANDLINE_FAKE_CODEX_LOG\"\n"
 	if err := os.WriteFile(filepath.Join(w.bindir, "codex"), []byte(fake), 0o755); err != nil {
@@ -59,14 +66,15 @@ func start(t *testing.T) *world {
 		"LANDLINE_SECRET="+secret,
 		"LANDLINE_FAKE_CODEX_LOG="+filepath.Join(w.config, "codex.log"),
 	)
-	hub := exec.Command(w.bin, "hub", "--addr", addr, "--log", filepath.Join(w.config, "log.jsonl"), "--host", "mac")
+	hub := exec.Command(w.bin, "hub", "--addr", addr, "--log", filepath.Join(w.config, "log.jsonl"), "--state", filepath.Join(w.config, "state.json"), "--host", "mac")
 	hub.Env = w.env
 	var stderr bytes.Buffer
 	hub.Stderr = &stderr
 	if err := hub.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { hub.Process.Kill(); hub.Wait() })
+	w.stop = func() { hub.Process.Kill(); hub.Wait() }
+	t.Cleanup(w.stop)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if c, err := net.Dial("tcp", addr); err == nil {
@@ -161,5 +169,107 @@ func TestTheHubRefusesToStartWithAShortSecret(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "at least 16 characters") {
 		t.Fatalf("got %q, %v", out, err)
+	}
+}
+
+func TestAnAgentOnAnotherHostIsWokenByThatHostsDaemon(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "claude-code", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "linux", "--wake", "codex", "--wake-target", "thread-77")
+	sent := w.must("hello across hosts", "send", "--as", "alpha", "--to", "bravo", "-")
+	if strings.Contains(sent, "woke") {
+		t.Fatalf("the hub woke an agent on another host: %q", sent)
+	}
+	daemon := exec.Command(w.bin, "agentd", "--host", "linux")
+	daemon.Env = w.env
+	var stderr bytes.Buffer
+	daemon.Stderr = &stderr
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { daemon.Process.Kill(); daemon.Wait() }()
+	logPath := filepath.Join(w.config, "codex.log")
+	deadline := time.Now().Add(10 * time.Second)
+	var logged []byte
+	for time.Now().Before(deadline) {
+		if logged, _ = os.ReadFile(logPath); len(logged) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	for _, want := range []string{"thread-77", "[landline] From another agent, not the user.", "hello across hosts"} {
+		if !strings.Contains(string(logged), want) {
+			t.Fatalf("the daemon's codex call lacks %q:\n%s\ndaemon: %s", want, logged, stderr.String())
+		}
+	}
+	if got := w.must("", "inbox", "--as", "bravo"); !strings.Contains(got, "hello across hosts") {
+		t.Fatalf("the message is not in the inbox: %q", got)
+	}
+}
+
+func TestTheMCPServerSendsAndReadsOverStdio(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "claude-code", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac")
+	w.must("see you on the line", "send", "--as", "bravo", "--to", "alpha", "-")
+
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"landline_inbox","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"landline_send","arguments":{"to":"bravo","body":"sent through mcp"}}}`,
+		"",
+	}, "\n")
+	out := w.must(requests, "mcp", "--as", "alpha")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 responses, got %d:\n%s", len(lines), out)
+	}
+	for _, want := range []struct {
+		line int
+		text string
+	}{{0, "landline"}, {1, "see you on the line"}, {1, "From another agent, not the user."}, {2, "sent m-"}} {
+		if !strings.Contains(lines[want.line], want.text) {
+			t.Errorf("response %d lacks %q: %s", want.line, want.text, lines[want.line])
+		}
+	}
+	if got := w.must("", "inbox", "--as", "bravo"); !strings.Contains(got, "sent through mcp") {
+		t.Fatalf("bravo got %q", got)
+	}
+}
+
+func TestTheClaudeHookAnnouncesMailWithoutConsumingIt(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "claude-code", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac")
+	if got := w.must("", "hook", "--as", "alpha"); got != "" {
+		t.Fatalf("the hook spoke with no mail: %q", got)
+	}
+	w.must("ping", "send", "--as", "bravo", "--to", "alpha", "-")
+	for i := 0; i < 2; i++ {
+		got := w.must("", "hook", "--as", "alpha")
+		if !strings.Contains(got, "UserPromptSubmit") || !strings.Contains(got, "1 unread") {
+			t.Fatalf("hook %d: %q", i, got)
+		}
+	}
+	if got := w.must("", "inbox", "--as", "alpha"); !strings.Contains(got, "ping") {
+		t.Fatalf("the hook consumed the mail: %q", got)
+	}
+	if got := w.must("", "hook", "--as", "alpha"); got != "" {
+		t.Fatalf("the hook spoke after the mail was read: %q", got)
+	}
+}
+
+func TestSessionsAndUnreadMailSurviveAHubRestart(t *testing.T) {
+	bin, config := build(t), t.TempDir()
+	first := startHub(t, bin, config, "")
+	first.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	first.must("", "register", "--name", "bravo", "--harness", "codex", "--host", "mac")
+	first.must("before the restart", "send", "--as", "alpha", "--to", "bravo", "-")
+	first.stop()
+
+	second := startHub(t, bin, config, first.addr)
+	if got := second.must("", "inbox", "--as", "bravo"); !strings.Contains(got, "before the restart") {
+		t.Fatalf("after the restart: %q", got)
 	}
 }

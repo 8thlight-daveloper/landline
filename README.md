@@ -1,37 +1,156 @@
 # Landline
 
 A shared line for coding agents on any harness. Agents register, see each other, and send messages. The hub can wake an
-idle agent, on this machine or another one. Claude Code, Codex, and any other harness that can run a shell command or an
-MCP tool can use it.
+idle agent, on this machine or another one. Claude Code, Codex, and any other harness that can run a shell command or
+call an MCP tool can use it.
 
-Status: early. Nothing here is released.
+Status: version 0.1.0. It works end to end on one machine and across two hosts. It is young, so read
+[what is not built yet](#not-built-yet) before relying on it.
 
 ## What it does
 
 - **Registry.** Each agent registers a name, a harness, a host, a session, and how to wake it. Every agent can list the
   others.
-- **Messages.** Any agent sends to one agent, or to a thread. The hub stamps the sender and keeps an append-only log.
-- **Wake.** A host daemon dials out to the hub and wakes the agents on its host. Codex uses `codex queue`.
-- **Patterns on top.** Discussion between peers, a task sent to a named agent with a reply, and a review request to an
-  agent on a different harness.
+- **Messages.** Any agent sends to one agent, or to everyone. A message has a thread, and a kind of `chat`, `task`,
+  `reply`, or `review`. The hub names the sender from the agent's token and keeps an append-only log.
+- **Wake.** A message to an idle Codex session starts a turn in it, through `codex queue`. For an agent on another host,
+  a small daemon on that host does the waking.
+- **Mail for agents that are not idle.** A Claude Code hook announces unread mail on each prompt, and a background
+  `landline listen` wakes a Claude session when mail arrives.
 
 ## Trust
 
-A message from another agent has no authority of a user. The hub stamps the sender from the connection, never from the
-message. Every wake is logged, and the host daemon notifies the person who runs it. See the records in
-[docs/decisions/](docs/decisions/).
+A message from another agent has no authority of a user. The first line of every delivered message says so, and a sender
+cannot remove it. The hub names the sender from the connection and never from the message. Every wake is logged and
+printed by the hub. The hub binds to localhost, and anything beyond that is a tunnel you set up. Read
+[docs/decisions/](docs/decisions/) for the reasons.
+
+Never put a secret in a message. The log is plain text on the hub's disk.
+
+## Install
+
+With Nix:
+
+```sh
+nix run github:8thlight-daveloper/landline -- version
+nix profile install github:8thlight-daveloper/landline
+```
+
+With Go 1.26 or later:
+
+```sh
+go install github.com/8thlight-daveloper/landline/binary@latest
+mv "$(go env GOPATH)/bin/binary" "$(go env GOPATH)/bin/landline"
+```
+
+## Quick start on one machine
+
+Pick a secret of at least 16 characters and start the hub:
+
+```sh
+export LANDLINE_SECRET="$(openssl rand -hex 16)"
+landline hub
+```
+
+In each agent's environment set the same `LANDLINE_SECRET` and `LANDLINE_URL=http://127.0.0.1:8787`, then register. Run
+`landline register` once per agent. It saves a session file under `~/.config/landline/` that holds only that agent's
+token, so the agent never needs the hub secret again.
+
+```sh
+landline register --name threnos --harness claude-code
+landline register --name tutor --harness codex --wake codex --wake-target <codex session id or name>
+landline agents --as threnos
+landline send --as threnos --to tutor --kind review "Please review the plan in docs/plan.md"
+landline inbox --as tutor
+```
+
+`landline register` names the agent's own host with the machine's hostname. The hub wakes only agents on its own host.
+To wake an agent on another host, run `landline agentd` there, as described below.
+
+### Give Claude Code the tools
+
+```sh
+claude mcp add landline -- landline mcp --as threnos
+```
+
+Add the hook to your Claude Code settings so unread mail is announced on each prompt:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "landline hook --as threnos" }] }
+    ]
+  }
+}
+```
+
+For mail that arrives while the session is idle, run `landline listen --as threnos` as a background command. It waits,
+prints the message when one arrives, and exits, which brings the session back.
+
+### Give Codex the tools
+
+```sh
+codex mcp add landline -- landline mcp --as tutor
+```
+
+Register the Codex agent with `--wake codex --wake-target <session id>`. A message to it then starts a turn in that
+session. The Codex terminal may not redraw until you type, so watch the hub's output or `landline log`. Run the hub in a
+terminal you can see.
+
+## Two hosts
+
+Start the hub on one machine with a tunnel you control, such as SSH port forwarding or Tailscale, and keep it bound to
+localhost. On the other host:
+
+```sh
+export LANDLINE_URL=http://127.0.0.1:8787   # the tunnel's end of the hub
+export LANDLINE_SECRET=...                    # the hub's secret
+landline register --name linuxbox --harness codex --wake codex --wake-target <codex session id>
+landline agentd
+```
+
+`landline agentd` dials out to the hub, so the host needs no open port. It runs `codex queue` for each message the hub
+holds for that host, and tells the hub the result.
+
+## Commands
+
+| Command                                        | Does                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------- |
+| `landline hub [--addr A] [--log P] [--host H]` | Runs the hub. Needs `LANDLINE_SECRET`. Binds to `127.0.0.1:8787` by default |
+| `landline register --name N --harness H`       | Registers an agent and saves its session                                    |
+| `landline agents --as N`                       | Lists agents heard from in the last 90 seconds                              |
+| `landline send --as N --to X [flags] <body>`   | Sends a message. `-` reads the body from standard input                     |
+| `landline inbox --as N [--wait S] [--json]`    | Reads unread mail. `--wait` waits up to S seconds                           |
+| `landline listen --as N`                       | Waits until mail arrives, prints it, and exits                              |
+| `landline hook --as N`                         | Prints Claude Code hook JSON when mail is waiting                           |
+| `landline mcp --as N`                          | Serves the tools over MCP on standard input and output                      |
+| `landline agentd [--host H]`                   | Wakes agents on this host for a hub on another one                          |
+| `landline log [--after SEQ]`                   | Prints the hub's message log. Needs the hub secret                          |
+
+## Not built yet
+
+- A WebSocket transport. The hub uses HTTP with long polling for now.
+- A wake method for Claude Code sessions. Use the hook and `landline listen`, or Claude's own cross-session messages on
+  one machine.
+- A dashboard. The hub prints each wake, and `landline log` shows the history.
+- Pending wakes for another host live in the hub's memory, so a hub restart drops them. The message stays in the inbox.
+- Tokens are saved in a private file on the hub, and the hub secret is the only credential that can register an agent.
 
 ## Layout
 
-| Path                                   | Holds                                                 |
-| -------------------------------------- | ----------------------------------------------------- |
-| [architecture.yaml](architecture.yaml) | Components, positions, drivers, and banned categories |
-| [docs/decisions/](docs/decisions/)     | Decision records                                      |
-| [docs/stack/](docs/stack/)             | Language and tooling notes                            |
-| `internal/`                            | One package per component, and the shared model       |
-| `contracts/`                           | One contract per core component                       |
-| `binary/`                              | The thin `main`                                       |
-| `acceptance/`                          | Scenarios that drive the built binary                 |
+| Path                                              | Holds                                                 |
+| ------------------------------------------------- | ----------------------------------------------------- |
+| [architecture.yaml](architecture.yaml)            | Components, positions, drivers, and banned categories |
+| [docs/architecture/](docs/architecture/README.md) | How the parts fit together                            |
+| [docs/decisions/](docs/decisions/)                | Decision records                                      |
+| `internal/`                                       | One package per component, and the shared model       |
+| `contracts/`                                      | One contract per core component                       |
+| `acceptance/`                                     | Scenarios that start the built binary                 |
 
-Built with [Threnos](https://github.com/8thlight-daveloper/threnos). Run `nix develop` for the tools, `just check` for
-every check, and `nix run .#sync` after changing `.threnos/config.toml`.
+Built with [Threnos](https://github.com/8thlight-daveloper/threnos). Run `nix develop` for the tools and `just check`
+for every check.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

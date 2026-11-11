@@ -72,3 +72,47 @@ func TestAnUnreachableHubIsAnError(t *testing.T) {
 		t.Fatal("no error")
 	}
 }
+
+func TestWakesAsksForTheHostAndWait(t *testing.T) {
+	t.Parallel()
+	var query, path string
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		query, path = r.URL.RawQuery, r.URL.Path
+		json.NewEncoder(w).Encode([]model.WakeJob{{ID: "j1", Agent: "bravo", Kind: "codex", Target: "t", Text: "[landline] x"}})
+	})
+	out, err := c.Wakes("linux", 30)
+	if err != nil || len(out) != 1 || out[0].ID != "j1" || out[0].Target != "t" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if path != "/v1/wakes" || !strings.Contains(query, "host=linux") || !strings.Contains(query, "wait=30") {
+		t.Fatalf("path %q query %q", path, query)
+	}
+}
+
+func TestAckWakePostsTheAckToTheJobPath(t *testing.T) {
+	t.Parallel()
+	var got model.WakeAck
+	var method, path, auth string
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		method, path, auth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		json.NewDecoder(r.Body).Decode(&got)
+		w.Write([]byte("{}"))
+	})
+	if err := c.AckWake("m-a-bravo", model.WakeAck{OK: false, Error: "no thread"}); err != nil {
+		t.Fatal(err)
+	}
+	if method != "POST" || path != "/v1/wakes/m-a-bravo/ack" || auth != "Bearer tok" || got.OK || got.Error != "no thread" {
+		t.Fatalf("%s %s %q %+v", method, path, auth, got)
+	}
+}
+
+func TestAckWakeSurfacesAnUnknownJob(t *testing.T) {
+	t.Parallel()
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		w.WriteHeader(404)
+		json.NewEncoder(w).Encode(model.ErrorResponse{Error: "no such wake"})
+	})
+	if err := c.AckWake("ghost", model.WakeAck{OK: true}); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("got %v", err)
+	}
+}

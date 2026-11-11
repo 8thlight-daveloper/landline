@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,14 +31,15 @@ type Waker interface {
 }
 
 type Config struct {
-	Secret   string
-	Host     string
-	Window   time.Duration
-	Now      func() time.Time
-	NewID    func() string
-	NewToken func() string
-	Wakers   map[string]Waker
-	Notify   func(string)
+	Secret    string
+	Host      string
+	Window    time.Duration
+	Now       func() time.Time
+	NewID     func() string
+	NewToken  func() string
+	Wakers    map[string]Waker
+	Notify    func(string)
+	StatePath string
 }
 
 type Server struct {
@@ -53,7 +55,17 @@ type Server struct {
 	waiting map[string]int
 	seq     int64
 	changed chan struct{}
+	wakes   map[string][]*queuedWake
 }
+
+type queuedWake struct {
+	job        model.WakeJob
+	leaseUntil time.Time
+}
+
+const wakeLease = 60 * time.Second
+
+var kindPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
 const maxRequestBytes = 2 * model.MaxBodyBytes
 
@@ -76,11 +88,13 @@ func New(cfg Config, store Store) (*Server, error) {
 	if cfg.Notify == nil {
 		cfg.Notify = func(string) {}
 	}
-	return &Server{
+	s := &Server{
 		cfg: cfg, store: store,
-		tokens: map[string]string{}, cursors: map[string]int64{}, waiting: map[string]int{},
+		tokens: map[string]string{}, cursors: map[string]int64{}, waiting: map[string]int{}, wakes: map[string][]*queuedWake{},
 		seq: store.LastSeq(), changed: make(chan struct{}),
-	}, nil
+	}
+	s.loadState()
+	return s, nil
 }
 
 func randomHex(n int) string {
@@ -98,6 +112,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/inbox", s.inbox)
 	mux.HandleFunc("GET /v1/agents", s.list)
 	mux.HandleFunc("GET /v1/log", s.logRead)
+	mux.HandleFunc("GET /v1/wakes", s.wakePoll)
+	mux.HandleFunc("POST /v1/wakes/{id}/ack", s.wakeAck)
 	return mux
 }
 
@@ -161,7 +177,11 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.WakeKind != "" && s.cfg.Wakers[body.WakeKind] == nil {
+	if body.WakeKind != "" && !kindPattern.MatchString(body.WakeKind) {
+		fail(w, http.StatusBadRequest, "a wake method is 1 to 32 lowercase letters, digits, or -")
+		return
+	}
+	if body.WakeKind != "" && s.localHost(body.Host) && s.cfg.Wakers[body.WakeKind] == nil {
 		fail(w, http.StatusBadRequest, "this hub has no wake method "+body.WakeKind)
 		return
 	}
@@ -188,6 +208,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if _, seen := s.cursors[body.Name]; !seen {
 		s.cursors[body.Name] = s.store.LastSeq()
 	}
+	s.saveLocked()
 	write(w, http.StatusOK, model.RegisterResponse{Name: body.Name, Token: token})
 }
 
@@ -215,7 +236,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	}
 	s.seq = decision.Envelope.Seq
 	sender, _ := s.reg.Find(s.agents, from)
-	targets := s.wakeTargets(decision.Recipients)
+	targets := s.wakeTargets(decision.Envelope, sender, decision.Recipients)
 	close(s.changed)
 	s.changed = make(chan struct{})
 	s.mu.Unlock()
@@ -235,19 +256,30 @@ func statusOf(err error) int {
 	}
 }
 
-func (s *Server) wakeTargets(recipients []string) []model.Agent {
+func (s *Server) wakeTargets(e model.Envelope, sender model.Agent, recipients []string) []model.Agent {
 	out := []model.Agent{}
 	for _, name := range recipients {
 		agent, found := s.reg.Find(s.agents, name)
-		if found && agent.WakeKind != "" && s.waiting[name] == 0 && s.localTo(agent) {
-			out = append(out, agent)
+		if !found || agent.WakeKind == "" || s.waiting[name] != 0 {
+			continue
 		}
+		if s.localTo(agent) {
+			out = append(out, agent)
+			continue
+		}
+		s.wakes[agent.Host] = append(s.wakes[agent.Host], &queuedWake{job: model.WakeJob{
+			ID: e.ID + "-" + agent.Name, Agent: agent.Name, Kind: agent.WakeKind, Target: agent.WakeTarget, Text: model.Render(e, sender),
+		}})
 	}
 	return out
 }
 
+func (s *Server) localHost(host string) bool {
+	return s.cfg.Host == "" || host == s.cfg.Host
+}
+
 func (s *Server) localTo(agent model.Agent) bool {
-	return s.cfg.Host == "" || agent.Host == s.cfg.Host
+	return s.localHost(agent.Host)
 }
 
 func (s *Server) wake(e model.Envelope, sender model.Agent, targets []model.Agent) []string {
@@ -275,6 +307,14 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
+	if query.Get("peek") != "" {
+		s.mu.Lock()
+		cursor := s.cursors[name]
+		unread := s.in.Select(s.store.All(), name, cursor, nil, 0)
+		s.mu.Unlock()
+		write(w, http.StatusOK, model.InboxResponse{Messages: []model.WireEnvelope{}, Next: cursor, Remaining: len(unread.Messages)})
+		return
+	}
 	wait := clamp(intOf(query.Get("wait")), 0, 60)
 	limit := clamp(intOf(query.Get("limit")), 0, 200)
 	if limit == 0 {
@@ -304,6 +344,7 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 		changed := s.changed
 		if len(page.Messages) > 0 && len(threads) == 0 {
 			s.cursors[name] = page.Next
+			s.saveLocked()
 		}
 		senders := map[string]model.Agent{}
 		for _, each := range page.Messages {
@@ -377,4 +418,87 @@ func intOf(raw string) int {
 
 func clamp(n, lo, hi int) int {
 	return max(lo, min(n, hi))
+}
+
+func (s *Server) wakePoll(w http.ResponseWriter, r *http.Request) {
+	if !s.isSecret(r) {
+		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
+		return
+	}
+	query := r.URL.Query()
+	host := query.Get("host")
+	if host == "" {
+		fail(w, http.StatusBadRequest, "a wake poll needs a host")
+		return
+	}
+	wait := clamp(intOf(query.Get("wait")), 0, 60)
+	deadline := time.NewTimer(time.Duration(wait) * time.Second)
+	defer deadline.Stop()
+	for {
+		s.mu.Lock()
+		jobs := s.leaseWakes(host)
+		changed := s.changed
+		s.mu.Unlock()
+		if len(jobs) > 0 || wait == 0 {
+			write(w, http.StatusOK, jobs)
+			return
+		}
+		select {
+		case <-changed:
+		case <-deadline.C:
+			write(w, http.StatusOK, jobs)
+			return
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func (s *Server) leaseWakes(host string) []model.WakeJob {
+	now := s.cfg.Now()
+	jobs := []model.WakeJob{}
+	for _, queued := range s.wakes[host] {
+		if now.Before(queued.leaseUntil) {
+			continue
+		}
+		queued.leaseUntil = now.Add(wakeLease)
+		jobs = append(jobs, queued.job)
+	}
+	return jobs
+}
+
+func (s *Server) wakeAck(w http.ResponseWriter, r *http.Request) {
+	if !s.isSecret(r) {
+		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
+		return
+	}
+	var ack model.WakeAck
+	if !decode(w, r, &ack) {
+		return
+	}
+	job, found := s.removeWake(r.PathValue("id"))
+	if !found {
+		fail(w, http.StatusNotFound, "no such wake")
+		return
+	}
+	if ack.OK {
+		s.cfg.Notify(fmt.Sprintf("host daemon woke %s (%s), wake %s", job.Agent, job.Kind, job.ID))
+	} else {
+		s.cfg.Notify(fmt.Sprintf("wake of %s failed on its host: %s", job.Agent, ack.Error))
+	}
+	write(w, http.StatusOK, struct{}{})
+}
+
+func (s *Server) removeWake(id string) (model.WakeJob, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for host, queue := range s.wakes {
+		for i, queued := range queue {
+			if queued.job.ID == id {
+				s.wakes[host] = append(queue[:i:i], queue[i+1:]...)
+				return queued.job, true
+			}
+		}
+	}
+	return model.WakeJob{}, false
 }

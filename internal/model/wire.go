@@ -63,3 +63,16 @@ type AgentInfo struct {
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
+
+type WakeJob struct {
+	ID     string `json:"id"`
+	Agent  string `json:"agent"`
+	Kind   string `json:"kind"`
+	Target string `json:"target"`
+	Text   string `json:"text"`
+}
+
+type WakeAck struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}

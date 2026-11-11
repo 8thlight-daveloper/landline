@@ -19,10 +19,15 @@ mutation_cadence = "nightly"
 # The gates are principles, decisions, contracts, acceptance, architecture, model, and build. A project that adopts
 # .threnos/approvals.yaml has each protected unit approved there. independence says what must differ between an agent
 # approver and the author: "session" (the default) or "harness".
-# [approvals]
-# principles = ["person"]
-# contracts = ["person", "agent"]
-# independence = "session"
+[approvals]
+principles = ["person", "agent"]
+decisions = ["person", "agent"]
+contracts = ["person", "agent"]
+acceptance = ["person", "agent"]
+architecture = ["person", "agent"]
+model = ["person", "agent"]
+build = ["person", "agent"]
+independence = "session"
 
 # Seeds are written once and recorded in .threnos/seeded. To keep one out from the first sync, list its path.
 # [seeds]

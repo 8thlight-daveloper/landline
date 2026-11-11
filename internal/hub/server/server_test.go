@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -383,5 +384,304 @@ func TestTheLogNeedsTheSecretAndReturnsWhatWasSent(t *testing.T) {
 	status, raw := h.call("GET", "/v1/log", secret, nil)
 	if status != 200 || !strings.Contains(string(raw), "logged") {
 		t.Fatalf("status %d body %s", status, raw)
+	}
+}
+
+func (h *harness) advance(d time.Duration) {
+	h.mu.Lock()
+	h.now = h.now.Add(d)
+	h.mu.Unlock()
+}
+
+func (h *harness) registerOn(name, host, wakeKind, wakeTarget string) string {
+	h.t.Helper()
+	status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: name, Harness: "codex", Host: host, Session: "s-" + name, WakeKind: wakeKind, WakeTarget: wakeTarget})
+	if status != 200 {
+		h.t.Fatalf("register %s: %d %s", name, status, raw)
+	}
+	var out model.RegisterResponse
+	json.Unmarshal(raw, &out)
+	return out.Token
+}
+
+func (h *harness) wakes(host string) []model.WakeJob {
+	h.t.Helper()
+	status, raw := h.call("GET", "/v1/wakes?host="+host, secret, nil)
+	if status != 200 {
+		h.t.Fatalf("wakes: %d %s", status, raw)
+	}
+	var out []model.WakeJob
+	json.Unmarshal(raw, &out)
+	return out
+}
+
+func (h *harness) notesCopy() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string{}, h.notes...)
+}
+
+func remoteHub(t *testing.T) (*harness, string) {
+	h := startOn(t, "mac")
+	alpha := h.registerOn("alpha", "mac", "", "")
+	h.registerOn("bravo", "linux", "codex", "thread-9")
+	return h, alpha
+}
+
+func TestAMessageForAnAgentOnAnotherHostIsQueuedForThatHost(t *testing.T) {
+	t.Parallel()
+	h, alpha := remoteHub(t)
+	_, raw := h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "hi"})
+	var sent model.SendResponse
+	json.Unmarshal(raw, &sent)
+	if len(sent.Woken) != 0 || h.waker.count() != 0 {
+		t.Fatalf("woken %v calls %v", sent.Woken, h.waker.calls)
+	}
+	jobs := h.wakes("linux")
+	if len(jobs) != 1 {
+		t.Fatalf("jobs %+v", jobs)
+	}
+	job := jobs[0]
+	if job.Agent != "bravo" || job.Kind != "codex" || job.Target != "thread-9" || job.ID == "" ||
+		!strings.HasPrefix(job.Text, "[landline] "+model.Marker) || !strings.Contains(job.Text, "hi") {
+		t.Fatalf("job %+v", job)
+	}
+	if other := h.wakes("elsewhere"); len(other) != 0 {
+		t.Fatalf("another host saw %+v", other)
+	}
+}
+
+func TestALeasedWakeIsNotReturnedAgainUntilTheLeaseEnds(t *testing.T) {
+	t.Parallel()
+	h, alpha := remoteHub(t)
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "hi"})
+	if len(h.wakes("linux")) != 1 {
+		t.Fatal("no first job")
+	}
+	h.advance(59 * time.Second)
+	if again := h.wakes("linux"); len(again) != 0 {
+		t.Fatalf("returned inside the lease: %+v", again)
+	}
+	h.advance(2 * time.Second)
+	if again := h.wakes("linux"); len(again) != 1 {
+		t.Fatalf("not returned after the lease: %+v", again)
+	}
+}
+
+func TestAnAckRemovesTheWakeAndNotifiesThePerson(t *testing.T) {
+	t.Parallel()
+	h, alpha := remoteHub(t)
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "hi"})
+	job := h.wakes("linux")[0]
+	if status, raw := h.call("POST", "/v1/wakes/"+job.ID+"/ack", secret, model.WakeAck{OK: true}); status != 200 {
+		t.Fatalf("ack: %d %s", status, raw)
+	}
+	h.advance(2 * time.Minute)
+	if again := h.wakes("linux"); len(again) != 0 {
+		t.Fatalf("still queued: %+v", again)
+	}
+	notes := h.notesCopy()
+	if len(notes) != 1 || !strings.Contains(notes[0], "host daemon woke bravo") {
+		t.Fatalf("notes %v", notes)
+	}
+	if status, _ := h.call("POST", "/v1/wakes/"+job.ID+"/ack", secret, model.WakeAck{OK: true}); status != 404 {
+		t.Fatalf("second ack status %d", status)
+	}
+}
+
+func TestAFailedAckReportsTheReason(t *testing.T) {
+	t.Parallel()
+	h, alpha := remoteHub(t)
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "hi"})
+	job := h.wakes("linux")[0]
+	h.call("POST", "/v1/wakes/"+job.ID+"/ack", secret, model.WakeAck{OK: false, Error: "no such thread"})
+	notes := h.notesCopy()
+	if len(notes) != 1 || !strings.Contains(notes[0], "failed") || !strings.Contains(notes[0], "no such thread") {
+		t.Fatalf("notes %v", notes)
+	}
+}
+
+func TestAckingAnUnknownWakeIs404(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	if status, _ := h.call("POST", "/v1/wakes/ghost/ack", secret, model.WakeAck{OK: true}); status != 404 {
+		t.Fatalf("status %d", status)
+	}
+}
+
+func TestTheWakeEndpointsRefuseAnAgentTokenAndNoToken(t *testing.T) {
+	t.Parallel()
+	h, alpha := remoteHub(t)
+	for _, token := range []string{alpha, "", "nope"} {
+		if status, _ := h.call("GET", "/v1/wakes?host=linux", token, nil); status != 401 {
+			t.Errorf("poll with %q: status %d", token, status)
+		}
+		if status, _ := h.call("POST", "/v1/wakes/x/ack", token, model.WakeAck{OK: true}); status != 401 {
+			t.Errorf("ack with %q: status %d", token, status)
+		}
+	}
+}
+
+func TestNothingIsQueuedForARecipientWaitingOnTheInbox(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	alpha := h.registerOn("alpha", "mac", "", "")
+	bravo := h.registerOn("bravo", "linux", "codex", "thread-9")
+	done := make(chan model.InboxResponse, 1)
+	go func() { done <- h.inbox(bravo, "?wait=5") }()
+	time.Sleep(200 * time.Millisecond)
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "hi"})
+	select {
+	case got := <-done:
+		if len(got.Messages) != 1 {
+			t.Fatalf("got %+v", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the long poll did not return")
+	}
+	if jobs := h.wakes("linux"); len(jobs) != 0 {
+		t.Fatalf("queued for a listener: %+v", jobs)
+	}
+}
+
+func TestAWakePollWaitsForAJobAndClampsTheWait(t *testing.T) {
+	t.Parallel()
+	h, alpha := remoteHub(t)
+	done := make(chan []model.WakeJob, 1)
+	go func() {
+		_, raw := h.call("GET", "/v1/wakes?host=linux&wait=5", secret, nil)
+		var out []model.WakeJob
+		json.Unmarshal(raw, &out)
+		done <- out
+	}()
+	time.Sleep(200 * time.Millisecond)
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "hi"})
+	select {
+	case got := <-done:
+		if len(got) != 1 {
+			t.Fatalf("got %+v", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the wake poll did not return")
+	}
+	if status, _ := h.call("GET", "/v1/wakes?wait=1", secret, nil); status != 400 {
+		t.Fatalf("a poll without a host: status %d", status)
+	}
+}
+
+func TestAHubWithNoHostQueuesNothing(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	h.registerOn("bravo", "linux", "codex", "t")
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "hi"})
+	if jobs := h.wakes("linux"); len(jobs) != 0 {
+		t.Fatalf("queued %+v", jobs)
+	}
+	if h.waker.count() != 1 {
+		t.Fatalf("local wake count %d", h.waker.count())
+	}
+}
+
+func TestARemoteAgentMayNameAWakeMethodOnlyItsHostDaemonHas(t *testing.T) {
+	t.Parallel()
+	h := startOn(t, "mac")
+	for kind, want := range map[string]int{"claude-remote": 200, "Bad Kind": 400} {
+		status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: "bravo", Harness: "x", Host: "linux", Session: "s", WakeKind: kind, WakeTarget: "t"})
+		if status != want {
+			t.Errorf("%q: status %d %s, want %d", kind, status, raw, want)
+		}
+	}
+	status, _ := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: "charlie", Harness: "x", Host: "mac", Session: "s", WakeKind: "claude-remote", WakeTarget: "t"})
+	if status != 400 {
+		t.Fatalf("a local agent named a wake method this hub lacks: %d", status)
+	}
+}
+
+func TestPeekCountsUnreadMailWithoutConsumingIt(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	bravo := h.register("bravo", "", "")
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "one"})
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "two"})
+	for i := 0; i < 2; i++ {
+		if got := h.inbox(bravo, "?peek=1"); got.Remaining != 2 || len(got.Messages) != 0 {
+			t.Fatalf("peek %d: %+v", i, got)
+		}
+	}
+	if got := h.inbox(bravo, ""); len(got.Messages) != 2 {
+		t.Fatalf("the peek consumed mail: %+v", got)
+	}
+	if got := h.inbox(bravo, "?peek=1"); got.Remaining != 0 {
+		t.Fatalf("after reading: %+v", got)
+	}
+}
+
+func TestTokensAndCursorsSurviveAHubRestart(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	open := func() (*httptest.Server, func()) {
+		log, err := store.Open(filepath.Join(dir, "log.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		hub, err := New(Config{Secret: secret, StatePath: filepath.Join(dir, "state.json"), NewID: func() string { return "m-" + time.Now().Format("150405.000000") }}, log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(hub.Handler())
+		return srv, func() { srv.Close(); log.Close() }
+	}
+	call := func(srv *httptest.Server, method, path, token string, body any) (int, []byte) {
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(method, srv.URL+path, bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var buf bytes.Buffer
+		buf.ReadFrom(resp.Body)
+		return resp.StatusCode, buf.Bytes()
+	}
+	first, stop := open()
+	var alpha, bravo model.RegisterResponse
+	_, raw := call(first, "POST", "/v1/register", secret, model.RegisterRequest{Name: "alpha", Harness: "x"})
+	json.Unmarshal(raw, &alpha)
+	_, raw = call(first, "POST", "/v1/register", secret, model.RegisterRequest{Name: "bravo", Harness: "x"})
+	json.Unmarshal(raw, &bravo)
+	call(first, "POST", "/v1/send", alpha.Token, model.SendBody{To: "bravo", Body: "one"})
+	call(first, "GET", "/v1/inbox", bravo.Token, nil)
+	call(first, "POST", "/v1/send", alpha.Token, model.SendBody{To: "bravo", Body: "two"})
+	stop()
+
+	second, stop := open()
+	defer stop()
+	status, raw := call(second, "GET", "/v1/inbox", bravo.Token, nil)
+	var got model.InboxResponse
+	json.Unmarshal(raw, &got)
+	if status != 200 || len(got.Messages) != 1 || got.Messages[0].Body != "two" {
+		t.Fatalf("after restart: %d %s", status, raw)
+	}
+	if status, _ := call(second, "POST", "/v1/send", alpha.Token, model.SendBody{To: "bravo", Body: "three"}); status != 200 {
+		t.Fatalf("the old token stopped working: %d", status)
+	}
+}
+
+func TestAStateFileThatIsNotReadableIsReportedAndIgnored(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	os.WriteFile(path, []byte("not json"), 0o600)
+	log, _ := store.Open(filepath.Join(dir, "log.jsonl"))
+	defer log.Close()
+	var notes []string
+	if _, err := New(Config{Secret: secret, StatePath: path, Notify: func(s string) { notes = append(notes, s) }}, log); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "register again") {
+		t.Fatalf("notes %v", notes)
 	}
 }
