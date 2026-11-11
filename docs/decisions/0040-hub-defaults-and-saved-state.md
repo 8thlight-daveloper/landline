@@ -20,8 +20,9 @@ mistake, so the defaults and the saved files need a decision.
 - **Saved state.** The hub keeps an append-only message log and a state file next to it. The state file holds the
   registered agents, their tokens, and each agent's read position. The hub makes the log mode 0600 each time it starts,
   and writes the state file as a new 0600 file each time it saves. A folder the hub creates is mode 0700, and a folder
-  that already exists is left as it is. A state file the hub cannot read is reported and ignored, and every agent then
-  registers again. Tokens are stored as they are, since the file is private to the person running the hub.
+  that already exists is left as it is. A state file that is missing is not an error. One the hub cannot read, or cannot
+  parse, is reported and ignored, and every agent then registers again. Tokens are stored as they are, since the file is
+  private to the person running the hub.
 - **Sessions.** `landline register` saves the agent's token and the hub's address in a 0600 file under
   `~/.config/landline/`. It never saves the hub secret, which comes from the environment only.
 - **Mail is handed out once.** Reading an inbox advances the agent's position before the response is written, so a
@@ -32,8 +33,9 @@ mistake, so the defaults and the saved files need a decision.
   and marks those idle. A Claude Code session that cannot be woken therefore stays visible for a day.
 - **Bounded memory for waiting wakes.** The hub keeps at most 200 queued wakes for a host. A new one past that drops the
   oldest, prints that it did, and leaves its message in the inbox.
-- **A page of mail is bounded.** A single read returns messages up to about 2 MiB of body text and reports how many
-  remain, so no reader has to accept an unbounded reply.
+- **A page of mail is bounded.** A single read stops adding messages once twice their body text passes about 2 MiB, and
+  reports how many remain. A reply stays within a few MiB for ordinary text and about 12 MiB at most, so no reader has
+  to accept an unbounded reply.
 
 ## Consequences
 

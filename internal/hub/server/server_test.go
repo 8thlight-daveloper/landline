@@ -877,3 +877,39 @@ func TestPeekAndInboxReportTheHeadOfTheLog(t *testing.T) {
 		t.Fatalf("inbox head %d", got.Head)
 	}
 }
+
+func TestAStateFileThatCannotBeReadIsReported(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can read any file")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	os.WriteFile(path, []byte("{}"), 0o000)
+	log, _ := store.Open(filepath.Join(dir, "log.jsonl"))
+	defer log.Close()
+	var notes []string
+	if _, err := New(Config{Secret: secret, StatePath: path, Notify: func(s string) { notes = append(notes, s) }}, log); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "register again") {
+		t.Fatalf("notes %v", notes)
+	}
+}
+
+func TestTheStateFileKeysAreSnakeCase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	log, _ := store.Open(filepath.Join(dir, "log.jsonl"))
+	defer log.Close()
+	hub, _ := New(Config{Secret: secret, StatePath: filepath.Join(dir, "state.json"), Wakers: map[string]Waker{"codex": &fakeWaker{}}}, log)
+	srv := httptest.NewServer(hub.Handler())
+	defer srv.Close()
+	h := &harness{t: t, srv: srv, waker: &fakeWaker{}, now: time.Now()}
+	h.register("alpha", "codex", "t1")
+	raw, _ := os.ReadFile(filepath.Join(dir, "state.json"))
+	for _, key := range []string{`"agents"`, `"tokens"`, `"cursors"`, `"name":"alpha"`, `"wake_kind":"codex"`, `"wake_target":"t1"`, `"last_seen"`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("the state lacks %s: %s", key, raw)
+		}
+	}
+}

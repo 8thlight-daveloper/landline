@@ -307,3 +307,54 @@ func TestRecipientsAreNeverNil(t *testing.T) {
 		t.Fatalf("got %#v, %v", got.Recipients, err)
 	}
 }
+
+func TestTheEnvelopeCarriesTheGivenIdSequenceAndExactTime(t *testing.T) {
+	t.Parallel()
+	exact := time.Date(2031, 2, 3, 4, 5, 6, 789012345, time.UTC)
+	got, err := newImpl().Route(known("alpha", "bravo"), "alpha", model.SendRequest{To: "bravo", Body: "x"}, "m-feedbeef", 987654, exact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := got.Envelope
+	if e.ID != "m-feedbeef" || e.Seq != 987654 || !e.Time.Equal(exact) || e.Time.Nanosecond() != 789012345 {
+		t.Fatalf("got %+v", e)
+	}
+}
+
+func TestAnEmptyOrPaddedRecipientIsUnknown(t *testing.T) {
+	t.Parallel()
+	for _, to := range []string{"", " bravo", "bravo ", "bravo\n"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: to, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownRecipient) {
+			t.Errorf("%q: %v", to, err)
+		}
+	}
+}
+
+func TestRoutingNeverReordersTheCallersAgentList(t *testing.T) {
+	t.Parallel()
+	descending := known("charlie", "bravo", "alpha")
+	before := append([]model.Agent(nil), descending...)
+	newImpl().Route(descending, "bravo", model.SendRequest{To: model.Broadcast, Body: "x"}, "m-1", 1, t0)
+	newImpl().Route(descending, "bravo", model.SendRequest{To: "alpha", Body: "x"}, "m-1", 1, t0)
+	if !reflect.DeepEqual(descending, before) {
+		t.Fatalf("the list was reordered: %+v", descending)
+	}
+}
+
+func TestABroadcastNeverNamesTheSenderAmongItsRecipients(t *testing.T) {
+	t.Parallel()
+	for _, from := range []string{"alpha", "bravo", "charlie"} {
+		got, err := send(t, from, model.SendRequest{To: model.Broadcast, Body: "x"}, "alpha", "bravo", "charlie")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range got.Recipients {
+			if r == from {
+				t.Errorf("%s is among its own recipients %v", from, got.Recipients)
+			}
+		}
+		if len(got.Recipients) != 2 {
+			t.Errorf("%s: %v", from, got.Recipients)
+		}
+	}
+}

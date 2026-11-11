@@ -220,3 +220,22 @@ func TestAMessageAddressedToTheAgentByNameIsItsEvenIfItSentIt(t *testing.T) {
 		t.Fatalf("got %v", seqs(got))
 	}
 }
+
+func TestAnAgentNamedAsAPrefixOfAnotherSeesOnlyItsOwnMail(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{
+		env(1, "bravo", "alpha", "main"),
+		env(2, "bravo", "alphabet", "main"),
+		env(3, "bravo", "alph", "main"),
+		env(4, "alpha2", model.Broadcast, "main"),
+		env(5, "alph", model.Broadcast, "main"),
+		env(6, "alpha", model.Broadcast, "main"),
+	}
+	got := newImpl().Select(l, "alpha", 0, nil, 0)
+	if want := []int64{1, 4, 5}; !reflect.DeepEqual(seqs(got), want) {
+		t.Fatalf("got %v, want %v", seqs(got), want)
+	}
+	if got := newImpl().Select(l, "alphabet", 0, nil, 0); !reflect.DeepEqual(seqs(got), []int64{2, 4, 5, 6}) {
+		t.Fatalf("alphabet got %v", seqs(got))
+	}
+}

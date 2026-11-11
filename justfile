@@ -3,7 +3,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 import "tools/mutation/mutation.just"
 
-md_paths := "docs AGENTS.md README.md"
+md_paths := "docs contracts AGENTS.md README.md"
 
 default:
     @just --list

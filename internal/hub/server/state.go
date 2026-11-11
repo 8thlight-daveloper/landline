@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -20,6 +21,9 @@ func (s *Server) loadState() {
 	}
 	raw, err := os.ReadFile(s.cfg.StatePath)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			s.cfg.Notify("the saved state could not be read, so every agent must register again: " + err.Error())
+		}
 		return
 	}
 	var snap snapshot

@@ -5,7 +5,7 @@ A driver does input and output.
 
 | Component        | Position | Kind   | Does                                                                           |
 | ---------------- | -------- | ------ | ------------------------------------------------------------------------------ |
-| `agent/registry` | 1        | core   | Registers agents, lists them, and drops the ones not heard from                |
+| `agent/registry` | 1        | core   | Registers agents and lists the ones heard from recently                        |
 | `message/router` | 1        | core   | Checks a send request, stamps the sender, and chooses the recipients           |
 | `message/inbox`  | 1        | core   | Chooses the unread messages for one agent from the log                         |
 | `log/store`      | 2        | driver | Appends envelopes to a file and reads them back                                |

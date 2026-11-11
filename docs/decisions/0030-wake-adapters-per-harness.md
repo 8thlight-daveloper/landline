@@ -11,8 +11,9 @@ note: Decided in conversation on 2026-11-10 and not yet recorded by a person.
 ## Context
 
 A message waits until its recipient next acts. An idle agent does not act, so a message to it needs a wake. Each harness
-has its own way in. Codex has `codex queue --thread <id> --message <text>`. A test showed it starts a turn in an idle
-interactive session within seconds, although the terminal did not redraw until the person typed.
+has its own way in. Codex has `codex queue --thread <id> --message <text>`. A hand test on 2026-11-10 saw it start a
+turn in an idle interactive session within seconds, although the terminal did not redraw until the person typed. The
+test is not repeated in this repository.
 
 ## Decision
 
@@ -21,13 +22,15 @@ harness and the text is the rendered message. `wake/codex` runs `codex queue`, s
 and gives up on its output pipes 2 seconds later.
 
 The hub records a message before it wakes anyone. It then wakes the recipients on its own host at the same time, so a
-broadcast costs the sender the slowest wake and not the sum. It does not wake an agent that has a long poll open, since
-that agent is already listening. For an agent on another host the hub queues a wake job, and the daemon on that host
+broadcast costs the sender the slowest wake and not the sum. It does not wake an agent that is waiting on an unfiltered
+long poll, since that agent is already listening. A long poll that names a thread does not count, because mail in
+another thread would not reach it. For an agent on another host the hub queues a wake job, and the daemon on that host
 polls for jobs, calls its own adapter, and reports the result. The hub leases a job for 60 seconds and offers it again
 if the daemon has not acknowledged it by then.
 
-The hub and the daemon print the notice of a wake, and the adapter only runs the command. The entry point holds the map
-from a wake method name to an adapter, in one place for the hub and one for the daemon.
+The hub and the daemon print the notice of a wake. The adapter runs the command, and it refuses a target that is empty
+and a text that does not start with the marker line of [0020](0020-messages-carry-no-user-authority.md). The entry point
+holds the map from a wake method name to an adapter, in one place for the hub and one for the daemon.
 
 A Claude Code session is not an adapter yet. It reads mail through the hook and a background listener, or through
 Claude's own cross-session messages on one machine.

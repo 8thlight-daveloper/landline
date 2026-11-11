@@ -37,4 +37,5 @@ The JSON shapes of the hub's API live in the domain model, because the hub and e
 
 - **An MCP server as the first interface.** Not every harness has MCP, and a server cannot wake an idle agent either.
 - **WebSocket first.** More moving parts before there is anything to send.
-- **Fork an existing relay.** The ones we read hold a mailbox and lack wake-up, a harness field, and a sender stamp.
+- **Fork an existing relay.** A fork would carry another design's transport and trust model, and this one needs the
+  sender stamp, the marker, and the wake queue from the start.

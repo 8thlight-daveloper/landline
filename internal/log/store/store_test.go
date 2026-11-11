@@ -164,3 +164,19 @@ func TestATornLastLineDoesNotCostTheNextEntry(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestTheLogUsesSnakeCaseKeys(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := Open(path)
+	e := envelope(1)
+	e.InReplyTo = "m-0"
+	s.Append(e)
+	s.Close()
+	raw, _ := os.ReadFile(path)
+	for _, key := range []string{`"seq":1`, `"id":"m"`, `"thread":"main"`, `"from":"alpha"`, `"to":"bravo"`, `"kind":"chat"`, `"body":"hi"`, `"in_reply_to":"m-0"`, `"time":`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("the log line lacks %s: %s", key, raw)
+		}
+	}
+}

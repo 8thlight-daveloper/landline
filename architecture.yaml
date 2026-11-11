@@ -1,3 +1,4 @@
+# The rules of docs/decisions/0010-one-go-program-over-http.md and 0030-wake-adapters-per-harness.md, as data.
 # The dependency rules, as data. A checker compares this with a graph that a
 # language adapter extracts from the code. Protected like a contract.
 

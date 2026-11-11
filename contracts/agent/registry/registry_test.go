@@ -289,3 +289,41 @@ func TestTheFieldLimitCountsBytesNotCharacters(t *testing.T) {
 		t.Fatalf("66 bytes in 33 characters: %v", err)
 	}
 }
+
+func TestNeitherRegisterNorOnlineReordersTheCallersList(t *testing.T) {
+	t.Parallel()
+	unsorted := []model.Agent{
+		{Name: "charlie", Harness: "h", LastSeen: t0},
+		{Name: "alpha", Harness: "h", LastSeen: t0},
+		{Name: "bravo", Harness: "h", LastSeen: t0},
+	}
+	before := append([]model.Agent(nil), unsorted...)
+	r := newImpl()
+	r.Online(unsorted, t0, time.Minute)
+	if !reflect.DeepEqual(unsorted, before) {
+		t.Fatalf("Online reordered the input: %+v", unsorted)
+	}
+	r.Register(unsorted, agent("delta"), t0)
+	if !reflect.DeepEqual(unsorted, before) {
+		t.Fatalf("Register reordered the input: %+v", unsorted)
+	}
+}
+
+func TestFindMatchesTheNameExactly(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	agents, _ := r.Register(nil, agent("alpha"), t0)
+	for _, name := range []string{"ALPHA", "Alpha", " alpha", "alpha "} {
+		if _, ok := r.Find(agents, name); ok {
+			t.Errorf("found %q", name)
+		}
+	}
+}
+
+func TestAnAgentHeardFromAfterNowCountsAsOnline(t *testing.T) {
+	t.Parallel()
+	agents := []model.Agent{{Name: "alpha", Harness: "h", LastSeen: t0.Add(time.Hour)}}
+	if got := names(newImpl().Online(agents, t0, time.Minute)); !reflect.DeepEqual(got, []string{"alpha"}) {
+		t.Fatalf("got %v", got)
+	}
+}
