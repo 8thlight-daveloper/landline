@@ -128,3 +128,55 @@ func TestEveryCallIsDeterministic(t *testing.T) {
 		t.Fatalf("%+v differs from %+v", a, b)
 	}
 }
+
+func TestANameThatSortsBeforeAllIsStillAValidName(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"aaa", "a", "alarm", "alk"} {
+		if _, err := newImpl().Register(nil, agent(name), t0); err != nil {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+}
+
+func TestOnlineSortsItsResultWhateverTheInputOrder(t *testing.T) {
+	t.Parallel()
+	unsorted := []model.Agent{
+		{Name: "charlie", Harness: "h", LastSeen: t0},
+		{Name: "alpha", Harness: "h", LastSeen: t0},
+		{Name: "bravo", Harness: "h", LastSeen: t0},
+	}
+	if got := names(newImpl().Online(unsorted, t0, time.Minute)); !reflect.DeepEqual(got, []string{"alpha", "bravo", "charlie"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestFindPicksTheRightAgentAmongSeveral(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	var agents []model.Agent
+	for _, name := range []string{"alpha", "bravo", "charlie"} {
+		agents, _ = r.Register(agents, agent(name), t0)
+	}
+	for _, name := range []string{"alpha", "bravo", "charlie"} {
+		if got, ok := r.Find(agents, name); !ok || got.Name != name {
+			t.Errorf("%s: got %+v %v", name, got, ok)
+		}
+	}
+	for _, name := range []string{"aaa", "zulu", "bra", "bravox"} {
+		if _, ok := r.Find(agents, name); ok {
+			t.Errorf("found %q", name)
+		}
+	}
+}
+
+func TestOnlineKeepsEveryFieldOfTheEntries(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	entry := agent("alpha")
+	entry.WakeKind, entry.WakeTarget = "codex", "thread-1"
+	agents, _ := r.Register(nil, entry, t0)
+	got := r.Online(agents, t0, time.Minute)
+	if len(got) != 1 || got[0].WakeKind != "codex" || got[0].WakeTarget != "thread-1" || got[0].Host != "mac" {
+		t.Fatalf("got %+v", got)
+	}
+}

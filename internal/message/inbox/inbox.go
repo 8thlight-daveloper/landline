@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"cmp"
 	"slices"
 
 	"github.com/8thlight-daveloper/landline/internal/model"
@@ -17,15 +18,7 @@ func (Inbox) Select(log []model.Envelope, agent string, cursor int64, threads []
 			matches = append(matches, each)
 		}
 	}
-	slices.SortFunc(matches, func(a, b model.Envelope) int {
-		switch {
-		case a.Seq < b.Seq:
-			return -1
-		case a.Seq > b.Seq:
-			return 1
-		}
-		return 0
-	})
+	slices.SortFunc(matches, func(a, b model.Envelope) int { return cmp.Compare(a.Seq, b.Seq) })
 	remaining := 0
 	if limit > 0 && len(matches) > limit {
 		remaining = len(matches) - limit

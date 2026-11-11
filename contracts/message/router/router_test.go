@@ -117,3 +117,33 @@ func TestRoutingLeavesItsInputsUnchangedAndIsDeterministic(t *testing.T) {
 		t.Fatalf("inputs %+v, results %+v and %+v", agents, a, b)
 	}
 }
+
+func TestDirectionDoesNotMatterForADirectMessage(t *testing.T) {
+	t.Parallel()
+	for _, pair := range [][2]string{{"alpha", "bravo"}, {"bravo", "alpha"}, {"aaa", "zulu"}, {"zulu", "aaa"}} {
+		got, err := send(t, pair[0], model.SendRequest{To: pair[1], Body: "x"}, "aaa", "alpha", "bravo", "zulu")
+		if err != nil || !reflect.DeepEqual(got.Recipients, []string{pair[1]}) {
+			t.Errorf("%v: got %+v, %v", pair, got, err)
+		}
+	}
+}
+
+func TestANameThatSortsBeforeAllIsADirectRecipientNotABroadcast(t *testing.T) {
+	t.Parallel()
+	got, err := send(t, "bravo", model.SendRequest{To: "aaa", Body: "x"}, "aaa", "alpha", "bravo")
+	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"aaa"}) || got.Envelope.To != "aaa" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestAnUnknownSenderOrRecipientIsRefusedWhateverItsSortOrder(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"aaa", "alpha2", "zzz", "bra"} {
+		if _, err := send(t, name, model.SendRequest{To: "bravo", Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownSender) {
+			t.Errorf("sender %q: %v", name, err)
+		}
+		if _, err := send(t, "alpha", model.SendRequest{To: name, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownRecipient) {
+			t.Errorf("recipient %q: %v", name, err)
+		}
+	}
+}
