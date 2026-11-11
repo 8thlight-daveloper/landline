@@ -672,3 +672,57 @@ func TestTheToolListAndTheInstructionsMentionAttach(t *testing.T) {
 		t.Fatalf("tool listed %v, instructions: %s", found, text)
 	}
 }
+
+func TestTheClientNameAndVersionFromInitializeAreReported(t *testing.T) {
+	t.Parallel()
+	var name, version string
+	var mu sync.Mutex
+	out := &syncBuf{}
+	reader, writer := io.Pipe()
+	done := make(chan struct{})
+	go func() {
+		ServeWith(reader, out, &fakeHub{}, Options{OnClient: func(n, v string) { mu.Lock(); name, version = n, v; mu.Unlock() }})
+		close(done)
+	}()
+	writer.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"claude-code","version":"2.1.296"}}}` + "\n"))
+	time.Sleep(100 * time.Millisecond)
+	writer.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}` + "\n"))
+	time.Sleep(100 * time.Millisecond)
+	writer.Close()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if name != "claude-code" || version != "2.1.296" {
+		t.Fatalf("%q %q", name, version)
+	}
+}
+
+func TestOnReadyRunsOnceAfterTheHandshakeInEveryMode(t *testing.T) {
+	t.Parallel()
+	for _, channel := range []bool{false, true} {
+		var calls int
+		var mu sync.Mutex
+		out := &syncBuf{}
+		reader, writer := io.Pipe()
+		done := make(chan struct{})
+		go func() {
+			ServeWith(reader, out, &pushHub{}, Options{Channel: channel, PollWait: 1, ReadyDelay: time.Millisecond, OnReady: func() { mu.Lock(); calls++; mu.Unlock() }})
+			close(done)
+		}()
+		writer.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"))
+		time.Sleep(100 * time.Millisecond)
+		mu.Lock()
+		early := calls
+		mu.Unlock()
+		writer.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"))
+		writer.Write([]byte(`{"jsonrpc":"2.0","id":3,"method":"tools/list"}` + "\n"))
+		time.Sleep(300 * time.Millisecond)
+		writer.Close()
+		<-done
+		mu.Lock()
+		if early != 0 || calls != 1 {
+			t.Errorf("channel %v: before tools/list %d, at the end %d", channel, early, calls)
+		}
+		mu.Unlock()
+	}
+}

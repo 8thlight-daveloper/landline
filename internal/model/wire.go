@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type RegisterRequest struct {
 	Name           string `json:"name"`
@@ -33,6 +36,7 @@ type AttachRequest struct {
 }
 
 type AttachResponse struct {
+	Name      string   `json:"name"`
 	Updated   []string `json:"updated"`
 	Challenge bool     `json:"challenge"`
 	Attached  bool     `json:"attached"`
@@ -108,4 +112,17 @@ type WakeJob struct {
 type WakeAck struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+}
+
+func (a AgentInfo) Attributes() string {
+	parts := []string{}
+	for _, each := range []struct{ name, value string }{
+		{"label", a.Label}, {"folder", a.Folder}, {"branch", a.Branch}, {"worktree", a.Worktree},
+		{"model", a.Model}, {"effort", a.Effort}, {"version", a.HarnessVersion},
+	} {
+		if each.value != "" {
+			parts = append(parts, each.name+": "+oneLine(each.value))
+		}
+	}
+	return strings.Join(parts, "  ")
 }

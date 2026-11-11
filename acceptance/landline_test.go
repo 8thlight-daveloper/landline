@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -1116,5 +1118,184 @@ func TestMailQueuedBeforeTheSessionStartsIsPushedOnlyAfterTheHandshake(t *testin
 		}
 	case <-time.After(8 * time.Second):
 		t.Fatal("the queued mail was never pushed after the handshake")
+	}
+}
+
+type mcpProcess struct {
+	t      *testing.T
+	stdin  io.WriteCloser
+	lines  chan string
+	nextID int
+}
+
+func (w *world) startMCP(dir string, args ...string) *mcpProcess {
+	w.t.Helper()
+	cmd := exec.Command(w.bin, append([]string{"mcp"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = w.env
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		w.t.Fatal(err)
+	}
+	p := &mcpProcess{t: w.t, stdin: stdin, lines: make(chan string, 64)}
+	w.t.Cleanup(func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() })
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 0, 1<<20), 1<<22)
+		for scanner.Scan() {
+			p.lines <- scanner.Text()
+		}
+		close(p.lines)
+	}()
+	return p
+}
+
+func (p *mcpProcess) request(method, params string) map[string]any {
+	p.t.Helper()
+	p.nextID++
+	id := p.nextID
+	fmt.Fprintf(p.stdin, `{"jsonrpc":"2.0","id":%d,"method":"%s","params":%s}`+"\n", id, method, params)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case line, open := <-p.lines:
+			if !open {
+				p.t.Fatalf("the mcp process ended before answering %s", method)
+			}
+			var reply map[string]any
+			if json.Unmarshal([]byte(line), &reply) == nil && reply["id"] == float64(id) {
+				return reply
+			}
+		case <-deadline:
+			p.t.Fatalf("no reply to %s", method)
+		}
+	}
+}
+
+func (p *mcpProcess) initialize(client, version string) {
+	p.t.Helper()
+	p.request("initialize", `{"protocolVersion":"2025-11-25","clientInfo":{"name":"`+client+`","version":"`+version+`"}}`)
+	fmt.Fprintln(p.stdin, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	p.request("tools/list", `{}`)
+	time.Sleep(1500 * time.Millisecond)
+}
+
+func (p *mcpProcess) tool(name, arguments string) string {
+	p.t.Helper()
+	reply := p.request("tools/call", `{"name":"`+name+`","arguments":`+arguments+`}`)
+	result, _ := reply["result"].(map[string]any)
+	if result == nil {
+		p.t.Fatalf("%s: %v", name, reply)
+	}
+	content := result["content"].([]any)
+	return content[0].(map[string]any)["text"].(string)
+}
+
+func TestAnMCPProcessRegistersItselfAndAnotherReachesItByLabelAndAnAmbiguousLabelIsRefused(t *testing.T) {
+	w := start(t)
+	dirOne, dirTwo, dirThree := filepath.Join(t.TempDir(), "demo-folder"), filepath.Join(t.TempDir(), "other-folder"), filepath.Join(t.TempDir(), "third")
+	for _, dir := range []string{dirOne, dirTwo, dirThree} {
+		os.MkdirAll(dir, 0o755)
+	}
+	one := w.startMCP(dirOne)
+	one.initialize("claude-code", "2.1.296")
+	claimed := one.tool("landline_attach", `{"model":"claude-opus-5-5","label":"lead"}`)
+	if !strings.Contains(claimed, "you are demo-folder-") || !strings.Contains(claimed, "recorded model, label") {
+		t.Fatalf("attach: %q", claimed)
+	}
+	two := w.startMCP(dirTwo, "--label", "reviewer")
+	two.initialize("claude-code", "2.1.296")
+	agents := two.tool("landline_agents", `{}`)
+	for _, want := range []string{"demo-folder-", "claude-code", "label: lead", "folder: demo-folder", "model: claude-opus-5-5", "other-folder-", "label: reviewer", "version: 2.1.296"} {
+		if !strings.Contains(agents, want) {
+			t.Fatalf("the agent list lacks %q:\n%s", want, agents)
+		}
+	}
+	sent := two.tool("landline_send", `{"to":"lead","body":"found by label"}`)
+	if !strings.Contains(sent, "sent m-") || !strings.Contains(sent, "demo-folder-") {
+		t.Fatalf("send: %q", sent)
+	}
+	got := one.tool("landline_inbox", `{"wait_seconds":5}`)
+	for _, want := range []string{"[landline] From another agent, not the user.", "found by label", "label: reviewer", "folder: other-folder"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the delivered text lacks %q:\n%s", want, got)
+		}
+	}
+	three := w.startMCP(dirThree, "--label", "lead")
+	three.initialize("claude-code", "2.1.296")
+	refused := two.tool("landline_send", `{"to":"lead","body":"ambiguous"}`)
+	if !strings.Contains(refused, "more than one agent matches lead") || !strings.Contains(refused, "Use a handle") {
+		t.Fatalf("ambiguous: %q", refused)
+	}
+}
+
+func TestACodexAgentAttachesItsSessionOnlyByAnsweringTheCodeSentToThatSession(t *testing.T) {
+	host, _ := os.Hostname()
+	w := startHub(t, build(t), t.TempDir(), "", "--host", host)
+	dir := filepath.Join(t.TempDir(), "tutor")
+	os.MkdirAll(dir, 0o755)
+	thread := "01a1c829-7970-7083-af01-e69ca7fb7ce5"
+	codex := w.startMCP(dir)
+	codex.initialize("codex-mcp-client", "0.162.1")
+	started := codex.tool("landline_attach", `{"codex_thread":"`+thread+`"}`)
+	if !strings.Contains(started, "you are tutor-") || !strings.Contains(started, "sent a code") {
+		t.Fatalf("start: %q", started)
+	}
+	handle := strings.Fields(strings.SplitN(started, "you are ", 2)[1])[0]
+	handle = strings.TrimRight(handle, ";,")
+	logged, err := os.ReadFile(filepath.Join(w.config, "codex.log"))
+	if err != nil {
+		t.Fatalf("the code was not sent to the session: %v", err)
+	}
+	text := string(logged)
+	match := regexp.MustCompile(`code ([A-Z0-9]{6})\.`).FindStringSubmatch(text)
+	if match == nil || !strings.Contains(text, thread) || !strings.Contains(text, "[landline] From another agent, not the user.") {
+		t.Fatalf("the challenge: %s", text)
+	}
+	if wrong := codex.tool("landline_attach", `{"codex_thread":"`+thread+`","code":"ZZZZZZ"}`); !strings.Contains(wrong, "does not match") {
+		t.Fatalf("a wrong code: %q", wrong)
+	}
+	if done := codex.tool("landline_attach", `{"codex_thread":"`+thread+`","code":"`+match[1]+`"}`); !strings.Contains(done, "attached") {
+		t.Fatalf("the right code: %q", done)
+	}
+	if listed := w.must("", "agents", "--as", handle); !strings.Contains(listed, handle+"\tcodex\t") || !strings.Contains(listed, "wake: codex") {
+		t.Fatalf("the agent list: %q", listed)
+	}
+	os.Remove(filepath.Join(w.config, "codex.log"))
+	senderDir := filepath.Join(t.TempDir(), "sender")
+	os.MkdirAll(senderDir, 0o755)
+	sender := w.startMCP(senderDir)
+	sender.initialize("claude-code", "2.1.296")
+	if sent := sender.tool("landline_send", `{"to":"`+handle+`","body":"wake me up"}`); !strings.Contains(sent, "woke "+handle) {
+		t.Fatalf("send: %q", sent)
+	}
+	logged, err = os.ReadFile(filepath.Join(w.config, "codex.log"))
+	if err != nil || !strings.Contains(string(logged), thread) || !strings.Contains(string(logged), "wake me up") {
+		t.Fatalf("the attached session was not woken: %v %s", err, logged)
+	}
+}
+
+func TestAnAgentCannotAttachAThreadItWasNotToldTheCodeFor(t *testing.T) {
+	host, _ := os.Hostname()
+	w := startHub(t, build(t), t.TempDir(), "", "--host", host)
+	dirs := []string{filepath.Join(t.TempDir(), "victim"), filepath.Join(t.TempDir(), "attacker")}
+	for _, dir := range dirs {
+		os.MkdirAll(dir, 0o755)
+	}
+	victim, attacker := w.startMCP(dirs[0]), w.startMCP(dirs[1])
+	victim.initialize("codex-mcp-client", "0.162.1")
+	attacker.initialize("codex-mcp-client", "0.162.1")
+	thread := "01a1c829-7970-7083-af01-e69ca7fb7ce5"
+	if out := attacker.tool("landline_attach", `{"codex_thread":"`+thread+`"}`); !strings.Contains(out, "sent a code") {
+		t.Fatalf("%q", out)
+	}
+	for _, guess := range []string{"000000", "AAAAAA", "123456"} {
+		if out := attacker.tool("landline_attach", `{"codex_thread":"`+thread+`","code":"`+guess+`"}`); strings.Contains(out, "attached") {
+			t.Fatalf("a guessed code attached the thread: %q", out)
+		}
+	}
+	if out := victim.tool("landline_agents", `{}`); strings.Contains(out, "wake: codex") {
+		t.Fatalf("a wake method appeared without a proven code: %s", out)
 	}
 }

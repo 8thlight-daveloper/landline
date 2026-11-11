@@ -90,6 +90,8 @@ type Options struct {
 	Sleep      func(time.Duration)
 	Notify     func(string)
 	ReadyDelay time.Duration
+	OnClient   func(name, version string)
+	OnReady    func()
 }
 
 type lockedWriter struct {
@@ -130,23 +132,32 @@ func ServeWith(in io.Reader, out io.Writer, hub Hub, options Options) error {
 			readyOnce.Do(func() { time.AfterFunc(delay, func() { close(ready) }) })
 		}
 	}
-	if options.Channel {
-		done := make(chan struct{})
-		defer close(done)
-		go func() {
-			select {
-			case <-ready:
-				pushMail(out, hub, options, done)
-			case <-done:
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ready:
+			if options.OnReady != nil {
+				options.OnReady()
 			}
-		}()
-	}
+			if options.Channel {
+				pushMail(out, hub, options, done)
+			}
+		case <-done:
+		}
+	}()
 	reader := bufio.NewReader(in)
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		line = bytes.TrimSpace(line)
 		if len(line) > 0 {
-			markSeen(methodOf(line))
+			method := methodOf(line)
+			if method == "initialize" && options.OnClient != nil {
+				if name, version := clientOf(line); name != "" {
+					options.OnClient(name, version)
+				}
+			}
+			markSeen(method)
 			if reply := handleLine(line, hub, options.Channel); reply != nil {
 				if err := write(out, reply); err != nil {
 					return err
@@ -346,7 +357,11 @@ func runAgents(hub Hub) (any, *rpcError) {
 		if !agent.Online {
 			wake += ", idle"
 		}
-		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\twake: %s", agent.Name, agent.Harness, agent.Host, wake))
+		line := fmt.Sprintf("%s\t%s\t%s\twake: %s", agent.Name, agent.Harness, agent.Host, wake)
+		if attributes := agent.Attributes(); attributes != "" {
+			line += "\t" + attributes
+		}
+		lines = append(lines, line)
 	}
 	return textResult(strings.Join(lines, "\n"), false), nil
 }
@@ -565,6 +580,9 @@ func runAttach(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
 		return textResult(err.Error(), true), nil
 	}
 	parts := []string{}
+	if response.Name != "" {
+		parts = append(parts, "you are "+response.Name)
+	}
 	if len(response.Updated) > 0 {
 		parts = append(parts, "recorded "+strings.Join(response.Updated, ", "))
 	}
@@ -578,4 +596,19 @@ func runAttach(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
 		parts = append(parts, "nothing changed")
 	}
 	return textResult(strings.Join(parts, "; "), false), nil
+}
+
+func clientOf(line []byte) (string, string) {
+	var message struct {
+		Params struct {
+			ClientInfo struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"clientInfo"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(line, &message) != nil {
+		return "", ""
+	}
+	return message.Params.ClientInfo.Name, message.Params.ClientInfo.Version
 }

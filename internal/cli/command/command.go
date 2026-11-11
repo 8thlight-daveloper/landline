@@ -185,7 +185,11 @@ func agents(args []string, env Env) error {
 		if !a.Online {
 			wake += ", idle"
 		}
-		fmt.Fprintf(env.Stdout, "%s\t%s\t%s\twake: %s\n", printable(a.Name), printable(a.Harness), printable(a.Host), wake)
+		line := fmt.Sprintf("%s\t%s\t%s\twake: %s", printable(a.Name), printable(a.Harness), printable(a.Host), wake)
+		if attributes := a.Attributes(); attributes != "" {
+			line += "\t" + printable(attributes)
+		}
+		fmt.Fprintln(env.Stdout, line)
 	}
 	return nil
 }

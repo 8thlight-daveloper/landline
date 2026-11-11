@@ -13,6 +13,18 @@ import (
 	"github.com/8thlight-daveloper/landline/internal/model"
 )
 
+type StatusError struct {
+	Status  int
+	Message string
+}
+
+func (e *StatusError) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("the hub answered %d", e.Status)
+	}
+	return fmt.Sprintf("%s (%d)", e.Message, e.Status)
+}
+
 type Client struct {
 	URL   string
 	Token string
@@ -49,9 +61,9 @@ func (c *Client) do(method, path string, in, out any) error {
 	if resp.StatusCode != nethttp.StatusOK {
 		var e model.ErrorResponse
 		if json.Unmarshal(data, &e) == nil && e.Error != "" {
-			return fmt.Errorf("%s (%d)", e.Error, resp.StatusCode)
+			return &StatusError{Status: resp.StatusCode, Message: e.Error}
 		}
-		return fmt.Errorf("the hub answered %d", resp.StatusCode)
+		return &StatusError{Status: resp.StatusCode}
 	}
 	if out == nil {
 		return nil

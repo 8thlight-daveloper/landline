@@ -61,7 +61,7 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 			updated = append(updated, claim.name)
 		}
 	}
-	response := model.AttachResponse{Updated: updated}
+	response := model.AttachResponse{Name: name, Updated: updated}
 	var challengeText, challengeThread string
 	switch {
 	case body.CodexThread != "" && body.Code == "":

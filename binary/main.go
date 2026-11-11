@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -166,27 +167,59 @@ func runDaemon(args []string, host string) int {
 	return 0
 }
 
+func gitRunner(dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
+	return strings.TrimSpace(string(out)), err
+}
+
 func runMCP(args []string, env command.Env) int {
-	channel := false
-	filtered := args[:0:0]
-	for _, each := range args {
-		if each == "--channel" {
+	channel, as := false, ""
+	overrides := command.Identity{}
+	targets := map[string]*string{
+		"--as": &as, "--label": &overrides.Label, "--model": &overrides.Model, "--effort": &overrides.Effort,
+		"--folder": &overrides.Folder, "--branch": &overrides.Branch,
+	}
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--channel" {
 			channel = true
 			continue
 		}
-		filtered = append(filtered, each)
+		target, known := targets[args[i]]
+		if !known || i+1 >= len(args) {
+			fmt.Fprintf(os.Stderr, "landline mcp: unknown or incomplete flag %s\n", args[i])
+			return 2
+		}
+		*target = args[i+1]
+		i++
 	}
-	values, err := flagValues(filtered, "--as")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "landline mcp:", err)
-		return 2
+	options := mcp.Options{Channel: channel, Notify: notifyToStderr}
+	if as == "" {
+		as = os.Getenv("LANDLINE_AS")
 	}
-	c, err := command.Connect(or(values["--as"], os.Getenv("LANDLINE_AS")), env)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "landline mcp:", err)
-		return 1
+	if as != "" {
+		c, err := command.Connect(as, env)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "landline mcp:", err)
+			return 1
+		}
+		if err := mcp.ServeWith(os.Stdin, os.Stdout, c, options); err != nil {
+			fmt.Fprintln(os.Stderr, "landline mcp:", err)
+			return 1
+		}
+		return 0
 	}
-	if err := mcp.ServeWith(os.Stdin, os.Stdout, c, mcp.Options{Channel: channel, Notify: notifyToStderr}); err != nil {
+	dir, _ := os.Getwd()
+	session := command.NewSession(env, func() command.Identity { return command.DetectIdentity(env, dir, gitRunner) }, overrides)
+	defer session.Close()
+	options.OnClient = session.SetClient
+	options.OnReady = func() {
+		if _, err := session.Agents(); err != nil {
+			notifyToStderr("landline mcp: " + err.Error())
+		}
+	}
+	if err := mcp.ServeWith(os.Stdin, os.Stdout, session, options); err != nil {
 		fmt.Fprintln(os.Stderr, "landline mcp:", err)
 		return 1
 	}
