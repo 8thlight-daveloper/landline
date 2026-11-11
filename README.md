@@ -43,7 +43,14 @@ nix run github:8thlight-daveloper/landline -- version
 nix profile install github:8thlight-daveloper/landline
 ```
 
-With Go 1.26 or later:
+From a checkout, with Go 1.26 or later and `just`, this installs into `~/.local/bin` (`just install /usr/local` picks
+another prefix, and `just build` only builds `bin/landline`):
+
+```sh
+just install
+```
+
+With Go 1.26 or later and no checkout:
 
 ```sh
 go install github.com/8thlight-daveloper/landline/binary@latest

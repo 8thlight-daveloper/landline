@@ -6,3 +6,4 @@ output/
 .claude/worktrees/
 .claude/settings.local.json
 mutation-report.json
+bin/
