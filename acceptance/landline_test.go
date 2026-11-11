@@ -879,7 +879,7 @@ func TestTheMCPServerListsItsThreeToolsAndShowsTheAgents(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("got %d responses", len(lines))
 	}
-	for _, name := range []string{"landline_agents", "landline_send", "landline_inbox"} {
+	for _, name := range []string{"landline_agents", "landline_send", "landline_inbox", "landline_attach"} {
 		if !strings.Contains(lines[1], name) {
 			t.Errorf("tools/list lacks %s: %s", name, lines[1])
 		}

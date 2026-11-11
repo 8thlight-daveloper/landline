@@ -15,15 +15,18 @@ import (
 )
 
 type fakeHub struct {
-	sent      []model.SendBody
-	waits     []int
-	threads   []string
-	afters    []int64
-	queued    []string
-	sendErr   error
-	inboxErr  error
-	agentsErr error
-	page      model.InboxResponse
+	sent           []model.SendBody
+	waits          []int
+	threads        []string
+	afters         []int64
+	attached       []model.AttachRequest
+	attachResponse model.AttachResponse
+	attachErr      error
+	queued         []string
+	sendErr        error
+	inboxErr       error
+	agentsErr      error
+	page           model.InboxResponse
 }
 
 func (f *fakeHub) Send(body model.SendBody) (model.SendResponse, error) {
@@ -36,6 +39,11 @@ func (f *fakeHub) Inbox(waitSeconds int, threads string, after int64) (model.Inb
 	f.threads = append(f.threads, threads)
 	f.afters = append(f.afters, after)
 	return f.page, f.inboxErr
+}
+
+func (f *fakeHub) Attach(req model.AttachRequest) (model.AttachResponse, error) {
+	f.attached = append(f.attached, req)
+	return f.attachResponse, f.attachErr
 }
 
 func (f *fakeHub) Agents() ([]model.AgentInfo, error) {
@@ -160,10 +168,10 @@ func TestToolsListNamesToolsAndRequiredFields(t *testing.T) {
 		}
 		required[tool["name"].(string)], _ = inputSchema["required"].([]any)
 	}
-	if len(required) != 3 {
+	if len(required) != 4 {
 		t.Fatalf("tools %v", required)
 	}
-	if len(required["landline_agents"]) != 0 || len(required["landline_inbox"]) != 0 {
+	if len(required["landline_agents"]) != 0 || len(required["landline_inbox"]) != 0 || len(required["landline_attach"]) != 0 {
 		t.Fatalf("required %v", required)
 	}
 	if got := required["landline_send"]; len(got) != 2 || got[0] != "to" || got[1] != "body" {
@@ -609,5 +617,58 @@ func TestNothingIsPushedAfterInitializedAloneOrBeforeTheGracePeriodEnds(t *testi
 	defer hub.mu.Unlock()
 	if callsAfterInitializedOnly != 0 || callsInsideGrace != 0 || hub.calls == 0 {
 		t.Fatalf("calls: after initialized only %d, inside the grace period %d, at the end %d", callsAfterInitializedOnly, callsInsideGrace, hub.calls)
+	}
+}
+
+func TestAttachPassesTheClaimsAndSaysWhatHappened(t *testing.T) {
+	t.Parallel()
+	hub := &fakeHub{attachResponse: model.AttachResponse{Updated: []string{"model", "label"}}}
+	text, isError := resultText(t, one(t, hub, call("landline_attach", `{"model":"claude-opus-5-5","label":"lead"}`)))
+	if isError || text != "recorded model, label" || hub.attached[0].Model != "claude-opus-5-5" || hub.attached[0].Label != "lead" {
+		t.Fatalf("%q %+v", text, hub.attached)
+	}
+}
+
+func TestAttachExplainsTheCodexChallengeAndTheFinish(t *testing.T) {
+	t.Parallel()
+	thread := "01a1c829-7970-7083-af01-e69ca7fb7ce5"
+	started, _ := resultText(t, one(t, &fakeHub{attachResponse: model.AttachResponse{Challenge: true}}, call("landline_attach", `{"codex_thread":"`+thread+`"}`)))
+	if !strings.Contains(started, "sent a code") || !strings.Contains(started, "again") {
+		t.Fatalf("%q", started)
+	}
+	hub := &fakeHub{attachResponse: model.AttachResponse{Attached: true}}
+	done, _ := resultText(t, one(t, hub, call("landline_attach", `{"codex_thread":"`+thread+`","code":"ABC123"}`)))
+	if !strings.Contains(done, "attached") || hub.attached[0].Code != "ABC123" || hub.attached[0].CodexThread != thread {
+		t.Fatalf("%q %+v", done, hub.attached)
+	}
+}
+
+func TestAttachWithNothingToSayIsRefusedAndAHubErrorIsShown(t *testing.T) {
+	t.Parallel()
+	if r := one(t, &fakeHub{}, call("landline_attach", `{}`)); r.Error == nil || r.Error.Code != -32602 {
+		t.Fatalf("%+v", r)
+	}
+	text, isError := resultText(t, one(t, &fakeHub{attachErr: errors.New("that code does not match")}, call("landline_attach", `{"label":"x"}`)))
+	if !isError || !strings.Contains(text, "does not match") {
+		t.Fatalf("%q %v", text, isError)
+	}
+	if r := one(t, &fakeHub{}, call("landline_attach", `{"model":5}`)); r.Error == nil {
+		t.Fatalf("a non-string model was accepted: %+v", r)
+	}
+}
+
+func TestTheToolListAndTheInstructionsMentionAttach(t *testing.T) {
+	t.Parallel()
+	list := one(t, &fakeHub{}, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	found := false
+	for _, tool := range list.Result["tools"].([]any) {
+		if tool.(map[string]any)["name"] == "landline_attach" {
+			found = true
+		}
+	}
+	init := one(t, &fakeHub{}, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	text := init.Result["instructions"].(string)
+	if !found || !strings.Contains(text, "landline_attach") || !strings.Contains(text, "CODEX_THREAD_ID") {
+		t.Fatalf("tool listed %v, instructions: %s", found, text)
 	}
 }

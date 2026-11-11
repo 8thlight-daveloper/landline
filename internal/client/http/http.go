@@ -64,6 +64,11 @@ func (c *Client) Register(req model.RegisterRequest) (model.RegisterResponse, er
 	return out, c.do("POST", "/v1/register", req, &out)
 }
 
+func (c *Client) Attach(req model.AttachRequest) (model.AttachResponse, error) {
+	var out model.AttachResponse
+	return out, c.do("POST", "/v1/attach", req, &out)
+}
+
 func (c *Client) Send(body model.SendBody) (model.SendResponse, error) {
 	var out model.SendResponse
 	return out, c.do("POST", "/v1/send", body, &out)
