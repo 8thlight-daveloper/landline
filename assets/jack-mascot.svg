@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 11 11" width="180" height="180" role="img" aria-label="Jack, the Landline mascot: a telephone jack with eyes">
   <title>Jack</title>
-  <path fill="#0071CE" d="M3 0H6V1H8V2H9V8.6Q9 9 8.6 9H7V7H6V9H5V7H4V9H3V7H2V9H.4Q0 9 0 8.6V2H1V1H3Z"/>
+  <path fill="#0071CE" d="M3 0H6V1H8V2H9V9H7V7H6V9H5V7H4V9H3V7H2V9H0V2H1V1H3Z"/>
   <path fill="#FFFFFF" d="M2 3H4V5H2ZM5 3H7V5H5Z"/>
   <path fill="#141414" d="M3 4H4V5H3ZM6 4H7V5H6Z"/>
 </svg>
