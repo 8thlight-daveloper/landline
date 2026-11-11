@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,5 +116,51 @@ func TestAnEnvelopeWhoseEncodedLineIsHugeStillLoads(t *testing.T) {
 	defer again.Close()
 	if got := again.All(); len(got) != 2 || got[1].Seq != 2 || len(got[0].Body) != model.MaxBodyBytes {
 		t.Fatalf("got %d envelopes", len(got))
+	}
+}
+
+func TestALogThatEndsWithoutANewlineDoesNotGlueTheNextEntryToIt(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	first, _ := Open(path)
+	first.Append(envelope(1))
+	first.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	line, _ := json.Marshal(envelope(2))
+	f.Write(line)
+	f.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(envelope(3)); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	again, _ := Open(path)
+	defer again.Close()
+	got := again.All()
+	if len(got) != 3 || got[0].Seq != 1 || got[1].Seq != 2 || got[2].Seq != 3 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestATornLastLineDoesNotCostTheNextEntry(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	first, _ := Open(path)
+	first.Append(envelope(1))
+	first.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(`{"seq":2,"bo`)
+	f.Close()
+	s, _ := Open(path)
+	s.Append(envelope(3))
+	s.Close()
+	again, _ := Open(path)
+	defer again.Close()
+	got := again.All()
+	if len(got) != 2 || got[0].Seq != 1 || got[1].Seq != 3 {
+		t.Fatalf("got %+v", got)
 	}
 }

@@ -212,7 +212,8 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": schema{
 					"wait_seconds": schema{"type": "integer", "minimum": 0, "maximum": maxWaitSeconds, "description": "Seconds to wait for mail when the inbox is empty."},
-					"thread":       schema{"type": "string", "description": "Comma separated thread names."},
+					"thread":       schema{"type": "string", "description": "Comma separated thread names. A read that names a thread does not mark mail read, so pass after with the position the last read gave you."},
+					"after":        schema{"type": "integer", "minimum": 0, "description": "With thread, only messages after this position."},
 				},
 			},
 		},
@@ -302,7 +303,11 @@ func runInbox(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
 	if rpcFailure != nil {
 		return nil, rpcFailure
 	}
-	page, err := hub.Inbox(wait, threads, 0)
+	after, rpcFailure := afterArgument(arguments)
+	if rpcFailure != nil {
+		return nil, rpcFailure
+	}
+	page, err := hub.Inbox(wait, threads, after)
 	if err != nil {
 		return textResult(err.Error(), true), nil
 	}
@@ -316,6 +321,9 @@ func runInbox(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
 	text := strings.Join(texts, "\n\n")
 	if page.Remaining > 0 {
 		text += fmt.Sprintf("\n\n%d more unread. Call landline_inbox again.", page.Remaining)
+	}
+	if threads != "" {
+		text += fmt.Sprintf("\n\nTo read on from here in these threads, call landline_inbox with the same thread and after=%d.", page.Next)
 	}
 	return textResult(text, false), nil
 }
@@ -344,6 +352,18 @@ func stringArgument(arguments map[string]json.RawMessage, name string, required 
 		return "", invalidParams("missing required argument: " + name)
 	}
 	return value, nil
+}
+
+func afterArgument(arguments map[string]json.RawMessage) (int64, *rpcError) {
+	raw, found := present(arguments, "after")
+	if !found {
+		return 0, nil
+	}
+	var value float64
+	if err := json.Unmarshal(raw, &value); err != nil || value != float64(int64(value)) || value < 0 {
+		return 0, invalidParams("after must be an integer of 0 or more")
+	}
+	return int64(value), nil
 }
 
 func waitArgument(arguments map[string]json.RawMessage) (int, *rpcError) {

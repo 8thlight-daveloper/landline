@@ -82,6 +82,14 @@ func (c *Client) Inbox(waitSeconds int, threads string, after int64) (model.Inbo
 	return out, c.do("GET", "/v1/inbox?"+q.Encode(), nil, &out)
 }
 
+func (c *Client) Head() (int64, error) {
+	var out model.InboxResponse
+	if err := c.do("GET", "/v1/inbox?peek=1", nil, &out); err != nil {
+		return 0, err
+	}
+	return out.Head, nil
+}
+
 func (c *Client) Unread() (int, error) {
 	var out model.InboxResponse
 	if err := c.do("GET", "/v1/inbox?peek=1", nil, &out); err != nil {

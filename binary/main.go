@@ -117,9 +117,14 @@ func runHub(args []string, home, host string) int {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "landline hub listening on %s, host %q, log %s\n", addr, host, logPath)
-	srv := &http.Server{Addr: addr, Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
-	if err := srv.ListenAndServe(); err != nil {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline hub:", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "landline hub listening on %s, host %q, log %s\n", listener.Addr(), host, logPath)
+	srv := &http.Server{Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
+	if err := srv.Serve(listener); err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
 		return 1
 	}

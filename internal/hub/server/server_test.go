@@ -842,3 +842,38 @@ func TestSendNamesTheAgentsWhoseWakeIsWaitingForAHostDaemon(t *testing.T) {
 		t.Fatalf("%+v", out)
 	}
 }
+
+func TestAnAgentWhosePollHasFinishedIsWokenByTheNextMessage(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	bravo := h.register("bravo", "codex", "thread-9")
+	done := make(chan model.InboxResponse, 1)
+	go func() { done <- h.inbox(bravo, "?wait=5") }()
+	time.Sleep(200 * time.Millisecond)
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "one"})
+	got := <-done
+	if len(got.Messages) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "two"})
+	if h.waker.count() != 1 {
+		t.Fatalf("the second message did not wake an agent with no poll open: %d calls", h.waker.count())
+	}
+}
+
+func TestPeekAndInboxReportTheHeadOfTheLog(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	bravo := h.register("bravo", "", "")
+	for i := 0; i < 3; i++ {
+		h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "x"})
+	}
+	if got := h.inbox(bravo, "?peek=1"); got.Head != 3 {
+		t.Fatalf("peek head %d", got.Head)
+	}
+	if got := h.inbox(bravo, ""); got.Head != 3 {
+		t.Fatalf("inbox head %d", got.Head)
+	}
+}

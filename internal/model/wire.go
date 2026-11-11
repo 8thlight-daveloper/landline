@@ -50,6 +50,7 @@ type InboxResponse struct {
 	Messages  []WireEnvelope `json:"messages"`
 	Next      int64          `json:"next"`
 	Remaining int            `json:"remaining"`
+	Head      int64          `json:"head"`
 }
 
 type AgentInfo struct {

@@ -267,3 +267,43 @@ func TestSendSaysWhenAWakeIsWaitingForAHostDaemon(t *testing.T) {
 		t.Fatalf("%q", r.out.String())
 	}
 }
+
+func TestListenWithAThreadStartsFromTheCurrentHeadAndAdvancesItsPosition(t *testing.T) {
+	t.Parallel()
+	var afters []string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("peek") != "" {
+			json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{}, Head: 10})
+			return
+		}
+		afters = append(afters, q.Get("after"))
+		if len(afters) < 3 {
+			json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{}, Next: int64(10 + len(afters))})
+			return
+		}
+		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nnew"}}, Next: 14})
+	}))
+	defer hub.Close()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"t"}`), 0o600)
+	r := do(t, dir, hub.URL, "", "listen", "--as", "alpha", "--thread", "deploy")
+	if r.code != 0 || strings.Join(afters, ",") != "10,11,12" || !strings.Contains(r.out.String(), "new") {
+		t.Fatalf("code %d afters %v out %q", r.code, afters, r.out.String())
+	}
+}
+
+func TestInboxOutputHasNoTerminalControlSequences(t *testing.T) {
+	t.Parallel()
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nhi\x1b]52;c;ZXZpbA==\x07 \x1b[31mred\u009b\u202e tab\there"}}})
+	}))
+	defer hub.Close()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"t"}`), 0o600)
+	r := do(t, dir, hub.URL, "", "inbox", "--as", "alpha")
+	out := r.out.String()
+	if strings.ContainsAny(out, "\x1b\x07\u009b\u202e") || !strings.Contains(out, "tab\there") || !strings.Contains(out, "hi") {
+		t.Fatalf("got %q", out)
+	}
+}

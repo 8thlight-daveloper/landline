@@ -14,6 +14,7 @@ type fakeHub struct {
 	sent      []model.SendBody
 	waits     []int
 	threads   []string
+	afters    []int64
 	sendErr   error
 	inboxErr  error
 	agentsErr error
@@ -28,6 +29,7 @@ func (f *fakeHub) Send(body model.SendBody) (model.SendResponse, error) {
 func (f *fakeHub) Inbox(waitSeconds int, threads string, after int64) (model.InboxResponse, error) {
 	f.waits = append(f.waits, waitSeconds)
 	f.threads = append(f.threads, threads)
+	f.afters = append(f.afters, after)
 	return f.page, f.inboxErr
 }
 
@@ -308,5 +310,31 @@ func TestEachResponseIsOneLineAndServeEndsCleanlyOnEOF(t *testing.T) {
 	}
 	if err := Serve(strings.NewReader(""), &out, &fakeHub{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInboxPassesAfterToTheHubAndTellsTheAgentWhereToReadOn(t *testing.T) {
+	t.Parallel()
+	hub := &fakeHub{page: model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nhello"}}, Next: 42}}
+	text, isError := resultText(t, one(t, hub, call("landline_inbox", `{"thread":"deploy","after":17}`)))
+	if isError || hub.afters[0] != 17 || hub.threads[0] != "deploy" {
+		t.Fatalf("hub saw after %v thread %v, got %q", hub.afters, hub.threads, text)
+	}
+	if !strings.Contains(text, "thread and after=42") {
+		t.Fatalf("no hint to read on: %q", text)
+	}
+	plain, _ := resultText(t, one(t, &fakeHub{page: model.InboxResponse{Messages: []model.WireEnvelope{{Text: "x"}}, Next: 9}}, call("landline_inbox", `{}`)))
+	if strings.Contains(plain, "after=") {
+		t.Fatalf("an unfiltered read gave a position hint: %q", plain)
+	}
+}
+
+func TestInboxRejectsABadAfter(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{`{"thread":"a","after":-1}`, `{"thread":"a","after":1.5}`, `{"thread":"a","after":"7"}`} {
+		r := one(t, &fakeHub{}, call("landline_inbox", bad))
+		if r.Error == nil || r.Error.Code != -32602 {
+			t.Errorf("%s: %+v", bad, r)
+		}
 	}
 }

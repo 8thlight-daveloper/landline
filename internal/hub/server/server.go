@@ -340,7 +340,7 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 		cursor := s.cursors[name]
 		unread := s.in.Select(s.store.All(), name, cursor, nil, 0)
 		s.mu.Unlock()
-		write(w, http.StatusOK, model.InboxResponse{Messages: []model.WireEnvelope{}, Next: cursor, Remaining: len(unread.Messages)})
+		write(w, http.StatusOK, model.InboxResponse{Messages: []model.WireEnvelope{}, Next: cursor, Remaining: len(unread.Messages), Head: s.store.LastSeq()})
 		return
 	}
 	wait := clamp(intOf(query.Get("wait")), 0, 60)
@@ -354,15 +354,19 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 	}
 	deadline := time.NewTimer(time.Duration(wait) * time.Second)
 	defer deadline.Stop()
-	if len(threads) == 0 {
-		s.mu.Lock()
-		s.waiting[name]++
-		s.mu.Unlock()
-		defer func() {
+	startWaiting := func() {
+		if len(threads) == 0 {
+			s.mu.Lock()
+			s.waiting[name]++
+			s.mu.Unlock()
+		}
+	}
+	stopWaiting := func() {
+		if len(threads) == 0 {
 			s.mu.Lock()
 			s.waiting[name]--
 			s.mu.Unlock()
-		}()
+		}
 	}
 	for {
 		s.mu.Lock()
@@ -384,18 +388,27 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 		}
 		s.mu.Unlock()
 		if len(page.Messages) > 0 || wait == 0 {
-			write(w, http.StatusOK, toWire(page, senders))
+			write(w, http.StatusOK, s.withHead(toWire(page, senders)))
 			return
 		}
+		startWaiting()
 		select {
 		case <-changed:
+			stopWaiting()
 		case <-deadline.C:
-			write(w, http.StatusOK, toWire(page, senders))
+			stopWaiting()
+			write(w, http.StatusOK, s.withHead(toWire(page, senders)))
 			return
 		case <-r.Context().Done():
+			stopWaiting()
 			return
 		}
 	}
+}
+
+func (s *Server) withHead(out model.InboxResponse) model.InboxResponse {
+	out.Head = s.store.LastSeq()
+	return out
 }
 
 func capPage(page model.Page) model.Page {

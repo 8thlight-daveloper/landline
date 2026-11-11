@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	client "github.com/8thlight-daveloper/landline/internal/client/http"
 	"github.com/8thlight-daveloper/landline/internal/model"
@@ -173,7 +174,7 @@ func agents(args []string, env Env) error {
 		if !a.Online {
 			wake += ", idle"
 		}
-		fmt.Fprintf(env.Stdout, "%s\t%s\t%s\twake: %s\n", a.Name, a.Harness, a.Host, wake)
+		fmt.Fprintf(env.Stdout, "%s\t%s\t%s\twake: %s\n", printable(a.Name), printable(a.Harness), printable(a.Host), wake)
 	}
 	return nil
 }
@@ -237,12 +238,24 @@ func inbox(args []string, env Env) error {
 		return json.NewEncoder(env.Stdout).Encode(out)
 	}
 	for _, m := range out.Messages {
-		fmt.Fprintf(env.Stdout, "%s\n\n", m.Text)
+		fmt.Fprintf(env.Stdout, "%s\n\n", printable(m.Text))
 	}
 	if out.Remaining > 0 {
 		fmt.Fprintf(env.Stderr, "%d more unread. Run inbox again.\n", out.Remaining)
 	}
 	return nil
+}
+
+func printable(text string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\t':
+			return r
+		case unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf):
+			return ' '
+		}
+		return r
+	}, text)
 }
 
 func listen(args []string, env Env) error {
@@ -257,6 +270,13 @@ func listen(args []string, env Env) error {
 		return err
 	}
 	var after int64
+	if *threads != "" {
+		head, err := c.Head()
+		if err != nil {
+			return err
+		}
+		after = head
+	}
 	failures := 0
 	for {
 		out, err := c.Inbox(50, *threads, after)
@@ -269,11 +289,14 @@ func listen(args []string, env Env) error {
 			continue
 		}
 		failures = 0
+		if *threads != "" {
+			after = out.Next
+		}
 		if len(out.Messages) == 0 {
 			continue
 		}
 		for _, m := range out.Messages {
-			fmt.Fprintf(env.Stdout, "%s\n\n", m.Text)
+			fmt.Fprintf(env.Stdout, "%s\n\n", printable(m.Text))
 		}
 		return nil
 	}

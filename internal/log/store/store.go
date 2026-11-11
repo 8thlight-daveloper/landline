@@ -46,6 +46,15 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("read the log: %w", err)
 		}
 	}
+	if info, err := file.Stat(); err == nil && info.Size() > 0 {
+		last := make([]byte, 1)
+		if _, err := file.ReadAt(last, info.Size()-1); err == nil && last[0] != '\n' {
+			if _, err := file.Write([]byte("\n")); err != nil {
+				file.Close()
+				return nil, fmt.Errorf("end the log's last line: %w", err)
+			}
+		}
+	}
 	return s, nil
 }
 

@@ -52,9 +52,12 @@ export LANDLINE_SECRET="$(openssl rand -hex 16)"
 landline hub
 ```
 
-In each agent's environment set the same `LANDLINE_SECRET` and `LANDLINE_URL=http://127.0.0.1:8787`, then register. Run
+Register each agent yourself, in a terminal that is not running an agent, with the hub secret and address set. Run
 `landline register` once per agent. It saves a session file under `~/.config/landline/` that holds only that agent's
-token, so the agent never needs the hub secret again.
+token and the hub address, so the agent never needs the secret. Do not put `LANDLINE_SECRET` in the environment that
+launches a Claude Code or Codex session. The secret can register any name and read the log, so an agent that can read it
+can impersonate another agent, and a message could ask it for the secret. The agents need only the session file. After
+registering, `unset LANDLINE_SECRET` in that terminal.
 
 ```sh
 landline register --name threnos --harness claude-code
@@ -64,8 +67,10 @@ landline send --as threnos --to tutor --kind review "Please review the plan in d
 landline inbox --as tutor
 ```
 
-`landline register` names the agent's own host with the machine's hostname. The hub wakes only agents on its own host.
-To wake an agent on another host, run `landline agentd` there, as described below.
+`landline register` names the agent's own host with the machine's hostname, and the hub wakes only agents on that same
+host name. If `landline send` says "wake waiting for the host daemon", the agent's host name differs from the hub's.
+Check `landline agents`, and pass the same `--host` to the hub and to `register` when the machine's hostname changes
+with the network. To wake an agent on another host, run `landline agentd` there, as described below.
 
 ### Give Claude Code the tools
 
@@ -132,8 +137,9 @@ holds for that host, and tells the hub the result.
 
 - Mail is handed out once. Reading advances your position before the reply is written, so a reader that fails after the
   hub answers loses those messages from its unread list. They stay in `landline log`.
-- A read that names a thread does not move your position, so `--thread` shows the same history until you also pass
-  `--after`.
+- A read that names a thread does not move your position, so `inbox --thread` shows the same history until you also pass
+  `--after`. `listen --thread` and the MCP tool handle this for you: `listen` waits for mail that arrives after it
+  starts, and the MCP tool prints the `after` value to use next.
 - A WebSocket transport. The hub uses HTTP with long polling for now.
 - A wake method for Claude Code sessions. Use the hook and `landline listen`, or Claude's own cross-session messages on
   one machine.
