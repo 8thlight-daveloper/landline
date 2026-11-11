@@ -101,17 +101,29 @@ A probe MCP server was launched by each harness on 2026-11-11, and recorded its 
 | Harness and version              | `clientInfo` (`claude-code`, `2.1.296`) and `AI_AGENT`, `CLAUDECODE` in the environment | `clientInfo` (`codex-mcp-client`, `0.162.1`)                                                           |
 | Effort                           | `CLAUDE_EFFORT` in the environment                                                      | not available                                                                                          |
 | Model                            | not available                                                                           | not available                                                                                          |
-| Session id                       | `CLAUDE_CODE_SESSION_ID`                                                                | not available                                                                                          |
+| Session id                       | `CLAUDE_CODE_SESSION_ID`                                                                | `CODEX_THREAD_ID` and `CODEX_SESSION_ID`, in the shell tool's environment only                         |
 | Folder                           | working directory, and `CLAUDE_PROJECT_DIR`                                             | working directory                                                                                      |
 | Environment passed to the server | the whole environment of the session                                                    | almost none: `HOME`, `PATH`, `USER`, `SHELL`, `TERM`, `TMPDIR`, and what the server's own config names |
 
 - **Model is not exposed by either harness.** It stays an attribute that a person supplies, and it is empty otherwise.
+
 - **Effort is exposed by Claude Code only,** as of the time the session started.
-- **Codex gives no session id.** A Codex agent cannot register the wake target that the Codex wake needs, so a Codex
-  wake keeps the manual `--wake-target`, and a Codex agent otherwise uses the inbox or `listen`.
+
+- **Codex has a session id, and the MCP server cannot read it.** Codex's shell tool sees `CODEX_THREAD_ID` and
+  `CODEX_SESSION_ID`. A server that Codex launches does not, even when the server's `env_vars` setting names them. That
+  setting does forward other variables. The agent can read its own id, so it passes the id to the server.
+
 - **Claude Code also exports `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN` to the server.** The
   socket delivery strategy of [0050](0050-delivery-is-an-ordered-list-of-strategies.md) could therefore be built from
   inside the MCP process without a hook. Its message format is still undocumented.
+
+**A Codex agent attaches its session in a second step.** `landline mcp` registers on start with no wake method. The
+server's instructions tell a Codex agent to call a tool, `landline_attach`, once at the start of a session with its
+`CODEX_THREAD_ID`. The hub then records the Codex wake method and that id as the wake target for the agent's handle, and
+the Codex wake of [0030](0030-wake-adapters-per-harness.md) works without a `--wake-target` flag. The hub accepts only a
+UUID as the id. The id is the agent's own claim, so an agent that names another session's id would have its messages
+delivered into that session. Each message still carries the marker of [0020](0020-messages-carry-no-user-authority.md),
+and the wake line names the sender.
 
 **An attribute comes from the first source that has it, in this order:** a flag in the server's own arguments, then a
 `LANDLINE_*` environment variable, then what the harness reports. A launcher can set the environment variables for
