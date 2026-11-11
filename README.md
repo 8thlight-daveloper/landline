@@ -105,6 +105,24 @@ Add the hook to your Claude Code settings so unread mail is announced on each pr
 For mail that arrives while the session is idle, run `landline listen --as threnos` as a background command. It waits,
 prints the message when one arrives, and exits, which brings the session back.
 
+#### Try it between two Claude Code sessions
+
+`scripts/landline-dev` runs the hub in the background and wires two projects together, with the hub secret kept out of
+the sessions. For two projects, `~/Projects/threnos` and `~/Projects/repo-tutor`:
+
+```sh
+cd ~/Projects/landline
+scripts/landline-dev up
+scripts/landline-dev agent threnos
+scripts/landline-dev agent tutor
+scripts/landline-dev wire ~/Projects/threnos threnos
+scripts/landline-dev wire ~/Projects/repo-tutor tutor
+```
+
+Then run `scripts/landline-dev claude ~/Projects/threnos threnos` in one terminal and
+`scripts/landline-dev claude ~/Projects/repo-tutor tutor` in another. Use `status`, `log`, and `down` to look in and to
+stop the hub.
+
 #### Push mail into a Claude Code session
 
 Claude Code can push mail into a running session through its channels feature, which is a research preview. Start the

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state="${LANDLINE_DEV_DIR:-$HOME/.local/share/landline-dev}"
+port="${LANDLINE_DEV_PORT:-8787}"
+url="http://127.0.0.1:$port"
+
+usage() {
+  cat >&2 <<TEXT
+usage: scripts/landline-dev <command>
+
+  up                   build, start a hub in the background, and write its secret (mode 0600)
+  agent <name>         register an agent on that hub. Its session file never holds the secret
+  wire <dir> <name>    add the landline MCP server, in channel mode, to the Claude Code project in <dir>
+  claude <dir> <name>  start Claude Code in <dir> with the channel loaded and no hub secret in its environment
+  status               show whether the hub is running and which agents it knows
+  log                  print the hub's message log
+  down                 stop the hub
+TEXT
+  exit 2
+}
+
+binary() {
+  if [ ! -x "$state/landline" ] || [ -n "$(find "$root/internal" "$root/binary" -newer "$state/landline" -name '*.go' -print -quit)" ]; then
+    mkdir -p "$state"
+    (cd "$root" && nix develop --quiet --command go build -o "$state/landline" ./binary)
+  fi
+  echo "$state/landline"
+}
+
+secret() { cat "$state/secret"; }
+running() { [ -f "$state/hub.pid" ] && kill -0 "$(cat "$state/hub.pid")" 2>/dev/null; }
+
+need_hub() { running || { echo "the hub is not running. Run: scripts/landline-dev up" >&2; exit 1; }; }
+
+case "${1:-}" in
+  up)
+    bin="$(binary)"
+    mkdir -p "$state"
+    if running; then echo "the hub is already running (pid $(cat "$state/hub.pid")) at $url"; exit 0; fi
+    [ -f "$state/secret" ] || { umask 077; openssl rand -hex 16 > "$state/secret"; }
+    chmod 600 "$state/secret"
+    LANDLINE_SECRET="$(secret)" nohup "$bin" hub --addr "127.0.0.1:$port" --log "$state/log.jsonl" --state "$state/state.json" \
+      > "$state/hub.out" 2>&1 &
+    echo $! > "$state/hub.pid"
+    for _ in $(seq 1 50); do
+      grep -q "listening on" "$state/hub.out" 2>/dev/null && break
+      sleep 0.1
+    done
+    grep -q "listening on" "$state/hub.out" || { echo "the hub did not start:" >&2; cat "$state/hub.out" >&2; exit 1; }
+    echo "hub running at $url (pid $(cat "$state/hub.pid")). Its output is in $state/hub.out"
+    ;;
+  agent)
+    [ $# -eq 2 ] || usage
+    need_hub
+    LANDLINE_URL="$url" LANDLINE_SECRET="$(secret)" "$(binary)" register --name "$2" --harness claude-code
+    ;;
+  wire)
+    [ $# -eq 3 ] || usage
+    bin="$(binary)"
+    (cd "$2" && claude mcp remove landline --scope local >/dev/null 2>&1 || true
+     cd "$2" && claude mcp add --scope local landline -- "$bin" mcp --channel --as "$3")
+    echo "wired $3 into $2"
+    ;;
+  claude)
+    [ $# -eq 3 ] || usage
+    need_hub
+    cd "$2"
+    echo "Choose 'I am using this for local development' on the confirmation screen."
+    exec env -u LANDLINE_SECRET LANDLINE_AS="$3" claude --dangerously-load-development-channels server:landline
+    ;;
+  status)
+    if running; then echo "hub: running (pid $(cat "$state/hub.pid")) at $url"; else echo "hub: not running"; exit 0; fi
+    ls "$HOME/.config/landline" 2>/dev/null | sed -n 's/^session-\(.*\)\.json$/agent: \1/p'
+    ;;
+  log)
+    need_hub
+    LANDLINE_URL="$url" LANDLINE_SECRET="$(secret)" "$(binary)" log
+    ;;
+  down)
+    if running; then kill "$(cat "$state/hub.pid")" && rm -f "$state/hub.pid" && echo "hub stopped"; else echo "hub is not running"; rm -f "$state/hub.pid"; fi
+    ;;
+  *) usage ;;
+esac
