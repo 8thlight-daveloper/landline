@@ -1,14 +1,29 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/8thlight-daveloper/landline/internal/cli/command"
 )
+
+//go:embed skills/landline/SKILL.md
+var landlineSkill []byte
+
+// installSkill writes the /landline skill where Claude Code looks for personal skills.
+func installSkill(home string) (string, error) {
+	dir := filepath.Join(home, ".claude", "skills", "landline")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "SKILL.md")
+	return path, os.WriteFile(path, landlineSkill, 0o644)
+}
 
 func runSetup(args []string) int {
 	print := false
@@ -46,6 +61,19 @@ func runSetup(args []string) int {
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "landline setup:", err)
 		return 1
+	}
+	if harness == "claude" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			var path string
+			if path, err = installSkill(home); err == nil {
+				fmt.Println("installed the /landline skill at", path)
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "landline setup: the MCP server is added, but the skill was not installed:", err)
+			return 1
+		}
 	}
 	return 0
 }

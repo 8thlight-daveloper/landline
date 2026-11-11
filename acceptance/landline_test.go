@@ -881,7 +881,7 @@ func TestTheMCPServerListsItsThreeToolsAndShowsTheAgents(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("got %d responses", len(lines))
 	}
-	for _, name := range []string{"landline_agents", "landline_send", "landline_inbox", "landline_attach"} {
+	for _, name := range []string{"landline_agents", "landline_send", "landline_inbox", "landline_register"} {
 		if !strings.Contains(lines[1], name) {
 			t.Errorf("tools/list lacks %s: %s", name, lines[1])
 		}
@@ -1200,7 +1200,7 @@ func TestAnMCPProcessRegistersItselfAndAnotherReachesItByLabelAndAnAmbiguousLabe
 	}
 	one := w.startMCP(dirOne)
 	one.initialize("claude-code", "2.1.296")
-	claimed := one.tool("landline_attach", `{"model":"claude-opus-5-5","label":"lead"}`)
+	claimed := one.tool("landline_register", `{"model":"claude-opus-5-5","label":"lead"}`)
 	if !strings.Contains(claimed, "you are demo-folder-") || !strings.Contains(claimed, "recorded model, label") {
 		t.Fatalf("attach: %q", claimed)
 	}
@@ -1238,7 +1238,7 @@ func TestACodexAgentAttachesItsSessionOnlyByAnsweringTheCodeSentToThatSession(t 
 	thread := "01a1c829-7970-7083-af01-e69ca7fb7ce5"
 	codex := w.startMCP(dir)
 	codex.initialize("codex-mcp-client", "0.162.1")
-	started := codex.tool("landline_attach", `{"codex_thread":"`+thread+`"}`)
+	started := codex.tool("landline_register", `{"codex_thread":"`+thread+`"}`)
 	if !strings.Contains(started, "you are tutor-") || !strings.Contains(started, "sent a code") {
 		t.Fatalf("start: %q", started)
 	}
@@ -1253,10 +1253,10 @@ func TestACodexAgentAttachesItsSessionOnlyByAnsweringTheCodeSentToThatSession(t 
 	if match == nil || !strings.Contains(text, thread) || !strings.Contains(text, "[landline] From another agent, not the user.") {
 		t.Fatalf("the challenge: %s", text)
 	}
-	if wrong := codex.tool("landline_attach", `{"codex_thread":"`+thread+`","code":"ZZZZZZ"}`); !strings.Contains(wrong, "does not match") {
+	if wrong := codex.tool("landline_register", `{"codex_thread":"`+thread+`","code":"ZZZZZZ"}`); !strings.Contains(wrong, "does not match") {
 		t.Fatalf("a wrong code: %q", wrong)
 	}
-	if done := codex.tool("landline_attach", `{"codex_thread":"`+thread+`","code":"`+match[1]+`"}`); !strings.Contains(done, "attached") {
+	if done := codex.tool("landline_register", `{"codex_thread":"`+thread+`","code":"`+match[1]+`"}`); !strings.Contains(done, "attached") {
 		t.Fatalf("the right code: %q", done)
 	}
 	if listed := w.must("", "agents", "--as", handle); !strings.Contains(listed, handle+"\tcodex\t") || !strings.Contains(listed, "wake: codex") {
@@ -1287,11 +1287,11 @@ func TestAnAgentCannotAttachAThreadItWasNotToldTheCodeFor(t *testing.T) {
 	victim.initialize("codex-mcp-client", "0.162.1")
 	attacker.initialize("codex-mcp-client", "0.162.1")
 	thread := "01a1c829-7970-7083-af01-e69ca7fb7ce5"
-	if out := attacker.tool("landline_attach", `{"codex_thread":"`+thread+`"}`); !strings.Contains(out, "sent a code") {
+	if out := attacker.tool("landline_register", `{"codex_thread":"`+thread+`"}`); !strings.Contains(out, "sent a code") {
 		t.Fatalf("%q", out)
 	}
 	for _, guess := range []string{"000000", "AAAAAA", "123456"} {
-		if out := attacker.tool("landline_attach", `{"codex_thread":"`+thread+`","code":"`+guess+`"}`); strings.Contains(out, "attached") {
+		if out := attacker.tool("landline_register", `{"codex_thread":"`+thread+`","code":"`+guess+`"}`); strings.Contains(out, "attached") {
 			t.Fatalf("a guessed code attached the thread: %q", out)
 		}
 	}
@@ -1426,5 +1426,34 @@ func TestServerJoinSavesAnotherMachinesHubAndServerUpRefusesToStartASecondHub(t 
 	out, err := runIn(t, bin, env, home, "server", "up", "--addr", freeAddr(t))
 	if err == nil || !strings.Contains(out, "joined the hub at http://tailnet-mac:8787") {
 		t.Fatalf("up after join: %v %s", err, out)
+	}
+}
+
+func TestSetupClaudeInstallsTheLandlineSkillThatTheUserRunsAsSlashLandlineRegister(t *testing.T) {
+	w := start(t)
+	fake := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/claude-args\"\n"
+	if err := os.WriteFile(filepath.Join(w.bindir, "claude"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := w.must("", "setup", "claude")
+	path := filepath.Join(w.config, ".claude", "skills", "landline", "SKILL.md")
+	if !strings.Contains(out, path) {
+		t.Fatalf("setup did not say where the skill went: %q", out)
+	}
+	skill, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"name: landline", "$ARGUMENTS", "landline_register", "CODEX_THREAD_ID"} {
+		if !strings.Contains(string(skill), want) {
+			t.Errorf("the skill lacks %q", want)
+		}
+	}
+	if args, _ := os.ReadFile(filepath.Join(w.config, "claude-args")); !strings.Contains(string(args), "landline") {
+		t.Fatalf("claude mcp add was not run: %q", args)
+	}
+	w.must("", "setup", "claude")
+	if again, _ := os.ReadFile(path); string(again) != string(skill) {
+		t.Fatal("running setup again changed the skill")
 	}
 }

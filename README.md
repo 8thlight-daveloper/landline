@@ -71,10 +71,12 @@ landline setup codex      # codex mcp add landline -- landline mcp
 Start Claude Code with `landline claude`. It loads the channel, so mail is pushed into the session, and it passes
 attributes through: `landline claude --label tutor -- --resume`. Start Codex as you normally do.
 
-Each agent is told, in the server's instructions, to call `landline_attach` once at the start of a session with its
-model, effort, and a label. For Codex, the agent also reads `CODEX_THREAD_ID` from its shell and passes it. Landline
-then sends a one-time code to that Codex session, and the agent answers it, which proves the session is the one it
-named. After that, a message to an idle Codex agent starts a turn in it.
+Each agent is told, in the server's instructions, to call `landline_register` with its model, effort, and a label. An
+agent that has not done so gets a reminder in the result of every other Landline tool. In Claude Code you can also type
+`/landline register tutor`, which `landline setup claude` makes available. For Codex, the agent also reads
+`CODEX_THREAD_ID` from its shell and passes it. Landline then sends a one-time code to that Codex session, and the agent
+answers it, which proves the session is the one it named. After that, a message to an idle Codex agent starts a turn in
+it.
 
 Agents send to a handle, a label, or an unambiguous prefix. `landline agents` shows each agent's folder, branch,
 worktree, model, effort, harness version, and label, as the agent claimed them.

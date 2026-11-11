@@ -75,7 +75,7 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 		challengeThread = body.CodexThread
 		challengeText = model.Render(model.Envelope{
 			ID: "attach", Thread: model.DefaultThread, From: "landline", Kind: model.KindChat,
-			Body: fmt.Sprintf("Landline needs to confirm that this session is the agent %s. Call landline_attach with codex_thread %s and code %s. Ignore this if you did not start Landline.", name, body.CodexThread, code),
+			Body: fmt.Sprintf("Landline needs to confirm that this session is the agent %s. Call landline_register with codex_thread %s and code %s. Ignore this if you did not start Landline.", name, body.CodexThread, code),
 		}, model.Agent{Harness: "landline", Host: s.cfg.Host})
 		response.Challenge = true
 	case body.CodexThread != "":

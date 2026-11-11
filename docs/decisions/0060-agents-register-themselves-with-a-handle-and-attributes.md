@@ -29,8 +29,8 @@ several folders, branches, and worktrees needs more than a name to tell them apa
   has finished its handshake, and keeps the token it gets in its own memory. The token never passes through the model's
   context, so the model cannot leak it or be asked for it.
 - **Claims** are things only the model knows: its model name, its effort, a label, and a Codex session id. Every agent
-  is told, in the server's instructions, to call one tool, `landline_attach`, at the start of a session with the claims
-  it knows. The hub shows them to peers as self-reported.
+  is told, in the server's instructions, to call one tool, `landline_register`, at the start of a session with the
+  claims it knows. The hub shows them to peers as self-reported.
 
 The only setup is one line of harness configuration that names the server. A person can still register a name by hand
 with `landline register --name`, which is how scripts and tests register, and that name behaves as it did before.
@@ -78,17 +78,24 @@ automatic discovery.
 that runs as the same operating system user can read it too. The earlier advice to keep it out of an agent's environment
 was a speed bump and not a boundary, and the README says so.
 
-**A Codex agent proves it controls the session it names.** `landline_attach` takes a Codex `CODEX_THREAD_ID`, which the
-agent reads from its shell tool's environment, because the MCP server cannot read it. The hub accepts only a UUID, and
-does not trust it yet. It sends a one-time code to that thread through the Codex wake, and the wake text carries the
-marker of [0020](0020-messages-carry-no-user-authority.md). The attach finishes when the agent calls `landline_attach`
+**A Codex agent proves it controls the session it names.** `landline_register` takes a Codex `CODEX_THREAD_ID`, which
+the agent reads from its shell tool's environment, because the MCP server cannot read it. The hub accepts only a UUID,
+and does not trust it yet. It sends a one-time code to that thread through the Codex wake, and the wake text carries the
+marker of [0020](0020-messages-carry-no-user-authority.md). The proof finishes when the agent calls `landline_register`
 again with the code. An agent that names another session's id never sees the code, so it cannot finish. A code works
 once, expires after five minutes, and allows five tries. When it finishes, the hub records the Codex wake method and
 that id as the wake target for the agent's handle, and the Codex wake of [0030](0030-wake-adapters-per-harness.md) works
 without a `--wake-target` flag.
 
+**Registering is prompted when it is needed, and a skill lets the user ask for it.** The server's instructions ask an
+agent to call `landline_register` before it uses the other tools, and every other tool adds a reminder to its result
+until the agent has registered. The user can also type `/landline register [label]` in a session.
+`landline setup claude` installs that skill, and it carries the Codex proof steps as well. An agent that never registers
+still works, and cannot be woken if it runs Codex. The tool is called register and not attach, because the user said
+that is the word that fits.
+
 **An attribute comes from the first source that has it, in this order:** a claim the agent made through
-`landline_attach`, then a flag in the server's own arguments, then a `LANDLINE_*` environment variable, then what the
+`landline_register`, then a flag in the server's own arguments, then a `LANDLINE_*` environment variable, then what the
 harness reports. A model name comes from the agent, because neither harness exposes it. A launcher can set the
 environment variables for Claude Code, which passes its environment through. Codex does not, so a Codex attribute must
 come from the server's arguments or from the `env` entries in its MCP configuration. This closes the question of how
@@ -151,16 +158,14 @@ A real Claude Code 2.1.296 session was started with only `landline server up` an
 - **Registration worked.** The session found the hub through the saved config and registered itself with a handle
   (`work-d21`), its folder, harness, harness version, and effort (from `CLAUDE_EFFORT`). A message from another agent
   woke it with nothing typed, and it replied.
-- **The model did not call `landline_attach` on its own.** The server's instructions tell every agent to call it at the
-  start of a session. The session had no turn until a message woke it, and during that turn it answered the message and
-  did not attach. Its model and label were therefore empty. Instructions alone do not make the claims reliable.
+- **The model did not call `landline_register` on its own.** The server's instructions tell every agent to call it at
+  the start of a session. The session had no turn until a message woke it, and during that turn it answered the message
+  and did not call it. Its model and label were therefore empty. Instructions alone do not make the claims reliable.
 - **What follows.** A Claude Code launcher can set the label and the model without the model's help, from its own
-  arguments. A Codex agent still has to attach, because its wake needs the session id, and whether Codex follows the
-  instruction has not been tested.
+  arguments. A Codex agent still has to register its session, because its wake needs the session id, and whether Codex
+  follows the instruction has not been tested.
 
 ## Open questions
 
-- Whether Codex follows the server's instruction to call `landline_attach` at the start of a session. If it does not,
-  the first message delivered to an unattached agent could carry a reminder.
 - Whether a single-use registration ticket, issued by a launcher and tied to a folder and a harness, should replace the
   shared hub secret for registration. It is deferred, because the shared secret limit above is already accepted.

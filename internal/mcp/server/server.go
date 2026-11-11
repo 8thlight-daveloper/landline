@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/model"
@@ -27,7 +28,7 @@ const (
 
 const instructions = `Landline connects you to other coding agents. Use landline_agents to see who is around, landline_send to message one agent or all of them, and landline_inbox to read your mail.
 
-At the start of a session, call landline_attach once with what you know about yourself: your model name, your effort level if you know it, and a short label if your user gave you one. Other agents see these as your own claims. If you are Codex, read CODEX_THREAD_ID from your shell environment, for example with the command echo $CODEX_THREAD_ID, and pass it as codex_thread. Landline then sends a message to your session that holds a code. Call landline_attach again with the same codex_thread and that code, and Landline will be able to wake you.
+Before you use the other Landline tools, call landline_register once with what you know about yourself: your model name, your effort level if you know it, and a short label if your user gave you one. Other agents see these as your own claims. If you are Codex, read CODEX_THREAD_ID from your shell environment, for example with the command echo $CODEX_THREAD_ID, and pass it as codex_thread. Landline then sends a message to your session that holds a code. Call landline_register again with the same codex_thread and that code, and Landline will be able to wake you.
 
 Mail only arrives when you call landline_inbox. Pass wait_seconds to wait for a reply.
 
@@ -112,6 +113,7 @@ func Serve(in io.Reader, out io.Writer, hub Hub) error {
 func ServeWith(in io.Reader, out io.Writer, hub Hub, options Options) error {
 	out = &lockedWriter{out: out}
 	ready := make(chan struct{})
+	var introduced atomic.Bool
 	var readyOnce sync.Once
 	var seenMu sync.Mutex
 	initialized, listed := false, false
@@ -158,7 +160,7 @@ func ServeWith(in io.Reader, out io.Writer, hub Hub, options Options) error {
 				}
 			}
 			markSeen(method)
-			if reply := handleLine(line, hub, options.Channel); reply != nil {
+			if reply := handleLine(line, hub, options.Channel, &introduced); reply != nil {
 				if err := write(out, reply); err != nil {
 					return err
 				}
@@ -182,7 +184,7 @@ func write(out io.Writer, reply *response) error {
 	return err
 }
 
-func handleLine(line []byte, hub Hub, channel bool) *response {
+func handleLine(line []byte, hub Hub, channel bool, introduced *atomic.Bool) *response {
 	if line[0] == '[' {
 		return failure(nullID, codeInvalidRequest, "batch requests are not supported")
 	}
@@ -199,7 +201,7 @@ func handleLine(line []byte, hub Hub, channel bool) *response {
 	if req.Method == "" {
 		return failure(req.ID, codeInvalidRequest, "method is required")
 	}
-	result, rpcFailure := dispatch(req, hub, channel)
+	result, rpcFailure := dispatch(req, hub, channel, introduced)
 	if rpcFailure != nil {
 		return &response{JSONRPC: "2.0", ID: req.ID, Error: rpcFailure}
 	}
@@ -222,7 +224,7 @@ func failure(id json.RawMessage, code int, message string) *response {
 	return &response{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: message}}
 }
 
-func dispatch(req request, hub Hub, channel bool) (any, *rpcError) {
+func dispatch(req request, hub Hub, channel bool, introduced *atomic.Bool) (any, *rpcError) {
 	switch req.Method {
 	case "initialize":
 		return initialize(req.Params, channel)
@@ -231,7 +233,7 @@ func dispatch(req request, hub Hub, channel bool) (any, *rpcError) {
 	case "tools/list":
 		return map[string]any{"tools": tools()}, nil
 	case "tools/call":
-		return callTool(req.Params, hub)
+		return callTool(req.Params, hub, introduced)
 	}
 	return nil, &rpcError{Code: codeMethodNotFound, Message: "method not found: " + req.Method}
 }
@@ -290,7 +292,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "landline_attach",
+			"name":        "landline_register",
 			"description": "Tell Landline about yourself: your model, effort, label, and, for Codex, your session id. These are your own claims. For Codex, call it with codex_thread, wait for the message that holds a code, then call it again with codex_thread and the code.",
 			"inputSchema": schema{
 				"type": "object",
@@ -318,22 +320,43 @@ func tools() []map[string]any {
 	}
 }
 
-func callTool(params json.RawMessage, hub Hub) (any, *rpcError) {
+const registerReminder = "You have not told Landline about yourself yet. Call landline_register with your model, your effort level, and a label if you have one, so other agents can tell you apart."
+
+func callTool(params json.RawMessage, hub Hub, introduced *atomic.Bool) (any, *rpcError) {
 	var call toolCall
 	if len(params) == 0 || json.Unmarshal(params, &call) != nil {
 		return nil, invalidParams("tools/call params must be an object with a name")
 	}
 	switch call.Name {
+	case "landline_register":
+		result, failure := runRegister(call.Arguments, hub)
+		if failure == nil {
+			if r, ok := result.(toolResult); ok && !r.IsError {
+				introduced.Store(true)
+			}
+		}
+		return result, failure
 	case "landline_agents":
-		return runAgents(hub)
-	case "landline_attach":
-		return runAttach(call.Arguments, hub)
+		return remind(runAgents(hub))(introduced)
 	case "landline_send":
-		return runSend(call.Arguments, hub)
+		return remind(runSend(call.Arguments, hub))(introduced)
 	case "landline_inbox":
-		return runInbox(call.Arguments, hub)
+		return remind(runInbox(call.Arguments, hub))(introduced)
 	}
 	return nil, invalidParams("unknown tool: " + call.Name)
+}
+
+func remind(result any, failure *rpcError) func(*atomic.Bool) (any, *rpcError) {
+	return func(introduced *atomic.Bool) (any, *rpcError) {
+		if failure != nil || introduced.Load() {
+			return result, failure
+		}
+		if r, ok := result.(toolResult); ok && len(r.Content) > 0 {
+			r.Content = append(r.Content, textContent{Type: "text", Text: registerReminder})
+			return r, nil
+		}
+		return result, failure
+	}
 }
 
 func textResult(text string, isError bool) toolResult {
@@ -560,7 +583,7 @@ func methodOf(line []byte) string {
 	return message.Method
 }
 
-func runAttach(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
+func runRegister(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
 	var request model.AttachRequest
 	for _, field := range []struct {
 		name string
@@ -587,7 +610,7 @@ func runAttach(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
 		parts = append(parts, "recorded "+strings.Join(response.Updated, ", "))
 	}
 	if response.Challenge {
-		parts = append(parts, "sent a code to that Codex session. When the message arrives, call landline_attach again with the same codex_thread and the code")
+		parts = append(parts, "sent a code to that Codex session. When the message arrives, call landline_register again with the same codex_thread and the code")
 	}
 	if response.Attached {
 		parts = append(parts, "this Codex session is attached, so Landline can wake it")

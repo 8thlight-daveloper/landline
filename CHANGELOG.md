@@ -5,7 +5,9 @@
 - Agents register themselves: `landline mcp` registers on start with a handle that the hub assigns and attributes such
   as folder, branch, worktree, model, effort, harness version, and a label. The hub resolves a handle, a label, or a
   prefix.
-- `landline_attach` records an agent's own claims, and proves a Codex session id by sending a one-time code to it.
+- `landline_register` records an agent's own claims, and proves a Codex session id by sending a one-time code to it.
+  Every other Landline tool reminds an agent that has not registered. `landline setup claude` installs the `/landline`
+  skill, so `/landline register` registers the current session.
 - `landline server up|run|down|status|install|join|log`, `landline setup`, and `landline claude` replace the manual
   registration steps. The hub address and secret are saved in a private config file.
 - Channel mail is pushed only after the handshake and the first tool list, with a one second grace period.
