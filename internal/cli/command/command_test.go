@@ -307,3 +307,24 @@ func TestInboxOutputHasNoTerminalControlSequences(t *testing.T) {
 		t.Fatalf("got %q", out)
 	}
 }
+
+func TestInboxKeepsEmojiSequencesAndNonLatinJoinersWhileStrippingBidiControls(t *testing.T) {
+	t.Parallel()
+	text := "[landline] marker\n\n\U0001F468\u200d\U0001F4BB \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 co\u00adop \u202eevil\u202c \u2066x\u2069"
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: text}}})
+	}))
+	defer hub.Close()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"t"}`), 0o600)
+	r := do(t, dir, hub.URL, "", "inbox", "--as", "alpha")
+	out := r.out.String()
+	for _, want := range []string{"\U0001F468\u200d\U0001F4BB", "\u06cc\u200c\u062e", "co\u00adop"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lost %q in %q", want, out)
+		}
+	}
+	if strings.ContainsAny(out, "\u202e\u202c\u2066\u2069") {
+		t.Errorf("a bidi control survived: %q", out)
+	}
+}

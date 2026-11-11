@@ -15,6 +15,7 @@ type fakeHub struct {
 	waits     []int
 	threads   []string
 	afters    []int64
+	queued    []string
 	sendErr   error
 	inboxErr  error
 	agentsErr error
@@ -23,7 +24,7 @@ type fakeHub struct {
 
 func (f *fakeHub) Send(body model.SendBody) (model.SendResponse, error) {
 	f.sent = append(f.sent, body)
-	return model.SendResponse{ID: "m-1", Seq: 3, Recipients: []string{"bravo", "charlie"}, Woken: []string{"bravo"}}, f.sendErr
+	return model.SendResponse{ID: "m-1", Seq: 3, Recipients: []string{"bravo", "charlie"}, Woken: []string{"bravo"}, Queued: f.queued}, f.sendErr
 }
 
 func (f *fakeHub) Inbox(waitSeconds int, threads string, after int64) (model.InboxResponse, error) {
@@ -332,6 +333,25 @@ func TestInboxPassesAfterToTheHubAndTellsTheAgentWhereToReadOn(t *testing.T) {
 func TestInboxRejectsABadAfter(t *testing.T) {
 	t.Parallel()
 	for _, bad := range []string{`{"thread":"a","after":-1}`, `{"thread":"a","after":1.5}`, `{"thread":"a","after":"7"}`} {
+		r := one(t, &fakeHub{}, call("landline_inbox", bad))
+		if r.Error == nil || r.Error.Code != -32602 {
+			t.Errorf("%s: %+v", bad, r)
+		}
+	}
+}
+
+func TestSendTellsTheAgentWhenAWakeIsWaitingForAHostDaemon(t *testing.T) {
+	t.Parallel()
+	hub := &fakeHub{queued: []string{"bravo"}}
+	text, isError := resultText(t, one(t, hub, call("landline_send", `{"to":"bravo","body":"hi"}`)))
+	if isError || !strings.Contains(text, "wake waiting for the host daemon of bravo") {
+		t.Fatalf("got %q", text)
+	}
+}
+
+func TestAnAfterBeyondWhatAHubCouldHoldIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{`{"thread":"a","after":9223372036854775808}`, `{"thread":"a","after":1e300}`} {
 		r := one(t, &fakeHub{}, call("landline_inbox", bad))
 		if r.Error == nil || r.Error.Code != -32602 {
 			t.Errorf("%s: %+v", bad, r)

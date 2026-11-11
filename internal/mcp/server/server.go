@@ -291,6 +291,9 @@ func runSend(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
 	if len(sent.Woken) > 0 {
 		text += "; woke " + strings.Join(sent.Woken, ", ")
 	}
+	if len(sent.Queued) > 0 {
+		text += "; wake waiting for the host daemon of " + strings.Join(sent.Queued, ", ")
+	}
 	return textResult(text, false), nil
 }
 
@@ -360,7 +363,7 @@ func afterArgument(arguments map[string]json.RawMessage) (int64, *rpcError) {
 		return 0, nil
 	}
 	var value float64
-	if err := json.Unmarshal(raw, &value); err != nil || value != float64(int64(value)) || value < 0 {
+	if err := json.Unmarshal(raw, &value); err != nil || value != float64(int64(value)) || value < 0 || value > 1<<53 {
 		return 0, invalidParams("after must be an integer of 0 or more")
 	}
 	return int64(value), nil

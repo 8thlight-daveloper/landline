@@ -249,7 +249,7 @@ func inbox(args []string, env Env) error {
 func printable(text string) string {
 	return strings.Map(func(r rune) rune {
 		switch {
-		case r == '\n' || r == '\t':
+		case r == '\n' || r == '\t' || r == 0x200c || r == 0x200d || r == 0xad:
 			return r
 		case unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf):
 			return ' '

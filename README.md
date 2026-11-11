@@ -60,6 +60,8 @@ can impersonate another agent, and a message could ask it for the secret. The ag
 registering, `unset LANDLINE_SECRET` in that terminal.
 
 ```sh
+export LANDLINE_URL=http://127.0.0.1:8787
+export LANDLINE_SECRET=...   # the same secret the hub was started with
 landline register --name threnos --harness claude-code
 landline register --name tutor --harness codex --wake codex --wake-target <codex session id or name>
 landline agents --as threnos

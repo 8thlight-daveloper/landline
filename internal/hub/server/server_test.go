@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -910,6 +911,65 @@ func TestTheStateFileKeysAreSnakeCase(t *testing.T) {
 	for _, key := range []string{`"agents"`, `"tokens"`, `"cursors"`, `"name":"alpha"`, `"wake_kind":"codex"`, `"wake_target":"t1"`, `"last_seen"`} {
 		if !strings.Contains(string(raw), key) {
 			t.Errorf("the state lacks %s: %s", key, raw)
+		}
+	}
+}
+
+func TestAReadPositionPastTheEndOfTheLogIsMovedBack(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	state := filepath.Join(dir, "state.json")
+	os.WriteFile(state, []byte(`{"agents":[],"tokens":{},"cursors":{"bravo":99}}`), 0o600)
+	log, _ := store.Open(filepath.Join(dir, "log.jsonl"))
+	defer log.Close()
+	var notes []string
+	hub, err := New(Config{Secret: secret, StatePath: state, Notify: func(s string) { notes = append(notes, s) }}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hub.cursors["bravo"] != 0 || len(notes) != 1 || !strings.Contains(notes[0], "moved back to 0") {
+		t.Fatalf("cursor %d notes %v", hub.cursors["bravo"], notes)
+	}
+}
+
+func TestNoWakeIsLostWhenASendLandsAsALongPollEnds(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha", "", "")
+	const agents = 60
+	names := make([]string, agents)
+	tokens := make([]string, agents)
+	for i := range names {
+		names[i] = fmt.Sprintf("poller%02d", i)
+		tokens[i] = h.register(names[i], "codex", "t-"+names[i])
+	}
+	type outcome struct {
+		polled int
+		woken  bool
+	}
+	results := make([]outcome, agents)
+	var group sync.WaitGroup
+	for i := range names {
+		group.Add(2)
+		go func() {
+			defer group.Done()
+			results[i].polled = len(h.inbox(tokens[i], "?wait=1").Messages)
+		}()
+		go func() {
+			defer group.Done()
+			time.Sleep(995*time.Millisecond + time.Duration(i%10)*time.Millisecond)
+			_, raw := h.call("POST", "/v1/send", alpha, model.SendBody{To: names[i], Body: "tight"})
+			var out model.SendResponse
+			json.Unmarshal(raw, &out)
+			results[i].woken = len(out.Woken) == 1
+		}()
+	}
+	group.Wait()
+	time.Sleep(300 * time.Millisecond)
+	for i, name := range names {
+		unread := h.inbox(tokens[i], "?peek=1").Remaining
+		if !results[i].woken && results[i].polled == 0 && unread > 0 {
+			t.Errorf("%s: no wake, the poll returned nothing, and %d message is unread", name, unread)
 		}
 	}
 }

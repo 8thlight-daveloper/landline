@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -37,6 +38,13 @@ func (s *Server) loadState() {
 	}
 	if snap.Cursors != nil {
 		s.cursors = snap.Cursors
+		head := s.store.LastSeq()
+		for name, cursor := range s.cursors {
+			if cursor > head {
+				s.cursors[name] = head
+				s.cfg.Notify(fmt.Sprintf("the read position of %s was past the end of the log, so it was moved back to %d", name, head))
+			}
+		}
 	}
 }
 

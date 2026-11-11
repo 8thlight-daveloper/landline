@@ -368,6 +368,38 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 		}
 	}
+	closeOut := func(deliver bool) (model.Page, map[string]model.Agent, []model.Agent, model.Envelope, model.Agent) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(threads) == 0 {
+			s.waiting[name]--
+		}
+		cursor := s.cursors[name]
+		if len(threads) > 0 {
+			cursor = int64(intOf(query.Get("after")))
+		}
+		page := capPage(s.in.Select(s.store.All(), name, cursor, threads, limit))
+		senders := map[string]model.Agent{}
+		for _, each := range page.Messages {
+			if a, found := s.reg.Find(s.agents, each.From); found {
+				senders[each.From] = a
+			}
+		}
+		if len(page.Messages) == 0 {
+			return page, senders, nil, model.Envelope{}, model.Agent{}
+		}
+		if deliver {
+			if len(threads) == 0 {
+				s.cursors[name] = page.Next
+				s.saveLocked()
+			}
+			return page, senders, nil, model.Envelope{}, model.Agent{}
+		}
+		last := page.Messages[len(page.Messages)-1]
+		sender := senders[last.From]
+		targets, _ := s.wakeTargets(last, sender, []string{name})
+		return page, senders, targets, last, sender
+	}
 	for {
 		s.mu.Lock()
 		cursor := s.cursors[name]
@@ -396,11 +428,13 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 		case <-changed:
 			stopWaiting()
 		case <-deadline.C:
-			stopWaiting()
-			write(w, http.StatusOK, s.withHead(toWire(page, senders)))
+			late, lateSenders, _, _, _ := closeOut(true)
+			write(w, http.StatusOK, s.withHead(toWire(late, lateSenders)))
 			return
 		case <-r.Context().Done():
-			stopWaiting()
+			if _, _, targets, last, sender := closeOut(false); len(targets) > 0 {
+				s.wake(last, sender, targets)
+			}
 			return
 		}
 	}
