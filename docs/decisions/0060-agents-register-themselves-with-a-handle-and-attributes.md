@@ -92,7 +92,29 @@ was a speed bump and not a boundary, and the README says so.
   and a trust decision for each message.
 - **Find hubs with mDNS.** It would find a hub automatically and would let any process on the network advertise one.
 
-## Open questions
+## Findings from the prototype
 
-- Which harnesses expose a session's model and effort to an MCP server, and how.
-- How `landline claude` and the MCP server agree on the attributes the person set with flags.
+A probe MCP server was launched by each harness on 2026-11-11, and recorded its environment and `initialize` request.
+
+| Attribute                        | Claude Code 2.1.296                                                                     | Codex 0.162.1                                                                                          |
+| -------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Harness and version              | `clientInfo` (`claude-code`, `2.1.296`) and `AI_AGENT`, `CLAUDECODE` in the environment | `clientInfo` (`codex-mcp-client`, `0.162.1`)                                                           |
+| Effort                           | `CLAUDE_EFFORT` in the environment                                                      | not available                                                                                          |
+| Model                            | not available                                                                           | not available                                                                                          |
+| Session id                       | `CLAUDE_CODE_SESSION_ID`                                                                | not available                                                                                          |
+| Folder                           | working directory, and `CLAUDE_PROJECT_DIR`                                             | working directory                                                                                      |
+| Environment passed to the server | the whole environment of the session                                                    | almost none: `HOME`, `PATH`, `USER`, `SHELL`, `TERM`, `TMPDIR`, and what the server's own config names |
+
+- **Model is not exposed by either harness.** It stays an attribute that a person supplies, and it is empty otherwise.
+- **Effort is exposed by Claude Code only,** as of the time the session started.
+- **Codex gives no session id.** A Codex agent cannot register the wake target that the Codex wake needs, so a Codex
+  wake keeps the manual `--wake-target`, and a Codex agent otherwise uses the inbox or `listen`.
+- **Claude Code also exports `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN` to the server.** The
+  socket delivery strategy of [0050](0050-delivery-is-an-ordered-list-of-strategies.md) could therefore be built from
+  inside the MCP process without a hook. Its message format is still undocumented.
+
+**An attribute comes from the first source that has it, in this order:** a flag in the server's own arguments, then a
+`LANDLINE_*` environment variable, then what the harness reports. A launcher can set the environment variables for
+Claude Code, which passes its environment through. Codex does not, so a Codex attribute must come from the server's
+arguments or from the `env` entries in its MCP configuration. This closes the question of how `landline claude` and the
+MCP server agree.

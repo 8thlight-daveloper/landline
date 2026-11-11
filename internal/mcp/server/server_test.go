@@ -404,14 +404,29 @@ func (b *syncBuf) lines() []string {
 	return strings.Split(strings.TrimSpace(b.data.String()), "\n")
 }
 
+func (b *syncBuf) notifications() []string {
+	var out []string
+	for _, line := range b.lines() {
+		if strings.Contains(line, `"method":"notifications/claude/channel"`) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
 func serveChannel(t *testing.T, hub Hub, input string, options Options) *syncBuf {
 	t.Helper()
 	out := &syncBuf{}
 	reader, writer := io.Pipe()
 	done := make(chan struct{})
 	options.Channel = true
+	if options.ReadyDelay == 0 {
+		options.ReadyDelay = time.Millisecond
+	}
 	go func() { ServeWith(reader, out, hub, options); close(done) }()
 	writer.Write([]byte(input))
+	writer.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"))
+	writer.Write([]byte(`{"jsonrpc":"2.0","id":99,"method":"tools/list"}` + "\n"))
 	time.Sleep(300 * time.Millisecond)
 	writer.Close()
 	<-done
@@ -455,7 +470,7 @@ func TestEachMailMessageBecomesOneChannelNotificationWithTheMarkerFirstAndSafeMe
 		{ID: "m-2", From: "bravo", Thread: "deploy", Kind: model.KindReply, InReplyTo: "m-1", Text: "[landline] " + model.Marker + "\nsecond"},
 	}}}}
 	out := serveChannel(t, hub, "", Options{PollWait: 1})
-	lines := out.lines()
+	lines := out.notifications()
 	if len(lines) != 2 {
 		t.Fatalf("%d notifications: %v", len(lines), lines)
 	}
@@ -504,7 +519,7 @@ func TestAHubErrorIsPrintedAndRetriedWithBackoffThenMailStillArrives(t *testing.
 	if len(notes) != 2 || !strings.Contains(notes[0], "hub down") || len(sleeps) != 2 || sleeps[0] != time.Millisecond || sleeps[1] != 2*time.Millisecond {
 		t.Fatalf("notes %v sleeps %v", notes, sleeps)
 	}
-	if lines := out.lines(); len(lines) != 1 || !strings.Contains(lines[0], "notifications/claude/channel") {
+	if lines := out.notifications(); len(lines) != 1 {
 		t.Fatalf("lines %v", lines)
 	}
 }
@@ -533,7 +548,66 @@ func TestToolCallsStillWorkInChannelModeAndNotificationsDoNotInterleaveWithRepli
 			replies++
 		}
 	}
-	if replies != 40 || notes != 40 {
+	if replies != 41 || notes != 40 {
 		t.Fatalf("replies %d notifications %d", replies, notes)
+	}
+}
+
+func TestNothingIsPushedUntilTheClientHasSaidItIsInitializedAndAskedForItsTools(t *testing.T) {
+	t.Parallel()
+	hub := &pushHub{pages: []model.InboxResponse{{Messages: []model.WireEnvelope{{ID: "m-1", From: "alpha", Text: "[landline] " + model.Marker + "\nbacklog"}}}}}
+	out := serveChannelNotReady(t, hub)
+	for _, line := range out.lines() {
+		if strings.Contains(line, "notifications/claude/channel") {
+			t.Fatalf("mail was pushed before the client was initialized: %s", line)
+		}
+	}
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	if hub.calls != 0 || len(hub.pages) != 1 {
+		t.Fatalf("the hub was read before the client was ready: %d calls, %d pages left", hub.calls, len(hub.pages))
+	}
+}
+
+func serveChannelNotReady(t *testing.T, hub Hub) *syncBuf {
+	t.Helper()
+	out := &syncBuf{}
+	reader, writer := io.Pipe()
+	done := make(chan struct{})
+	go func() { ServeWith(reader, out, hub, Options{Channel: true, PollWait: 1}); close(done) }()
+	writer.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n"))
+	time.Sleep(300 * time.Millisecond)
+	writer.Close()
+	<-done
+	return out
+}
+
+func TestNothingIsPushedAfterInitializedAloneOrBeforeTheGracePeriodEnds(t *testing.T) {
+	t.Parallel()
+	hub := &pushHub{pages: []model.InboxResponse{{Messages: []model.WireEnvelope{{ID: "m-1", From: "alpha", Text: "[landline] " + model.Marker + "\nx"}}}}}
+	out := &syncBuf{}
+	reader, writer := io.Pipe()
+	done := make(chan struct{})
+	go func() {
+		ServeWith(reader, out, hub, Options{Channel: true, PollWait: 1, ReadyDelay: 600 * time.Millisecond})
+		close(done)
+	}()
+	writer.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"))
+	time.Sleep(200 * time.Millisecond)
+	hub.mu.Lock()
+	callsAfterInitializedOnly := hub.calls
+	hub.mu.Unlock()
+	writer.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"))
+	time.Sleep(200 * time.Millisecond)
+	hub.mu.Lock()
+	callsInsideGrace := hub.calls
+	hub.mu.Unlock()
+	time.Sleep(800 * time.Millisecond)
+	writer.Close()
+	<-done
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	if callsAfterInitializedOnly != 0 || callsInsideGrace != 0 || hub.calls == 0 {
+		t.Fatalf("calls: after initialized only %d, inside the grace period %d, at the end %d", callsAfterInitializedOnly, callsInsideGrace, hub.calls)
 	}
 }

@@ -106,10 +106,27 @@ in its private state file and never print it.
 - **A Claude Code plugin from the official marketplace.** It would remove the development flag. It needs Anthropic to
   allowlist the plugin, which we do not control.
 
+## Findings from the prototype
+
+A prototype ran on 2026-11-11 against Claude Code 2.1.296, in a pseudo-terminal, with a throwaway hub and two agents.
+
+- **A pushed event starts a turn in an idle session.** With nothing typed, the session showed a one-line
+  `← landline: [landline] From another agent, not the user. from: alpha ...` preview, called `landline_send`, and its
+  reply reached the sender. The `<channel>` text reached the model in a form it acted on as a peer message. The role is
+  still not stated in the documentation.
+- **A local server is accepted with the development flag.** Claude Code shows a confirmation screen, and the person
+  chooses "I am using this for local development". The first run in a new folder also shows the folder trust screen.
+- **Claude Code registers its channel listener late, and drops earlier events silently.** The server saw `initialize`,
+  `notifications/initialized`, then `tools/list`. Test events sent at 0 seconds after the handshake were dropped, and
+  events sent at 2, 5, 10, and 20 seconds arrived. The first version of `landline mcp --channel` pushed queued mail at
+  launch, and the hub had already marked it read, so a backlog was lost. The server now waits for the handshake and the
+  first `tools/list`, then one more second, before it reads or pushes any mail. A queued message then arrives after
+  startup and is acted on.
+- **The one-second grace is a measured heuristic.** It rests on one version and one machine. A change in Claude Code
+  could move the registration later, so the inbox stays the recovery for any message that is lost this way.
+
 ## Open questions
 
-- Whether Claude Code tells an MCP server that it supports channels during `initialize`. If it does, `--channel` can
-  become automatic.
-- Whether a pushed event starts a turn in an idle session. The page implies it does and does not say.
-- In which role the `<channel>` content reaches the model, and what authority limits Claude Code applies to it.
+- Whether Claude Code tells an MCP server that it supports channels during `initialize`. The client's `initialize`
+  capabilities hold `roots` and `elicitation` and nothing about channels, so `--channel` stays a flag.
 - Whether a Landline channel can be listed on an allowlist for an organization that sets `allowedChannelPlugins`.

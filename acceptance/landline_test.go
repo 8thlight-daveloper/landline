@@ -1019,7 +1019,12 @@ func TestTheChannelModePushesMailToAnIdleSessionWithoutAnyToolCall(t *testing.T)
 	case <-time.After(5 * time.Second):
 		t.Fatal("no initialize reply")
 	}
-	time.Sleep(500 * time.Millisecond)
+	stdin.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"))
+	stdin.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"))
+	time.Sleep(1800 * time.Millisecond)
+	for len(lines) > 0 {
+		<-lines
+	}
 	w.must("pushed without a tool call", "send", "--as", "alpha", "--to", "bravo", "--thread", "deploy", "--kind", "task", "-")
 	select {
 	case line := <-lines:
@@ -1056,5 +1061,60 @@ func TestPlainMCPModeNeverPushesAndNeverDeclaresAChannel(t *testing.T) {
 	}
 	if got := w.must("", "inbox", "--as", "bravo"); !strings.Contains(got, "unread stays unread") {
 		t.Fatalf("plain mode consumed mail: %q", got)
+	}
+}
+
+func TestMailQueuedBeforeTheSessionStartsIsPushedOnlyAfterTheHandshake(t *testing.T) {
+	w := start(t)
+	w.must("", "register", "--name", "alpha", "--harness", "codex", "--host", "mac")
+	w.must("", "register", "--name", "bravo", "--harness", "claude-code", "--host", "mac")
+	w.must("queued before the session", "send", "--as", "alpha", "--to", "bravo", "-")
+	cmd := exec.Command(w.bin, "mcp", "--channel", "--as", "bravo")
+	cmd.Env = w.env
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { stdin.Close(); cmd.Process.Kill(); cmd.Wait() }()
+	lines := make(chan string, 8)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 0, 1<<20), 1<<22)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+	stdin.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n"))
+	<-lines
+	select {
+	case line := <-lines:
+		t.Fatalf("mail was pushed before the client said it was initialized: %s", line)
+	case <-time.After(1500 * time.Millisecond):
+	}
+	stdin.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"))
+	select {
+	case line := <-lines:
+		if strings.Contains(line, "queued before the session") {
+			t.Fatalf("pushed after initialized alone, before the tools were listed: %s", line)
+		}
+	case <-time.After(1200 * time.Millisecond):
+	}
+	stdin.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"))
+	var listed string
+	select {
+	case listed = <-lines:
+	case <-time.After(8 * time.Second):
+		t.Fatal("no reply to tools/list")
+	}
+	_ = listed
+	select {
+	case line := <-lines:
+		if !strings.Contains(line, "queued before the session") {
+			t.Fatalf("got %s", line)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("the queued mail was never pushed after the handshake")
 	}
 }
