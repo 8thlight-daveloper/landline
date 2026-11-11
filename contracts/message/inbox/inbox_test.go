@@ -67,7 +67,7 @@ func TestALimitReturnsTheOldestFirstAndCountsTheRest(t *testing.T) {
 	}
 }
 
-func TestAMessageAnAgentSentItselfIsNotInItsInbox(t *testing.T) {
+func TestAnAgentDoesNotSeeItsOwnBroadcast(t *testing.T) {
 	t.Parallel()
 	for _, m := range newImpl().Select(log, "alpha", 0, nil, 0).Messages {
 		if m.From == "alpha" {
@@ -184,5 +184,39 @@ func TestSelectNeverReordersTheCallersLog(t *testing.T) {
 	newImpl().Select(shuffled, "alpha", 0, nil, 0)
 	if !reflect.DeepEqual(shuffled, before) {
 		t.Fatalf("the log was reordered: %+v", shuffled)
+	}
+}
+
+func TestABroadcastInAThreadNobodyAskedForIsLeftOut(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{
+		env(1, "bravo", model.Broadcast, "deploy"),
+		env(2, "bravo", model.Broadcast, "main"),
+	}
+	got := newImpl().Select(l, "alpha", 0, []string{"deploy"}, 0)
+	if want := []int64{1}; !reflect.DeepEqual(seqs(got), want) {
+		t.Fatalf("got %v, want %v", seqs(got), want)
+	}
+}
+
+func TestAThreadIsMatchedWholeAndExactly(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{
+		env(1, "bravo", "alpha", "deploy"),
+		env(2, "bravo", "alpha", "deploy-2"),
+		env(3, "bravo", "alpha", "dep"),
+		env(4, "bravo", "alpha", "Deploy"),
+	}
+	got := newImpl().Select(l, "alpha", 0, []string{"deploy"}, 0)
+	if want := []int64{1}; !reflect.DeepEqual(seqs(got), want) {
+		t.Fatalf("got %v, want %v", seqs(got), want)
+	}
+}
+
+func TestAMessageAddressedToTheAgentByNameIsItsEvenIfItSentIt(t *testing.T) {
+	t.Parallel()
+	l := []model.Envelope{env(1, "alpha", "alpha", "main")}
+	if got := newImpl().Select(l, "alpha", 0, nil, 0); len(got.Messages) != 1 {
+		t.Fatalf("got %v", seqs(got))
 	}
 }

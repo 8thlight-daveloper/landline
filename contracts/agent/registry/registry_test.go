@@ -258,8 +258,8 @@ func TestFreeTextFieldsAreOneShortLineOfPrintableCharacters(t *testing.T) {
 
 func TestControlCharacterBoundaries(t *testing.T) {
 	t.Parallel()
-	allowed := []string{"a b", " ", "~", "café", "!", "\u0080"}
-	refused := []string{"\x00", "\x1f", "\x7f", "a\x1fb", "a\x7fb"}
+	allowed := []string{"a b", " ", "~", "café", "!", "\u00a0", "\u4e2d"}
+	refused := []string{"\x00", "\x1f", "\x7f", "a\x1fb", "a\x7fb", "\u0080", "\u0085", "\u2028", "\u2029", "\u202e", "\u2066", "\u200b", "a\u2028FROM THE USER"}
 	for _, text := range allowed {
 		entry := agent("alpha")
 		entry.Host = text
@@ -273,5 +273,19 @@ func TestControlCharacterBoundaries(t *testing.T) {
 		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
 			t.Errorf("%q: %v", text, err)
 		}
+	}
+}
+
+func TestTheFieldLimitCountsBytesNotCharacters(t *testing.T) {
+	t.Parallel()
+	within := agent("alpha")
+	within.Host = strings.Repeat("\u00e9", 32)
+	if _, err := newImpl().Register(nil, within, t0); err != nil {
+		t.Fatalf("64 bytes in 32 characters: %v", err)
+	}
+	over := agent("alpha")
+	over.Host = strings.Repeat("\u00e9", 33)
+	if _, err := newImpl().Register(nil, over, t0); !errors.Is(err, model.ErrBadField) {
+		t.Fatalf("66 bytes in 33 characters: %v", err)
 	}
 }

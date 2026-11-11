@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/8thlight-daveloper/landline/internal/model"
 )
@@ -64,7 +65,7 @@ func plainField(text string) bool {
 		return false
 	}
 	for _, r := range text {
-		if r < 0x20 || r == 0x7f {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf) {
 			return false
 		}
 	}

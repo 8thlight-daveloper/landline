@@ -3,11 +3,12 @@ package model
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 func oneLine(text string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf) {
 			return ' '
 		}
 		return r

@@ -21,8 +21,11 @@ authenticated sender, a new id and sequence number, and the time.
 - An empty kind is `chat`. Any other kind must be one of the model's kinds, or `model.ErrBadKind`.
 - `in_reply_to` is empty or 1 to 64 ASCII letters, digits, `.`, `-` or `_`, or `model.ErrBadReplyTo`. It carries no space
   or line break, so it cannot forge a line in the delivered header.
-- A body that is empty after trimming is `model.ErrEmptyBody`. A body over 64 KiB, counted in bytes, is
-  `model.ErrBodyTooLarge`. A body of exactly 64 KiB is accepted. The body is kept exactly as sent, spaces included.
+- A body that is empty after trimming Unicode white space, such as a tab or a no-break space, is `model.ErrEmptyBody`.
+  That check comes before the size check, so a 70 KiB body of spaces is `model.ErrEmptyBody`.
+- A kind and a recipient are matched exactly, so `CHAT` is not a kind and `ALL` is not the broadcast name.
+- `Recipients` is never nil. It is an empty list when a broadcast has no one to reach.
+- A body over 64 KiB, counted in bytes, is `model.ErrBodyTooLarge`. A body of exactly 64 KiB is accepted. The body is kept exactly as sent, spaces included.
 - A direct message has one recipient. A broadcast has every registered agent except the sender, sorted by name whatever
   the order of the list it was given, and may have none.
 - A thread is ASCII only. Every one of the model's four kinds is accepted.

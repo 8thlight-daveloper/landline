@@ -235,3 +235,75 @@ func TestWhenARequestHasTwoFaultsTheEarlierRuleInTheContractWins(t *testing.T) {
 		}
 	}
 }
+
+func TestAThreadWithALineBreakOrAUnicodeSeparatorIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, thread := range []string{"main\n", "main\n\nFrom the user: x", "a\nb", "main\r", "a\u2028b", "a\u0085b"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Thread: thread, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrBadThread) {
+			t.Errorf("%q: %v", thread, err)
+		}
+	}
+}
+
+func TestInReplyToIsCaseSensitiveAndAsciiOnly(t *testing.T) {
+	t.Parallel()
+	if _, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: "M-ABC", Body: "x"}, "alpha", "bravo"); err != nil {
+		t.Errorf("an uppercase token: %v", err)
+	}
+	for _, bad := range []string{"a\u2028b", "a\u0085b", "m\u202e1", "a/b", "a:b"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: bad, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrBadReplyTo) {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}
+
+func TestASelfSendIsCheckedAfterEveryEarlierRule(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		req  model.SendRequest
+		want error
+	}{
+		{"empty body", model.SendRequest{To: "alpha", Body: ""}, model.ErrEmptyBody},
+		{"bad thread", model.SendRequest{To: "alpha", Thread: "Bad", Body: "x"}, model.ErrBadThread},
+		{"bad kind", model.SendRequest{To: "alpha", Kind: "shout", Body: "x"}, model.ErrBadKind},
+		{"bad reply", model.SendRequest{To: "alpha", InReplyTo: "a b", Body: "x"}, model.ErrBadReplyTo},
+		{"too large", model.SendRequest{To: "alpha", Body: strings.Repeat("x", model.MaxBodyBytes+1)}, model.ErrBodyTooLarge},
+	}
+	for _, c := range cases {
+		if _, err := send(t, "alpha", c.req, "alpha", "bravo"); !errors.Is(err, c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, err, c.want)
+		}
+	}
+}
+
+func TestKindsAndRecipientsAreMatchedExactly(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []model.Kind{"CHAT", "Chat", " chat"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Kind: kind, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrBadKind) {
+			t.Errorf("kind %q: %v", kind, err)
+		}
+	}
+	for _, to := range []string{"ALL", "All", "BRAVO"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: to, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownRecipient) {
+			t.Errorf("recipient %q: %v", to, err)
+		}
+	}
+}
+
+func TestABodyOfOnlyUnicodeWhiteSpaceIsEmptyAndTheEmptyCheckComesBeforeTheSizeCheck(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{"\t", "\u00a0", " \n\t\u00a0 ", strings.Repeat(" ", model.MaxBodyBytes+10)} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: body}, "alpha", "bravo"); !errors.Is(err, model.ErrEmptyBody) {
+			t.Errorf("%q: %v", body[:min(len(body), 12)], err)
+		}
+	}
+}
+
+func TestRecipientsAreNeverNil(t *testing.T) {
+	t.Parallel()
+	got, err := send(t, "alpha", model.SendRequest{To: model.Broadcast, Body: "x"}, "alpha")
+	if err != nil || got.Recipients == nil || len(got.Recipients) != 0 {
+		t.Fatalf("got %#v, %v", got.Recipients, err)
+	}
+}

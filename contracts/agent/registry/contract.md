@@ -15,8 +15,10 @@ Holds the list of registered agents as a value. Every call takes the list and re
   is `model.ErrBadName`. An agent with no harness is `model.ErrNoHarness`.
 - A name is checked as ASCII only, 32 characters at most.
 - A harness that is empty or only spaces is `model.ErrNoHarness`.
-- The harness, host, session, wake method, and wake target are each at most 64 bytes with no control characters, so
-  none of them can break onto a new line. Anything else is `model.ErrBadField`. An empty host, session, wake method, or
+- The harness, host, session, wake method, and wake target are each at most 64 bytes, counted in bytes. They hold no
+  control character, no line or paragraph separator, and no invisible formatting character such as a right-to-left
+  override, which are the Unicode categories Cc, Zl, Zp, and Cf. So none of them can break onto a new line or reorder
+  the text around them. Anything else is `model.ErrBadField`. An empty host, session, wake method, or
   wake target is allowed.
 - The returned list is sorted by name. The input list is never changed, including when `Register` replaces an entry.
 - `Online` returns the agents whose `LastSeen` is no more than `window` before `now`, sorted by name.
