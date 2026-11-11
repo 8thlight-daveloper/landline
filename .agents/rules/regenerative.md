@@ -102,7 +102,9 @@ folder, `acceptance/`, `architecture.yaml`, and the model folder. A unit that ch
 records check until a new approval covers it.
 
 - Record an approval only with `nix run .#approve -- <gate> [unit] --approver <who>`, which writes the unit's hash.
-  Never edit the ledger by hand.
+  Never edit the ledger by hand. When a unit was renamed or deleted, its old entry fails the check. Drop it with
+  `nix run .#approve -- --remove <gate> <unit>`, which refuses while the unit exists. The renamed unit needs its own
+  approval.
 - Approve a gate only when `approvals.<gate>` in `.threnos/config.toml`, or in `.threnos/local.toml` for this person,
   lists `agent`. Otherwise stop and ask a person.
 - Never approve your own work. An agent approver names its harness and session, and its session must differ from the
