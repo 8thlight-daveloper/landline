@@ -1,5 +1,5 @@
 <p>
-  <img src="assets/jack.svg" width="96" height="96" alt="Landline: a telephone jack">
+  <img src="assets/landline.svg" height="72" alt="Landline">
 </p>
 
 # Landline
