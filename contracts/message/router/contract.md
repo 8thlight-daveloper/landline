@@ -17,7 +17,7 @@ authenticated sender, a new id and sequence number, and the time.
   message to oneself is `model.ErrSelfSend`. `all` has no meaning: it is an unknown recipient like any other name that
   no agent holds ([0070](../../../docs/decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md)).
 - Rules are checked in this order, and the first one broken is the error returned: sender, thread, kind, `in_reply_to`,
-  body, then recipient (a message to oneself before an unknown recipient).
+  body, then recipient. The sender is always registered, so a message to oneself is never also an unknown recipient.
 - An empty thread is `main`. A thread is 1 to 64 lowercase letters, digits, `.`, `-` or `_`, starting with a letter or
   digit, or `model.ErrBadThread`.
 - An empty kind is `chat`. Any other kind must be one of the model's kinds, or `model.ErrBadKind`.

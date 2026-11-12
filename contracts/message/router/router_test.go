@@ -79,8 +79,10 @@ func TestRefusals(t *testing.T) {
 
 func TestABodyOfExactlyTheLimitIsAccepted(t *testing.T) {
 	t.Parallel()
-	if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: strings.Repeat("x", model.MaxBodyBytes)}, "alpha", "bravo"); err != nil {
-		t.Fatal(err)
+	body := strings.Repeat("x", model.MaxBodyBytes)
+	got, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: body}, "alpha", "bravo")
+	if err != nil || got.Envelope.Body != body || !reflect.DeepEqual(got.Recipients, []string{"bravo"}) {
+		t.Fatalf("got %d bytes, recipients %v, %v", len(got.Envelope.Body), got.Recipients, err)
 	}
 }
 
@@ -144,10 +146,11 @@ func TestThreadBoundaries(t *testing.T) {
 
 func TestTheBodyIsKeptExactlyAsSent(t *testing.T) {
 	t.Parallel()
-	body := "  leading and trailing space \n\n"
-	got, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: body}, "alpha", "bravo")
-	if err != nil || got.Envelope.Body != body {
-		t.Fatalf("got %q, %v", got.Envelope.Body, err)
+	for _, body := range []string{"  leading and trailing space \n\n", "ends in a space ", "ends in a tab\t"} {
+		got, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: body}, "alpha", "bravo")
+		if err != nil || got.Envelope.Body != body {
+			t.Errorf("got %q, %v", got.Envelope.Body, err)
+		}
 	}
 }
 
@@ -356,8 +359,9 @@ func TestADuplicateNameInTheAgentListIsOneRecipient(t *testing.T) {
 func TestReplyTokensMayStartWithPunctuation(t *testing.T) {
 	t.Parallel()
 	for _, token := range []string{"-a", ".a", "_a", "---", "..."} {
-		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: token, Body: "x"}, "alpha", "bravo"); err != nil {
-			t.Errorf("%q: %v", token, err)
+		got, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: token, Body: "x"}, "alpha", "bravo")
+		if err != nil || got.Envelope.InReplyTo != token {
+			t.Errorf("%q: %+v, %v", token, got.Envelope, err)
 		}
 	}
 }
