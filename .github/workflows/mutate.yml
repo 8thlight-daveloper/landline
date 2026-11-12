@@ -88,6 +88,17 @@ jobs:
         run: |
           seconds=$(( $(date +%s) - STARTED ))
           nix develop --quiet --command just mutate-summary "$COMPONENT" mutation.log "$seconds" >> "$GITHUB_STEP_SUMMARY"
+      - name: Flag surviving mutants
+        if: always()
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          survivors="$(jq -r '.survivors // "none"' result.json 2>/dev/null || echo none)"
+          if [ "$survivors" = "none" ]; then
+            echo "::warning title=No mutation score for $COMPONENT::The run did not finish, so it has no score."
+          elif [ "$survivors" != "0" ]; then
+            echo "::warning title=Surviving mutants in $COMPONENT::$survivors survived. Each one is a contract gap, or an equivalent mutant that a person must check."
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

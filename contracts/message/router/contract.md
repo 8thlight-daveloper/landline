@@ -33,6 +33,10 @@ authenticated sender, a new id and sequence number, and the time.
   agents passed in is never reordered or changed.
 - A name that appears more than once in the agent list is still one recipient.
 - A thread is ASCII only. Every one of the model's four kinds is accepted.
+- The letters are exactly the ASCII ranges `a` to `z` and `A` to `Z`, and the digits `0` to `9`, so `z` and `Z` are
+  accepted and the characters next to them in the ASCII table (`{` after `z`, `[` after `Z`, `` ` `` and `@` before `a`
+  and `A`) are refused. Every character of `in_reply_to` is checked, the first included. Fixture source: the ASCII table
+  (US-ASCII, code points `0x40` to `0x7B`).
 - The envelope carries the given id, sequence number, and time, and the thread, kind, body, and `InReplyTo` as sent.
 
 ## Side effects and data access
@@ -69,18 +73,20 @@ None.
 
 ## Wrong implementations tried
 
-| Wrong implementation                             | Caught by                                                                                               |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| Trim the body                                    | `TestTheBodyIsKeptExactlyAsSent`                                                                        |
-| Accept a 65 character thread or a leading `.`    | `TestThreadBoundaries`                                                                                  |
-| Accept a newline in a thread or `in_reply_to`    | `TestAThreadWithALineBreakOrAUnicodeSeparatorIsRefused`, `TestInReplyToIsOneShortTokenWithNoLineBreaks` |
-| Hard-code the id, sequence, or round the time    | `TestTheEnvelopeCarriesTheGivenIdSequenceAndExactTime`                                                  |
-| Treat an empty recipient as a valid one          | `TestAnEmptyOrPaddedRecipientIsUnknown`                                                                 |
-| Treat `all` as a broadcast to everyone else      | `TestTheNameAllIsNotARecipientAtAll`                                                                    |
-| Treat `ALL` or `All` as special                  | `TestAllInAnyCaseIsAnUnknownRecipientToo`                                                               |
-| Return more than one recipient, or none          | `TestADecisionNamesExactlyOneRecipientAndNeverNil`                                                      |
-| Treat an unknown `all` as a self-send or success | `TestAnUnknownRecipientNamedAllIsNeitherASelfSendNorASuccess`                                           |
-| Check the `all` recipient before earlier rules   | `TestAnAllRecipientStillFollowsTheFixedOrderOfRules`                                                    |
-| List a repeated agent name twice                 | `TestADuplicateNameInTheAgentListIsOneRecipient`                                                        |
-| Sort the caller's list in place                  | `TestRoutingNeverReordersTheCallersAgentList`                                                           |
-| Check self-send before the body or thread        | `TestASelfSendIsCheckedAfterEveryEarlierRule`                                                           |
+| Wrong implementation                                                               | Caught by                                                                                               |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Trim the body                                                                      | `TestTheBodyIsKeptExactlyAsSent`                                                                        |
+| Accept a 65 character thread or a leading `.`                                      | `TestThreadBoundaries`                                                                                  |
+| Accept a newline in a thread or `in_reply_to`                                      | `TestAThreadWithALineBreakOrAUnicodeSeparatorIsRefused`, `TestInReplyToIsOneShortTokenWithNoLineBreaks` |
+| Hard-code the id, sequence, or round the time                                      | `TestTheEnvelopeCarriesTheGivenIdSequenceAndExactTime`                                                  |
+| Treat an empty recipient as a valid one                                            | `TestAnEmptyOrPaddedRecipientIsUnknown`                                                                 |
+| Treat `all` as a broadcast to everyone else                                        | `TestTheNameAllIsNotARecipientAtAll`                                                                    |
+| Treat `ALL` or `All` as special                                                    | `TestAllInAnyCaseIsAnUnknownRecipientToo`                                                               |
+| Return more than one recipient, or none                                            | `TestADecisionNamesExactlyOneRecipientAndNeverNil`                                                      |
+| Treat an unknown `all` as a self-send or success                                   | `TestAnUnknownRecipientNamedAllIsNeitherASelfSendNorASuccess`                                           |
+| Check the `all` recipient before earlier rules                                     | `TestAnAllRecipientStillFollowsTheFixedOrderOfRules`                                                    |
+| List a repeated agent name twice                                                   | `TestADuplicateNameInTheAgentListIsOneRecipient`                                                        |
+| Sort the caller's list in place                                                    | `TestRoutingNeverReordersTheCallersAgentList`                                                           |
+| Check self-send before the body or thread                                          | `TestASelfSendIsCheckedAfterEveryEarlierRule`                                                           |
+| Skip the first character of `in_reply_to` when checking it                         | `TestEveryCharacterOfInReplyToIsCheckedIncludingTheFirst`                                               |
+| Refuse `z` or `Z` in a thread or `in_reply_to`, or accept `{`, `[`, `` ` `` or `@` | `TestTokenAlphabetEdgesAtZAndUppercaseZ`                                                                |

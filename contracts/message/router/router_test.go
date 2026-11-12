@@ -470,3 +470,37 @@ func TestADecisionNamesExactlyOneRecipientAndNeverNil(t *testing.T) {
 		}
 	}
 }
+
+func TestTokenAlphabetEdgesAtZAndUppercaseZ(t *testing.T) {
+	t.Parallel()
+	agents := []string{"alpha", "bravo"}
+	for _, thread := range []string{"z", "az", "zz9", "a.z"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Thread: thread, Body: "x"}, agents...); err != nil {
+			t.Errorf("thread %q: %v", thread, err)
+		}
+	}
+	for _, thread := range []string{"{", "a{", "a`", "`a", "a[", "a@", "[a", "@a"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", Thread: thread, Body: "x"}, agents...); !errors.Is(err, model.ErrBadThread) {
+			t.Errorf("thread %q: %v", thread, err)
+		}
+	}
+	for _, token := range []string{"z", "Z", "az", "AZ", "zZ", "a.Z", "m-z"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: token, Body: "x"}, agents...); err != nil {
+			t.Errorf("in_reply_to %q: %v", token, err)
+		}
+	}
+	for _, token := range []string{"{", "a{", "a`", "`a", "a[", "a@", "[a", "@a"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: token, Body: "x"}, agents...); !errors.Is(err, model.ErrBadReplyTo) {
+			t.Errorf("in_reply_to %q: %v", token, err)
+		}
+	}
+}
+
+func TestEveryCharacterOfInReplyToIsCheckedIncludingTheFirst(t *testing.T) {
+	t.Parallel()
+	for _, token := range []string{" a", "\na", "\ta", "/a", ":a", "{a", "\u00e9a", "\u2028a", " ", "\n", "@", "{"} {
+		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: token, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrBadReplyTo) {
+			t.Errorf("in_reply_to %q: %v", token, err)
+		}
+	}
+}

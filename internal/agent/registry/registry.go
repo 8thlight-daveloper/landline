@@ -85,7 +85,7 @@ func (Registry) Resolve(all, live []model.Agent, query string) (model.Agent, []m
 		if each.Label == query {
 			labelled = append(labelled, each)
 		}
-		if strings.HasPrefix(each.Name, query) || (each.Label != "" && strings.HasPrefix(each.Label, query)) {
+		if strings.HasPrefix(each.Name, query) || strings.HasPrefix(each.Label, query) {
 			prefixed = append(prefixed, each)
 		}
 	}
