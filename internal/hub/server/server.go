@@ -47,18 +47,19 @@ type Config struct {
 }
 
 type Server struct {
-	cfg     Config
-	store   Store
-	reg     registry.Registry
-	rt      router.Router
-	mu      sync.Mutex
-	agents  []model.Agent
-	tokens  map[string]string
-	seq     int64
-	attach  map[string]*attachChallenge
-	streams map[string]*stream
-	pending map[string]*pendingDelivery
-	sent    map[string][]time.Time
+	cfg       Config
+	store     Store
+	reg       registry.Registry
+	rt        router.Router
+	mu        sync.Mutex
+	agents    []model.Agent
+	tokens    map[string]string
+	observers map[string]time.Time
+	seq       int64
+	attach    map[string]*attachChallenge
+	streams   map[string]*stream
+	pending   map[string]*pendingDelivery
+	sent      map[string][]time.Time
 }
 
 type stream struct {
@@ -116,7 +117,7 @@ func New(cfg Config, store Store) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg, store: store,
-		tokens: map[string]string{}, attach: map[string]*attachChallenge{},
+		tokens: map[string]string{}, observers: map[string]time.Time{}, attach: map[string]*attachChallenge{},
 		streams: map[string]*stream{}, pending: map[string]*pendingDelivery{},
 		sent: map[string][]time.Time{},
 		seq:  store.LastSeq(),
@@ -135,6 +136,7 @@ func randomHex(n int) string {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/register", s.register)
+	mux.HandleFunc("POST /v1/observers", s.registerObserver)
 	mux.HandleFunc("POST /v1/send", s.send)
 	mux.HandleFunc("GET /v1/stream", s.openStream)
 	mux.HandleFunc("POST /v1/deliveries/{id}/report", s.report)
@@ -164,6 +166,11 @@ func (s *Server) expireLocked() {
 		s.forgetLocked(agent.Name)
 	}
 	s.agents = kept
+	for token, seen := range s.observers {
+		if now.Sub(seen) > s.cfg.Grace {
+			delete(s.observers, token)
+		}
+	}
 }
 
 func (s *Server) forgetLocked(name string) {
@@ -192,24 +199,108 @@ func (s *Server) isSecret(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(bearer(r)), []byte(s.cfg.Secret)) == 1
 }
 
-func (s *Server) agentFor(r *http.Request) (string, bool) {
+type caller int
+
+const (
+	unknownCaller caller = iota
+	agentCaller
+	observerCaller
+)
+
+func (s *Server) callerFor(r *http.Request) (string, caller) {
 	token := bearer(r)
 	if token == "" {
-		return "", false
+		return "", unknownCaller
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expireLocked()
+	if _, ok := s.observers[token]; ok {
+		s.observers[token] = s.cfg.Now()
+		return "", observerCaller
+	}
 	name, ok := s.tokens[token]
 	if !ok {
-		return "", false
+		return "", unknownCaller
 	}
 	if agent, found := s.reg.Find(s.agents, name); found {
 		if updated, err := s.reg.Register(s.agents, agent, s.cfg.Now()); err == nil {
 			s.agents = updated
 		}
 	}
-	return name, true
+	return name, agentCaller
+}
+
+func (s *Server) secretOnly(w http.ResponseWriter, r *http.Request) bool {
+	if s.isSecret(r) {
+		return true
+	}
+	if s.observerRefreshed(r) {
+		fail(w, http.StatusForbidden, "an observer token is read-only and may only list agents")
+	} else {
+		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
+	}
+	return false
+}
+
+func (s *Server) observerRefreshed(r *http.Request) bool {
+	token := bearer(r)
+	if token == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireLocked()
+	if _, ok := s.observers[token]; !ok {
+		return false
+	}
+	s.observers[token] = s.cfg.Now()
+	return true
+}
+
+func (s *Server) agentFor(w http.ResponseWriter, r *http.Request) (string, bool) {
+	name, who := s.callerFor(r)
+	switch who {
+	case agentCaller:
+		return name, true
+	case observerCaller:
+		fail(w, http.StatusForbidden, "an observer token is read-only and may only list agents")
+	default:
+		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
+	}
+	return "", false
+}
+
+func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
+	if !s.secretOnly(w, r) {
+		return
+	}
+	var body ObserverRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	if !plainKind(body.Kind) {
+		fail(w, http.StatusBadRequest, "kind must be 1 to 64 bytes of plain text")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireLocked()
+	token := s.cfg.NewToken()
+	s.observers[token] = s.cfg.Now()
+	write(w, http.StatusOK, ObserverResponse{Token: token})
+}
+
+func plainKind(kind string) bool {
+	if len(kind) > 64 || strings.TrimSpace(kind) == "" {
+		return false
+	}
+	for _, r := range kind {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf) {
+			return false
+		}
+	}
+	return true
 }
 
 func write(w http.ResponseWriter, status int, value any) {
@@ -237,8 +328,7 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
-	if !s.isSecret(r) {
-		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
+	if !s.secretOnly(w, r) {
 		return
 	}
 	var body model.RegisterRequest
@@ -314,9 +404,8 @@ func (s *Server) resolveLocked(query string) (model.Agent, []model.Agent) {
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
-	from, ok := s.agentFor(r)
+	from, ok := s.agentFor(w, r)
 	if !ok {
-		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
 		return
 	}
 	var body model.SendBody
@@ -480,9 +569,8 @@ func (s *Server) deliver(ctx context.Context, name string, delivery model.Delive
 }
 
 func (s *Server) report(w http.ResponseWriter, r *http.Request) {
-	name, ok := s.agentFor(r)
+	name, ok := s.agentFor(w, r)
 	if !ok {
-		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
 		return
 	}
 	var report model.DeliveryReport
@@ -508,9 +596,8 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) openStream(w http.ResponseWriter, r *http.Request) {
-	name, ok := s.agentFor(r)
+	name, ok := s.agentFor(w, r)
 	if !ok {
-		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
 		return
 	}
 	mine := &stream{out: make(chan model.Delivery), done: make(chan struct{})}
@@ -582,7 +669,7 @@ func (s *Server) closeStream(name string, closing *stream) {
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.agentFor(r); !ok {
+	if _, who := s.callerFor(r); who == unknownCaller {
 		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
 		return
 	}
@@ -605,8 +692,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logRead(w http.ResponseWriter, r *http.Request) {
-	if !s.isSecret(r) {
-		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
+	if !s.secretOnly(w, r) {
 		return
 	}
 	after := int64(intOf(r.URL.Query().Get("after")))

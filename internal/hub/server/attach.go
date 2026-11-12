@@ -26,9 +26,8 @@ type attachChallenge struct {
 }
 
 func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
-	name, ok := s.agentFor(r)
+	name, ok := s.agentFor(w, r)
 	if !ok {
-		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
 		return
 	}
 	var body model.AttachRequest

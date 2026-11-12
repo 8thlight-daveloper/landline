@@ -1650,3 +1650,249 @@ func TestAHandleIsNotIssuedWhileAPresentAgentHoldsItAndIsIssuedOnceItIsGone(t *t
 		t.Fatalf("a forgotten handle was not free: %s", third)
 	}
 }
+
+func (h *harness) registerObserver(kind string) string {
+	h.t.Helper()
+	status, raw := h.call("POST", "/v1/observers", secret, ObserverRequest{Kind: kind})
+	if status != 200 {
+		h.t.Fatalf("register observer: %d %s", status, raw)
+	}
+	var out ObserverResponse
+	json.Unmarshal(raw, &out)
+	if out.Token == "" {
+		h.t.Fatal("empty observer token")
+	}
+	return out.Token
+}
+
+func TestObserverRegistrationNeedsTheHubSecretAndAValidKind(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	for _, token := range []string{"", "wrong", alpha} {
+		if status, _ := h.call("POST", "/v1/observers", token, ObserverRequest{Kind: "tui"}); status != 401 {
+			t.Fatalf("token %q answered %d", token, status)
+		}
+	}
+	token := h.registerObserver("tui")
+	if status, _ := h.call("POST", "/v1/observers", token, ObserverRequest{Kind: "tui"}); status != 403 {
+		t.Fatalf("an observer registering an observer answered %d", status)
+	}
+	bad := map[string]string{
+		"empty": "", "blank": "  \t", "long": strings.Repeat("k", 65), "control": "t\nui",
+		"line separator": "t ui", "format": "t​ui",
+	}
+	for name, kind := range bad {
+		if status, _ := h.call("POST", "/v1/observers", secret, ObserverRequest{Kind: kind}); status != 400 {
+			t.Fatalf("%s kind answered %d", name, status)
+		}
+	}
+	if status, _ := h.call("POST", "/v1/observers", secret, map[string]string{}); status != 400 {
+		t.Fatalf("a missing kind answered %d", status)
+	}
+	if status, _ := h.call("POST", "/v1/observers", secret, ObserverRequest{Kind: strings.Repeat("k", 64)}); status != 200 {
+		t.Fatalf("a 64 byte kind answered %d", status)
+	}
+}
+
+func TestAnObserverIsNeverListedAsAnAgent(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	h.openStream(alpha)
+	observer := h.registerObserver("tui")
+	for _, token := range []string{alpha, observer} {
+		listed := h.agents(token)
+		if len(listed) != 1 || listed[0].Name != "alpha" || !listed[0].Connected {
+			t.Fatalf("listed %+v", listed)
+		}
+	}
+	_, raw := h.call("GET", "/v1/agents", observer, nil)
+	_, agentRaw := h.call("GET", "/v1/agents", alpha, nil)
+	if string(raw) != string(agentRaw) {
+		t.Fatalf("observer saw %s, agent saw %s", raw, agentRaw)
+	}
+}
+
+func TestAnObserverTokenIsRefusedOnEveryOtherRoute(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	h.openStream(alpha)
+	h.register("bravo")
+	observer := h.registerObserver("tui")
+	routes := []struct {
+		method, path string
+		body         any
+	}{
+		{"POST", "/v1/send", model.SendBody{To: "alpha", Body: "x"}},
+		{"GET", "/v1/stream", nil},
+		{"POST", "/v1/attach", model.AttachRequest{}},
+		{"POST", "/v1/deliveries/d-1/report", model.DeliveryReport{OK: true}},
+		{"GET", "/v1/log", nil},
+		{"POST", "/v1/register", model.RegisterRequest{Name: "charlie", Harness: "codex"}},
+		{"POST", "/v1/observers", ObserverRequest{Kind: "tui"}},
+	}
+	for _, route := range routes {
+		status, raw := h.call(route.method, route.path, observer, route.body)
+		var problem model.ErrorResponse
+		json.Unmarshal(raw, &problem)
+		if status != 403 || !strings.Contains(problem.Error, "read-only") {
+			t.Fatalf("%s %s answered %d %s", route.method, route.path, status, raw)
+		}
+	}
+	if len(h.logged()) != 0 {
+		t.Fatal("a refused observer wrote to the log")
+	}
+	if len(h.agents(alpha)) != 2 {
+		t.Fatal("a refused observer changed the agents")
+	}
+	for _, route := range routes[:5] {
+		if status, _ := h.call(route.method, route.path, "unknown-token", route.body); status != 401 {
+			t.Fatalf("%s %s answered %d to an unknown token", route.method, route.path, status)
+		}
+	}
+}
+
+func TestALeakedObserverTokenCannotSend(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	receiver := h.openStream(alpha)
+	observer := h.registerObserver("tui")
+	if status, _ := h.call("POST", "/v1/send", observer, model.SendBody{To: "alpha", Body: "do it"}); status != 403 {
+		t.Fatalf("status %d", status)
+	}
+	if len(h.logged()) != 0 {
+		t.Fatal("the message was logged")
+	}
+	select {
+	case line := <-receiver.lines:
+		t.Fatalf("the stream got %q", line)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestAnObserverIsKeptForExactlyTheGraceAndDroppedAfterIt(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	observer := h.registerObserver("tui")
+	h.advance(2 * time.Minute)
+	if status, _ := h.call("GET", "/v1/agents", observer, nil); status != 200 {
+		t.Fatalf("at the grace the token answered %d", status)
+	}
+	h.advance(2*time.Minute + time.Nanosecond)
+	if status, _ := h.call("GET", "/v1/agents", observer, nil); status != 401 {
+		t.Fatalf("past the grace the token answered %d", status)
+	}
+	if status, _ := h.call("GET", "/v1/agents", observer, nil); status != 401 {
+		t.Fatalf("the dropped token answered %d", status)
+	}
+	h.hub.mu.Lock()
+	held := len(h.hub.observers)
+	h.hub.mu.Unlock()
+	if held != 0 {
+		t.Fatalf("%d observers held", held)
+	}
+}
+
+func TestAnExpiredObserverIsDroppedAtTheFirstRequestOfAnyKindAndANewOneWorks(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	observer := h.registerObserver("tui")
+	h.advance(2*time.Minute + time.Nanosecond)
+	h.call("GET", "/v1/log", secret, nil)
+	h.hub.mu.Lock()
+	held := len(h.hub.observers)
+	h.hub.mu.Unlock()
+	if held != 0 {
+		t.Fatal("the observer was kept")
+	}
+	if status, _ := h.call("GET", "/v1/agents", observer, nil); status != 401 {
+		t.Fatalf("status %d", status)
+	}
+	fresh := h.registerObserver("tui")
+	if status, _ := h.call("GET", "/v1/agents", fresh, nil); status != 200 {
+		t.Fatalf("status %d", status)
+	}
+}
+
+func TestEveryRequestRefreshesAnObserver(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	observer := h.registerObserver("tui")
+	for i := 0; i < 3; i++ {
+		h.advance(90 * time.Second)
+		if status, _ := h.call("GET", "/v1/agents", observer, nil); status != 200 {
+			t.Fatalf("round %d answered %d", i, status)
+		}
+	}
+	h.advance(90 * time.Second)
+	if status, _ := h.call("POST", "/v1/send", observer, model.SendBody{To: "x", Body: "x"}); status != 403 {
+		t.Fatalf("a refused request answered %d", status)
+	}
+	h.advance(90 * time.Second)
+	if status, _ := h.call("GET", "/v1/agents", observer, nil); status != 200 {
+		t.Fatalf("a refused request did not refresh: %d", status)
+	}
+}
+
+func TestAnAgentTokenSentToASecretRouteRefreshesNothing(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	for _, route := range []string{"/v1/log", "/v1/register", "/v1/observers"} {
+		method := "POST"
+		if route == "/v1/log" {
+			method = "GET"
+		}
+		h.advance(time.Minute + 30*time.Second)
+		if status, _ := h.call(method, route, alpha, nil); status != 401 {
+			t.Fatalf("%s answered %d", route, status)
+		}
+	}
+	h.advance(time.Minute + 30*time.Second)
+	if status, _ := h.call("GET", "/v1/agents", alpha, nil); status != 401 {
+		t.Fatalf("requests refused on secret routes kept the agent alive: %d", status)
+	}
+}
+
+func TestObserversAreIndependentAndAgentsAreUnaffected(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	h.openStream(alpha)
+	first := h.registerObserver("tui")
+	h.advance(time.Minute)
+	second := h.registerObserver("web")
+	if first == second {
+		t.Fatal("two observers share a token")
+	}
+	h.advance(time.Minute + time.Nanosecond)
+	if status, _ := h.call("GET", "/v1/agents", first, nil); status != 401 {
+		t.Fatalf("the first observer answered %d", status)
+	}
+	if status, _ := h.call("GET", "/v1/agents", second, nil); status != 200 {
+		t.Fatalf("the second observer answered %d", status)
+	}
+	if status, _ := h.call("GET", "/v1/agents", alpha, nil); status != 200 {
+		t.Fatalf("the agent answered %d", status)
+	}
+	if status, _ := h.call("GET", "/v1/agents", secret, nil); status != 401 {
+		t.Fatalf("the hub secret answered %d on an agent route", status)
+	}
+	h.register("bravo")
+	if status, _ := h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "x"}); status != 409 {
+		t.Fatalf("an agent send answered %d", status)
+	}
+}
+
+func TestAHubRestartForgetsObservers(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	observer := h.registerObserver("tui")
+	restarted := start(t)
+	if status, _ := restarted.call("GET", "/v1/agents", observer, nil); status != 401 {
+		t.Fatalf("status %d", status)
+	}
+}

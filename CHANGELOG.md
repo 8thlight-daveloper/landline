@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `POST /v1/observers` registers an observer, a read-only client that is not an agent
+  ([0090](docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)). Its token may call
+  `GET /v1/agents` and gets 403 on every other route. The hub holds it in memory and forgets it after 2 minutes without
+  a request, and the token then answers 401. An observer never appears in the agent list.
 - The hub keeps only connected agents ([0080](docs/decisions/0080-the-hub-keeps-only-connected-agents.md)). Agents and
   tokens live in memory, and an agent is held while its stream is open and for 2 minutes after (`--grace`). The hub
   drops the registration and the token after that, and the token answers 401. A send resolves a label or a prefix

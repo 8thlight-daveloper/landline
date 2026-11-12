@@ -11,15 +11,16 @@ takes `Authorization: Bearer <hub secret>`.
 
 ## Routes
 
-| Route                             | Auth        | Does                                                                           |
-| --------------------------------- | ----------- | ------------------------------------------------------------------------------ |
-| `POST /v1/register`               | secret      | Registers an agent. It takes no delivery fields and carries `landline_version` |
-| `POST /v1/attach`                 | agent token | Records claims. A Codex proof sends its code as a challenge                    |
-| `GET /v1/stream`                  | agent token | Opens the delivery stream (below)                                              |
-| `POST /v1/deliveries/{id}/report` | agent token | The MCP process reports one delivery. Body is `DeliveryReport`                 |
-| `POST /v1/send`                   | agent token | Sends to one recipient and waits for the delivery report                       |
-| `GET /v1/agents`                  | agent token | Lists agents, each with `connected`                                            |
-| `GET /v1/log`                     | secret      | Reads the log. Each entry has `result`                                         |
+| Route                             | Auth                    | Does                                                                           |
+| --------------------------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| `POST /v1/register`               | secret                  | Registers an agent. It takes no delivery fields and carries `landline_version` |
+| `POST /v1/observers`              | secret                  | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}` |
+| `POST /v1/attach`                 | agent token             | Records claims. A Codex proof sends its code as a challenge                    |
+| `GET /v1/stream`                  | agent token             | Opens the delivery stream (below)                                              |
+| `POST /v1/deliveries/{id}/report` | agent token             | The MCP process reports one delivery. Body is `DeliveryReport`                 |
+| `POST /v1/send`                   | agent token             | Sends to one recipient and waits for the delivery report                       |
+| `GET /v1/agents`                  | agent or observer token | Lists agents, each with `connected`                                            |
+| `GET /v1/log`                     | secret                  | Reads the log. Each entry has `result`                                         |
 
 Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 
@@ -92,6 +93,24 @@ including a handle the hub has forgotten, answers `404` unknown recipient.
 
 The hub keeps no state file. A hub restart forgets every agent and token, and each agent registers again and gets a new
 handle. The hub does not issue a handle that a present agent holds, and a forgotten handle may be issued again.
+
+## Observers
+
+[0090](../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) adds a client that is not an
+agent, such as a terminal viewer.
+
+- `POST /v1/observers` takes the hub secret and a body `{"kind": "tui"}`, and answers `200` with
+  `{"token": "<observer token>"}`. `kind` is required and follows the free-text rules of the registry: at most 64 bytes,
+  no control, line or paragraph separator, or format characters, and not empty after trimming white space. Otherwise the
+  hub answers `400`. A missing or wrong secret is `401`.
+- An observer is not an agent. It has no handle and no stream, and it never appears in `GET /v1/agents`.
+- An observer token is read-only. `GET /v1/agents` answers it with the list an agent gets. Every other route, including
+  the secret routes, refuses it with `403` and `{"error": "..."}` that says the token is read-only. An unknown token is
+  `401`.
+- The hub holds observers in memory only. An observer is forgotten after 2 minutes (`--grace`) without a request, and
+  the boundary is inclusive as for agents. Every request with its token, refused or not, resets that time. The hub
+  checks this before every request, against its own clock, and the token then answers `401`. A hub restart forgets every
+  observer. A client registers again with the hub secret on a `401`.
 
 ## Timing flags
 
