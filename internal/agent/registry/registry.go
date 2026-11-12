@@ -40,17 +40,6 @@ func (Registry) Register(agents []model.Agent, entry model.Agent, now time.Time)
 	return out, nil
 }
 
-func (Registry) Online(agents []model.Agent, now time.Time, window time.Duration) []model.Agent {
-	out := []model.Agent{}
-	for _, each := range agents {
-		if now.Sub(each.LastSeen) <= window {
-			out = append(out, each)
-		}
-	}
-	sortByName(out)
-	return out
-}
-
 func (Registry) Find(agents []model.Agent, name string) (model.Agent, bool) {
 	for _, each := range agents {
 		if each.Name == name {

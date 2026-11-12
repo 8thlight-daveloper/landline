@@ -93,21 +93,6 @@ func TestRegisterLeavesItsInputUnchanged(t *testing.T) {
 	}
 }
 
-func TestOnlineListsAgentsHeardFromWithinTheWindow(t *testing.T) {
-	t.Parallel()
-	r := newImpl()
-	agents, _ := r.Register(nil, agent("alpha"), t0)
-	agents, _ = r.Register(agents, agent("bravo"), t0.Add(50*time.Second))
-	now := t0.Add(100 * time.Second)
-	got := names(r.Online(agents, now, 60*time.Second))
-	if want := []string{"bravo"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	if got := names(r.Online(agents, t0.Add(60*time.Second), 60*time.Second)); !reflect.DeepEqual(got, []string{"alpha", "bravo"}) {
-		t.Fatalf("an agent heard from exactly one window ago is still online: got %v", got)
-	}
-}
-
 func TestFindReturnsTheNamedAgent(t *testing.T) {
 	t.Parallel()
 	r := newImpl()
@@ -139,18 +124,6 @@ func TestANameThatSortsBeforeAllIsStillAValidName(t *testing.T) {
 	}
 }
 
-func TestOnlineSortsItsResultWhateverTheInputOrder(t *testing.T) {
-	t.Parallel()
-	unsorted := []model.Agent{
-		{Name: "charlie", Harness: "h", LastSeen: t0},
-		{Name: "alpha", Harness: "h", LastSeen: t0},
-		{Name: "bravo", Harness: "h", LastSeen: t0},
-	}
-	if got := names(newImpl().Online(unsorted, t0, time.Minute)); !reflect.DeepEqual(got, []string{"alpha", "bravo", "charlie"}) {
-		t.Fatalf("got %v", got)
-	}
-}
-
 func TestFindPicksTheRightAgentAmongSeveral(t *testing.T) {
 	t.Parallel()
 	r := newImpl()
@@ -167,18 +140,6 @@ func TestFindPicksTheRightAgentAmongSeveral(t *testing.T) {
 		if _, ok := r.Find(agents, name); ok {
 			t.Errorf("found %q", name)
 		}
-	}
-}
-
-func TestOnlineKeepsEveryFieldOfTheEntries(t *testing.T) {
-	t.Parallel()
-	r := newImpl()
-	entry := agent("alpha")
-	entry.Folder, entry.Label = "threnos", "tutor"
-	agents, _ := r.Register(nil, entry, t0)
-	got := r.Online(agents, t0, time.Minute)
-	if len(got) != 1 || got[0].Folder != "threnos" || got[0].Label != "tutor" || got[0].Host != "mac" {
-		t.Fatalf("got %+v", got)
 	}
 }
 
@@ -286,7 +247,7 @@ func TestTheFieldLimitCountsBytesNotCharacters(t *testing.T) {
 	}
 }
 
-func TestNeitherRegisterNorOnlineReordersTheCallersList(t *testing.T) {
+func TestRegisterDoesNotReorderTheCallersList(t *testing.T) {
 	t.Parallel()
 	unsorted := []model.Agent{
 		{Name: "charlie", Harness: "h", LastSeen: t0},
@@ -294,12 +255,7 @@ func TestNeitherRegisterNorOnlineReordersTheCallersList(t *testing.T) {
 		{Name: "bravo", Harness: "h", LastSeen: t0},
 	}
 	before := append([]model.Agent(nil), unsorted...)
-	r := newImpl()
-	r.Online(unsorted, t0, time.Minute)
-	if !reflect.DeepEqual(unsorted, before) {
-		t.Fatalf("Online reordered the input: %+v", unsorted)
-	}
-	r.Register(unsorted, agent("delta"), t0)
+	newImpl().Register(unsorted, agent("delta"), t0)
 	if !reflect.DeepEqual(unsorted, before) {
 		t.Fatalf("Register reordered the input: %+v", unsorted)
 	}
@@ -313,14 +269,6 @@ func TestFindMatchesTheNameExactly(t *testing.T) {
 		if _, ok := r.Find(agents, name); ok {
 			t.Errorf("found %q", name)
 		}
-	}
-}
-
-func TestAnAgentHeardFromAfterNowCountsAsOnline(t *testing.T) {
-	t.Parallel()
-	agents := []model.Agent{{Name: "alpha", Harness: "h", LastSeen: t0.Add(time.Hour)}}
-	if got := names(newImpl().Online(agents, t0, time.Minute)); !reflect.DeepEqual(got, []string{"alpha"}) {
-		t.Fatalf("got %v", got)
 	}
 }
 
@@ -472,14 +420,6 @@ func TestResultsNeverShareStorageWithTheCallersSpareCapacity(t *testing.T) {
 	}
 }
 
-func TestOnlineWithAWindowOfZeroKeepsOnlyThoseHeardFromNow(t *testing.T) {
-	t.Parallel()
-	agents := []model.Agent{{Name: "alpha", Harness: "h", LastSeen: t0}, {Name: "bravo", Harness: "h", LastSeen: t0.Add(-time.Nanosecond)}}
-	if got := names(newImpl().Online(agents, t0, 0)); !reflect.DeepEqual(got, []string{"alpha"}) {
-		t.Fatalf("got %v", got)
-	}
-}
-
 func TestReRegisteringWithEmptyOptionalFieldsReplacesTheOldValues(t *testing.T) {
 	t.Parallel()
 	r := newImpl()
@@ -594,5 +534,107 @@ func TestResolveNeverChangesItsInputs(t *testing.T) {
 	newImpl().Resolve(all, live, "tutor")
 	if !reflect.DeepEqual(all, beforeAll) || !reflect.DeepEqual(live, beforeLive) {
 		t.Fatalf("an input changed: %v %v", names(all), names(live))
+	}
+}
+
+func TestResolveDoesNotMatchTheMiddleOrEndOfAHandleOrALabel(t *testing.T) {
+	t.Parallel()
+	all := resolveList()
+	if got, _ := newImpl().Resolve(all, all, "alpha-1k2"); got.Name != "alpha-1k2" {
+		t.Fatalf("the whole handle: %+v", got)
+	}
+	for _, query := range []string{"lpha", "ravo", "1k2", "k2", "utor", "tor", "viewer", "-"} {
+		if got, candidates := newImpl().Resolve(all, all, query); got.Name != "" || len(candidates) != 0 {
+			t.Errorf("%q: %+v %v", query, got, names(candidates))
+		}
+	}
+}
+
+func TestResolveDoesNotTrimTheQuery(t *testing.T) {
+	t.Parallel()
+	all := resolveList()
+	if got, _ := newImpl().Resolve(all, all, "alpha-1k2"); got.Name != "alpha-1k2" {
+		t.Fatalf("the untrimmed handle: %+v", got)
+	}
+	for _, query := range []string{" alpha-1k2", "alpha-1k2 ", "\talpha-1k2", " reviewer", "reviewer\n", " bra", "bra ", " ", "\u00a0reviewer"} {
+		if got, candidates := newImpl().Resolve(all, all, query); got.Name != "" || len(candidates) != 0 {
+			t.Errorf("%q: %+v %v", query, got, names(candidates))
+		}
+	}
+}
+
+func TestResolveMatchesHandlesAndLabelsOnlyInTheCaseTheyWereGiven(t *testing.T) {
+	t.Parallel()
+	all := []model.Agent{
+		{Name: "alpha", Harness: "h", Label: "Tutor"},
+		{Name: "bravo", Harness: "h", Label: "Reviewer"},
+	}
+	for _, query := range []string{"ALPHA", "Alpha", "aLPHA", "tutor", "TUTOR", "reviewer", "REV", "rev", "BRA", "tu"} {
+		if got, candidates := newImpl().Resolve(all, all, query); got.Name != "" || len(candidates) != 0 {
+			t.Errorf("%q: %+v %v", query, got, names(candidates))
+		}
+	}
+	for query, want := range map[string]string{"alpha": "alpha", "Tutor": "alpha", "Rev": "bravo", "Tu": "alpha"} {
+		if got, _ := newImpl().Resolve(all, all, query); got.Name != want {
+			t.Errorf("%q: %+v, want %s", query, got, want)
+		}
+	}
+}
+
+func TestResolveALabelTieIsNotBrokenByAPrefixMatch(t *testing.T) {
+	t.Parallel()
+	all := []model.Agent{
+		{Name: "alpha", Harness: "h", Label: "tutor"},
+		{Name: "bravo", Harness: "h", Label: "tutor"},
+		{Name: "tutor-x", Harness: "h"},
+		{Name: "tutor-y", Harness: "h", Label: "tutor"},
+	}
+	got, candidates := newImpl().Resolve(all, all, "tutor")
+	if got.Name != "" || !reflect.DeepEqual(names(candidates), []string{"alpha", "bravo", "tutor-y"}) {
+		t.Fatalf("got %+v %v", got, names(candidates))
+	}
+}
+
+func TestResolveListsAnAgentOnceWhenItsHandleAndItsLabelBothStartWithTheQuery(t *testing.T) {
+	t.Parallel()
+	all := []model.Agent{
+		{Name: "tutor-1", Harness: "h", Label: "tutor"},
+		{Name: "tutor-2", Harness: "h", Label: "tutor-two"},
+		{Name: "zulu", Harness: "h"},
+	}
+	got, candidates := newImpl().Resolve(all, all, "tut")
+	if got.Name != "" || !reflect.DeepEqual(names(candidates), []string{"tutor-1", "tutor-2"}) {
+		t.Fatalf("got %+v %v", got, names(candidates))
+	}
+	single := all[:1]
+	if got, candidates := newImpl().Resolve(single, single, "tut"); got.Name != "tutor-1" || candidates != nil {
+		t.Fatalf("one agent matching twice is one match: %+v %v", got, names(candidates))
+	}
+}
+
+func TestAHarnessOfOnlyAnInvisibleCharacterThatIsNotWhiteSpaceIsABadFieldNotNoHarness(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []string{"\u200b", "\u200b\u200b", " \u200b ", "\x00", "\x1f", "\ufeff"} {
+		entry := agent("alpha")
+		entry.Harness = harness
+		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
+			t.Errorf("%q: %v", harness, err)
+		}
+	}
+}
+
+func TestEveryFieldRefusesInvisibleFormattingCharacters(t *testing.T) {
+	t.Parallel()
+	formatting := []string{"\u00ad", "\u0600", "\u061c", "\u180e", "\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202d", "\u202e", "\u2060", "\u2066", "\u2069", "\ufeff", "\U000e0001", "\U000e0041"}
+	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "Model", "Effort", "Label"} {
+		for _, char := range formatting {
+			for _, text := range []string{"a" + char + "b", char + "codex", "codex" + char} {
+				entry := agent("alpha")
+				setField(&entry, field, text)
+				if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
+					t.Errorf("%s %q: %v", field, text, err)
+				}
+			}
+		}
 	}
 }
