@@ -6,6 +6,7 @@ affects: [agent/registry, hub/server, mcp/server, cli/command, client/http]
 builds-on: ['0010', '0020', '0040', '0050']
 partly-supersedes: ['0020']
 note: Decided in conversation on 2026-11-11 and not yet approved. It replaces the part of 0020 that has the person who holds the hub secret choose agent names.
+partly-superseded-by: ['0070']
 ---
 
 # 0060. Agents register themselves, with a handle and attributes

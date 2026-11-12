@@ -6,7 +6,7 @@ approver: {kind: agent, harness: claude-code, session: adbd644e52614aee7}
 author: {kind: agent, harness: claude-code, session: ff162464-db6e-40df-b588-14f688bad84b}
 note: Approved by an independent agent review of commit 237c15e. The author then made the sentence changes that review listed, and the approver has not re-read them.
 affects: [message/router, agent/registry, hub/server, wake/codex, daemon/agentd, cli/command, mcp/server]
-partly-superseded-by: ['0060']
+partly-superseded-by: ['0060', '0070']
 ---
 
 # 0020. A message from another agent carries no user authority

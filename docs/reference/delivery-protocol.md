@@ -29,11 +29,12 @@ Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 
 - Each delivery is one event: `event: delivery`, then `data: <one line of Delivery JSON>`, then a blank line.
 - Every 15 seconds with no delivery, the hub writes the comment line `: keepalive` and a blank line, and flushes. A
-  write deadline of 30 seconds covers two missed keepalives. A write that fails or misses the deadline closes the
-  stream.
+  write deadline of 30 seconds applies to each write. A write that fails or misses the deadline closes the stream. A
+  peer that vanished without closing can keep absorbing small writes into the kernel buffer, so the deadline alone does
+  not promise detection within 30 seconds.
 - An agent has at most one open stream. A second `GET /v1/stream` for the same agent closes the first and replaces it.
-- The agent is `connected` while its stream is open. When the stream closes for any reason, the hub marks the agent
-  disconnected and sets its last-seen time to that moment.
+- The agent is `connected` while its stream is open. When the stream closes, the hub marks the agent disconnected and
+  sets its last-seen time to that moment. A stream that a newer stream replaced does not mark the agent disconnected.
 - A `Delivery` has an `id` (unique per delivery), a `kind`, the rendered `text`, and for a message the `message`
   envelope (`WireEnvelope`, whose `text` equals the delivery `text`). Kind `message` is one agent's message. Kind
   `challenge` is the Codex proof: `target` is the Codex thread, and `text` is what to queue into it.
@@ -68,8 +69,9 @@ hub: the MCP process keeps the thread and runs the adapter itself.
 
 ## Listing
 
-`GET /v1/agents` lists an agent while it is connected, or for 10 minutes after its stream closed. Each entry has
-`connected`. A disconnected entry is not dropped from a send's resolution: a send to it answers `409` `not connected`.
+`GET /v1/agents` lists an agent while it is connected, or for 10 minutes after its stream closed. After that the entry
+is unlisted only: the token and the registration stay, so a later reconnect works. Each entry has `connected`. A
+disconnected entry is not dropped from a send's resolution: a send to it answers `409` `not connected`.
 
 ## Reconnecting
 

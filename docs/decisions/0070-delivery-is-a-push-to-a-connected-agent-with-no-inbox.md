@@ -2,9 +2,9 @@
 category: architecture
 status: accepted
 approval: person
-affects: [hub/server, mcp/server, wake/codex, daemon/agentd, message/inbox, message/router, client/http, cli/command]
+affects: [hub/server, mcp/server, wake/codex, message/router, client/http, cli/command]
 builds-on: ['0010', '0020', '0060']
-partly-supersedes: ['0030', '0050']
+partly-supersedes: ['0020', '0030', '0040', '0050', '0060']
 note: Drafted on 2026-11-11 after two hand tests of `codex queue` from inside an MCP process. It reverses the inbox decision of 0050.
 ---
 

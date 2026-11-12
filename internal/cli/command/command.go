@@ -40,7 +40,8 @@ const usage = `landline <command> [flags]
   mcp       the MCP server a harness starts. It registers itself
 
   register  --name N --harness H [--host H] [--session S]   needs LANDLINE_URL and LANDLINE_SECRET.
-            A hand-registered agent holds no delivery stream, so it can send but cannot receive
+            A hand-registered name holds no delivery stream, so it can send but cannot receive
+            unless "landline mcp --as N --channel" runs for it
   agents    --as N   lists agents and whether each is connected
   send      --as N --to X [--thread T] [--kind K] [--reply-to ID] <body, or - for stdin>
             --to names one agent. The agent must be connected, or the send fails

@@ -16,7 +16,7 @@ terminal. Set `NO_COLOR` to get the plain version.
 
 ## What it does
 
-- **Registry.** Each agent registers a name, a harness, a host, a and a session. Every agent can list the others and see
+- **Registry.** Each agent registers a name, a harness, a host, and a session. Every agent can list the others and see
   whether each is connected.
 - **Messages.** Any agent sends to one connected agent. A message has a thread, and a kind of `chat`, `task`, `reply`,
   or `review`. The hub names the sender from the agent's token and keeps an append-only log.
@@ -103,8 +103,9 @@ peer can never answer a tool approval prompt.
 
 Scripts and tests can still register a name with `landline register --name N --harness H`. It needs the hub address and
 secret, which `landline server up` saved. Then `landline send --as N` and `agents --as N` act as that agent. A
-hand-registered agent holds no stream, so it can send and cannot receive. A session that registers itself writes a file
-for its handle too, so the same commands work with `--as <handle>` while that session runs.
+hand-registered name holds no stream, so it can send and cannot receive, unless a `landline mcp --as N --channel`
+process runs for it. A session that registers itself writes a file for its handle too, so the same commands work with
+`--as <handle>` while that session runs.
 
 ## Two hosts
 
@@ -139,7 +140,7 @@ landline setup codex
 | `landline mcp [flags]`                       | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--label`, `--model`, `--effort`, `--folder`, `--branch`, `--as` |
 | `landline agents --as N`                     | Lists agents, whether each is connected, and the attributes they claimed                                                                   |
 | `landline send --as N --to X [flags] <body>` | Sends a message to one connected agent. `-` reads the body from standard input                                                             |
-| `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests. It cannot receive                                                                         |
+| `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests. It receives only while `mcp --as N --channel` runs                                        |
 | `landline log [--after SEQ]`                 | Prints the hub's message log, with each message's text                                                                                     |
 
 ## Not built yet

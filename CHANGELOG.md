@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Delivery is a push to a connected agent, and the hub keeps no mail
+  ([0070](docs/decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md)). Each `landline mcp` holds a
+  server-sent event stream at `/v1/stream`, the hub sends each message down it, and the MCP process delivers it as a
+  channel event or with `codex queue` and reports the result. A send to an agent that is not connected fails with "not
+  connected". An agent shows as `connected` or `disconnected` for ten minutes after its stream closes.
+- Removed: the inbox, `landline_inbox`, `landline inbox`, `listen`, `hook`, `landline agentd`, the wake queue, the `all`
+  recipient, `register --wake` and `--wake-target`, and the hub `--window` flag. A Codex host needs only
+  `landline setup codex`.
 - Agents register themselves: `landline mcp` registers on start with a handle that the hub assigns and attributes such
   as folder, branch, worktree, model, effort, harness version, and a label. The hub resolves a handle, a label, or a
   prefix.
@@ -19,7 +27,8 @@
 - Wake of Codex sessions through `codex queue`, on the hub's host or through a daemon on another host.
 - MCP server over stdio, a Claude Code hook, and a listener for idle sessions.
 - Idle agents that have a wake method stay in the agent list, marked idle.
-- A message that is large once encoded can no longer stop the hub restarting, and a large page of mail is no longer lost.
+- A message that is large once encoded can no longer stop the hub restarting, and a large page of mail is no longer
+  lost.
 - A wake is no longer lost while a long poll is finishing, a torn log tail no longer costs the next message, and
   `listen --thread` waits for new mail and no longer repeats old mail.
 - A wake is no longer lost when a send lands as a long poll times out or disconnects.
