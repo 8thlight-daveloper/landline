@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/8thlight-daveloper/landline/internal/agent/registry"
 	"github.com/8thlight-daveloper/landline/internal/message/router"
@@ -63,7 +65,9 @@ type stream struct {
 
 type pendingDelivery struct {
 	agent  string
+	stream *stream
 	report chan model.DeliveryReport
+	lost   chan struct{}
 }
 
 const minSecretLength = 16
@@ -324,6 +328,25 @@ func statusOf(err error) int {
 	}
 }
 
+const maxReportedProblemBytes = 256
+
+func plainProblem(problem string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp) {
+			return ' '
+		}
+		return r
+	}, problem)
+	if len(cleaned) <= maxReportedProblemBytes {
+		return cleaned
+	}
+	cut := maxReportedProblemBytes
+	for cut > 0 && !utf8.RuneStart(cleaned[cut]) {
+		cut--
+	}
+	return cleaned[:cut]
+}
+
 func (s *Server) deliver(ctx context.Context, name string, delivery model.Delivery) (int, string) {
 	s.mu.Lock()
 	open := s.streams[name]
@@ -332,7 +355,7 @@ func (s *Server) deliver(ctx context.Context, name string, delivery model.Delive
 		return http.StatusConflict, "not connected"
 	}
 	delivery.ID = "d-" + randomHex(8)
-	waiting := &pendingDelivery{agent: name, report: make(chan model.DeliveryReport, 1)}
+	waiting := &pendingDelivery{agent: name, stream: open, report: make(chan model.DeliveryReport, 1), lost: make(chan struct{})}
 	s.pending[delivery.ID] = waiting
 	s.mu.Unlock()
 	defer func() {
@@ -342,21 +365,35 @@ func (s *Server) deliver(ctx context.Context, name string, delivery model.Delive
 	}()
 	timer := time.NewTimer(s.cfg.DeliveryTimeout)
 	defer timer.Stop()
-	select {
-	case open.out <- delivery:
-	case <-open.done:
-		return http.StatusConflict, "not connected"
-	case <-timer.C:
-		return http.StatusGatewayTimeout, "no delivery report"
-	case <-ctx.Done():
-		return http.StatusGatewayTimeout, "no delivery report"
+	retried := false
+	for handed := false; !handed; {
+		select {
+		case open.out <- delivery:
+			handed = true
+		case <-open.done:
+			s.mu.Lock()
+			current := s.streams[name]
+			if current == nil || current == open || retried {
+				s.mu.Unlock()
+				return http.StatusConflict, "not connected"
+			}
+			waiting.stream = current
+			s.mu.Unlock()
+			open, retried = current, true
+		case <-timer.C:
+			return http.StatusGatewayTimeout, "no delivery report"
+		case <-ctx.Done():
+			return http.StatusGatewayTimeout, "no delivery report"
+		}
 	}
 	select {
 	case report := <-waiting.report:
 		if report.OK {
 			return http.StatusOK, ""
 		}
-		return http.StatusBadGateway, report.Error
+		return http.StatusBadGateway, plainProblem(report.Error)
+	case <-waiting.lost:
+		return http.StatusConflict, "not connected"
 	case <-timer.C:
 		return http.StatusGatewayTimeout, "no delivery report"
 	case <-ctx.Done():
@@ -453,6 +490,12 @@ func (s *Server) closeStream(name string, closing *stream) {
 	}
 	delete(s.streams, name)
 	close(closing.done)
+	for id, waiting := range s.pending {
+		if waiting.stream == closing {
+			delete(s.pending, id)
+			close(waiting.lost)
+		}
+	}
 	if agent, found := s.reg.Find(s.agents, name); found {
 		if updated, err := s.reg.Register(s.agents, agent, s.cfg.Now()); err == nil {
 			s.agents = updated

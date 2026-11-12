@@ -190,6 +190,17 @@ func TestBadDeliveryJSONIsAnErrorAndStopsTheStream(t *testing.T) {
 	}
 }
 
+func TestSeveralDataLinesOfOneEventAreJoinedWithNewlinesBeforeDecoding(t *testing.T) {
+	t.Parallel()
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		fmt.Fprint(w, "event: delivery\ndata: {\"id\":\"d-1\",\ndata: \"kind\":\"message\",\"text\":\"hi\"}\n\n")
+	})
+	got, err := collect(t, c)
+	if err != nil || len(got) != 1 || got[0].ID != "d-1" || got[0].Text != "hi" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
 func TestAnEventThatIsNotADeliveryIsIgnored(t *testing.T) {
 	t.Parallel()
 	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {

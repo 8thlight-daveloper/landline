@@ -133,24 +133,25 @@ func (c *Client) Stream(ctx context.Context, handle func(model.Delivery)) error 
 	defer stop()
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64<<10), maxStreamLine)
-	var event, data string
+	var event string
+	var data []string
 	for scanner.Scan() {
 		line := scanner.Text()
 		switch {
 		case line == "":
-			if event == "delivery" && data != "" {
+			if event == "delivery" && len(data) > 0 {
 				var delivery model.Delivery
-				if err := json.Unmarshal([]byte(data), &delivery); err != nil {
+				if err := json.Unmarshal([]byte(strings.Join(data, "\n")), &delivery); err != nil {
 					return fmt.Errorf("the hub sent a delivery that is not valid JSON: %w", err)
 				}
 				handle(delivery)
 			}
-			event, data = "", ""
+			event, data = "", nil
 		case strings.HasPrefix(line, ":"):
 		case strings.HasPrefix(line, "event:"):
 			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 		case strings.HasPrefix(line, "data:"):
-			data = strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
+			data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
 		}
 	}
 	if ctx.Err() != nil {

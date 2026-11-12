@@ -536,6 +536,9 @@ func attempt(out io.Writer, options Options, state *session, delivery model.Deli
 }
 
 func writeChannel(out io.Writer, m model.WireEnvelope, text string) error {
+	if !strings.HasPrefix(text, "[landline] "+model.Marker+"\n") {
+		return errors.New("the delivery text lacks the landline marker")
+	}
 	raw, err := json.Marshal(channelNotification(m, text))
 	if err != nil {
 		return err

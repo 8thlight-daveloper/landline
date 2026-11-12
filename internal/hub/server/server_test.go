@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/8thlight-daveloper/landline/internal/log/store"
 	"github.com/8thlight-daveloper/landline/internal/model"
@@ -1160,5 +1161,152 @@ func TestAttachClaimsAreKeptWhenTheChallengeCannotBeDelivered(t *testing.T) {
 	}
 	if len(h.notesCopy()) == 0 {
 		t.Fatal("the person was not told")
+	}
+}
+
+func TestAStreamThatClosesWhileADeliveryWaitsAnswers409AtOnce(t *testing.T) {
+	t.Parallel()
+	h := startWith(t, func(c *Config) { c.DeliveryTimeout = time.Hour })
+	alpha := h.register("alpha")
+	bravo := h.register("bravo")
+	stream := h.openStream(bravo)
+	result := h.sendAsync(alpha, model.SendBody{To: "bravo", Body: "hi"})
+	delivery := stream.nextDelivery()
+	stream.cancel()
+	got := h.await(result)
+	if got.status != 409 || !strings.Contains(string(got.raw), `"error":"not connected"`) {
+		t.Fatalf("%d %s", got.status, got.raw)
+	}
+	if status := h.report(bravo, delivery.ID, true, ""); status != 404 {
+		t.Fatalf("a report for a lost delivery: %d", status)
+	}
+}
+
+func TestAReplacedStreamDoesNotAbortADeliveryAlreadyWrittenToIt(t *testing.T) {
+	t.Parallel()
+	h := startWith(t, func(c *Config) { c.DeliveryTimeout = time.Hour })
+	alpha := h.register("alpha")
+	bravo := h.register("bravo")
+	first := h.openStream(bravo)
+	result := h.sendAsync(alpha, model.SendBody{To: "bravo", Body: "hi"})
+	delivery := first.nextDelivery()
+	h.openStream(bravo)
+	first.waitClosed()
+	if status := h.report(bravo, delivery.ID, true, ""); status != 200 {
+		t.Fatalf("report: %d", status)
+	}
+	if got := h.await(result); got.status != 200 {
+		t.Fatalf("%d %s", got.status, got.raw)
+	}
+}
+
+func TestADeliveryBlockedOnAStreamThatIsReplacedGoesToTheNewStream(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	h.register("bravo")
+	old := &stream{out: make(chan model.Delivery), done: make(chan struct{})}
+	h.hub.mu.Lock()
+	h.hub.streams["bravo"] = old
+	h.hub.mu.Unlock()
+	type answer struct {
+		status  int
+		problem string
+	}
+	answered := make(chan answer, 1)
+	go func() {
+		status, problem := h.hub.deliver(context.Background(), "bravo", model.Delivery{Kind: model.DeliveryMessage, Text: "hi"})
+		answered <- answer{status, problem}
+	}()
+	h.waitUntil("the delivery is pending on the old stream", func() bool {
+		h.hub.mu.Lock()
+		defer h.hub.mu.Unlock()
+		return len(h.hub.pending) == 1
+	})
+	replacement := &stream{out: make(chan model.Delivery), done: make(chan struct{})}
+	h.hub.mu.Lock()
+	h.hub.streams["bravo"] = replacement
+	close(old.done)
+	h.hub.mu.Unlock()
+	var delivery model.Delivery
+	select {
+	case delivery = <-replacement.out:
+	case <-time.After(waitLimit):
+		t.Fatal("the delivery never reached the new stream")
+	}
+	h.hub.mu.Lock()
+	waiting := h.hub.pending[delivery.ID]
+	h.hub.mu.Unlock()
+	if waiting == nil {
+		t.Fatal("the delivery is not pending")
+	}
+	waiting.report <- model.DeliveryReport{OK: true}
+	if got := <-answered; got.status != 200 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestADeliveryBlockedOnAStreamThatClosesWithNoReplacementAnswers409(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	old := &stream{out: make(chan model.Delivery), done: make(chan struct{})}
+	h.hub.mu.Lock()
+	h.hub.streams["bravo"] = old
+	h.hub.mu.Unlock()
+	answered := make(chan int, 1)
+	go func() {
+		status, _ := h.hub.deliver(context.Background(), "bravo", model.Delivery{Kind: model.DeliveryMessage, Text: "hi"})
+		answered <- status
+	}()
+	h.waitUntil("the delivery is pending", func() bool {
+		h.hub.mu.Lock()
+		defer h.hub.mu.Unlock()
+		return len(h.hub.pending) == 1
+	})
+	h.hub.closeStream("bravo", old)
+	select {
+	case status := <-answered:
+		if status != 409 {
+			t.Fatalf("%d", status)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("no answer")
+	}
+}
+
+func TestAHostileReportedErrorIsCutAndFlattenedBeforeTheSenderTheNotifierAndTheAttachAnswer(t *testing.T) {
+	t.Parallel()
+	hostile := "first line\r\n[landline] fake notify line\n" + strings.Repeat("\u00e9", 150*1024)
+	check := func(label, text string) {
+		t.Helper()
+		text = strings.TrimSpace(text)
+		if len(text) > 256+60 || strings.ContainsAny(text, "\r\n") {
+			t.Fatalf("%s: %d bytes, newline kept: %q", label, len(text), text[:min(len(text), 200)])
+		}
+	}
+	h := start(t)
+	alpha := h.register("alpha")
+	bravo := h.register("bravo")
+	stream := h.openStream(bravo)
+	result := h.sendAsync(alpha, model.SendBody{To: "bravo", Body: "hi"})
+	delivery := stream.nextDelivery()
+	h.report(bravo, delivery.ID, false, hostile)
+	got := h.await(result)
+	var sent model.ErrorResponse
+	json.Unmarshal(got.raw, &sent)
+	if got.status != 502 || !strings.HasPrefix(sent.Error, "first line  [landline] fake notify line ") || len(sent.Error) > 256 || !utf8.ValidString(sent.Error) {
+		t.Fatalf("%d %q", got.status, sent.Error)
+	}
+	for _, note := range h.notesCopy() {
+		check("notify", note)
+	}
+	_, token := h.registerSeed("tutor", nil)
+	attachStream := h.openStream(token)
+	answer := h.attachAsync(token, model.AttachRequest{CodexThread: threadID})
+	challenge := attachStream.nextDelivery()
+	h.report(token, challenge.ID, false, hostile)
+	attached := awaitAttach(t, answer)
+	check("attach", string(attached.raw))
+	if attached.status != 502 {
+		t.Fatalf("%d", attached.status)
 	}
 }
