@@ -1023,36 +1023,260 @@ func nonLoopbackAddress() string {
 	return ""
 }
 
-func TestTheHubListensOnLocalhostOnlyByDefault(t *testing.T) {
-	if c, err := net.Dial("tcp", "127.0.0.1:8787"); err == nil {
-		c.Close()
-		t.Skip("port 8787 is already in use on this machine")
-	}
+func TestTheHubListensOnTheLoopbackAddressOfLandlinePortAndNotOnOtherAddresses(t *testing.T) {
 	bin, config := build(t), t.TempDir()
-	hub := exec.Command(bin, "hub", "--log", filepath.Join(config, "log.jsonl"), "--state", filepath.Join(config, "state.json"))
-	hub.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret)
+	_, port, _ := net.SplitHostPort(freeAddr(t))
+	hub := exec.Command(bin, "server", "run", "--log", filepath.Join(config, "log.jsonl"), "--state", filepath.Join(config, "state.json"))
+	hub.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret, "LANDLINE_PORT="+port)
+	stderr := &syncBuffer{}
+	hub.Stderr = stderr
 	if err := hub.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { hub.Process.Kill(); hub.Wait() }()
-	deadline := time.Now().Add(10 * time.Second)
-	up := false
-	for time.Now().Before(deadline) && !up {
-		if c, err := net.Dial("tcp", "127.0.0.1:8787"); err == nil {
+	eventually(t, "the hub to listen on 127.0.0.1:"+port, func() bool {
+		c, err := net.Dial("tcp", "127.0.0.1:"+port)
+		if err == nil {
 			c.Close()
-			up = true
-		} else {
-			time.Sleep(50 * time.Millisecond)
 		}
-	}
-	if !up {
-		t.Fatal("the hub did not listen on 127.0.0.1:8787")
-	}
+		return err == nil
+	})
 	if other := nonLoopbackAddress(); other != "" {
-		if c, err := net.DialTimeout("tcp", other+":8787", time.Second); err == nil {
+		if c, err := net.DialTimeout("tcp", net.JoinHostPort(other, port), time.Second); err == nil {
 			c.Close()
-			t.Fatalf("the hub answers on %s:8787, so it listens beyond localhost", other)
+			t.Fatalf("the hub answers on %s:%s, so it listens beyond localhost", other, port)
 		}
+	}
+}
+
+func TestAnInvalidLandlinePortMakesTheHubExitWithStatusTwoAndAMessage(t *testing.T) {
+	bin, config := build(t), t.TempDir()
+	for _, bad := range []string{"99999", "abc", "0", "-1"} {
+		cmd := exec.Command(bin, "server", "run", "--log", filepath.Join(config, "log.jsonl"), "--state", filepath.Join(config, "state.json"))
+		cmd.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret, "LANDLINE_PORT="+bad)
+		var out bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &out
+		err := cmd.Run()
+		exit, isExit := err.(*exec.ExitError)
+		if !isExit || exit.ExitCode() != 2 || !strings.Contains(out.String(), "LANDLINE_PORT") {
+			t.Errorf("LANDLINE_PORT=%s: %v %q", bad, err, out.String())
+		}
+	}
+}
+
+type rawLines struct {
+	lines  chan string
+	closed chan struct{}
+	status int
+}
+
+func (w *world) openRawLines(name string) *rawLines {
+	w.t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	w.t.Cleanup(cancel)
+	req, _ := http.NewRequestWithContext(ctx, "GET", w.url+"/v1/stream", nil)
+	req.Header.Set("Authorization", "Bearer "+w.token(name))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	r := &rawLines{lines: make(chan string, 256), closed: make(chan struct{}), status: resp.StatusCode}
+	go func() {
+		defer close(r.closed)
+		defer resp.Body.Close()
+		reader := bufio.NewReader(resp.Body)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			r.lines <- strings.TrimRight(line, "\r\n")
+		}
+	}()
+	return r
+}
+
+func (r *rawLines) waitFor(t *testing.T, line string, within time.Duration) {
+	t.Helper()
+	deadline := time.After(within)
+	for {
+		select {
+		case got := <-r.lines:
+			if got == line {
+				return
+			}
+		case <-r.closed:
+			t.Fatalf("the stream closed before %q arrived", line)
+		case <-deadline:
+			t.Fatalf("%q did not arrive within %s", line, within)
+		}
+	}
+}
+
+func logResults(output string) map[string]string {
+	results := map[string]string{}
+	var fields []string
+	for _, line := range strings.Split(output, "\n") {
+		switch {
+		case strings.HasPrefix(line, "    "):
+			if fields != nil {
+				result := ""
+				if len(fields) > 5 {
+					result = fields[5]
+				}
+				results[strings.TrimPrefix(line, "    ")] = result
+				fields = nil
+			}
+		case line != "":
+			fields = strings.Split(line, "\t")
+		}
+	}
+	return results
+}
+
+func TestAnOpenStreamReceivesAKeepaliveCommentWithNoDeliveryAndStaysOpen(t *testing.T) {
+	w := startHub(t, build(t), t.TempDir(), "", "--keepalive", "200ms")
+	w.register("bravo")
+	stream := w.openRawLines("bravo")
+	stream.waitFor(t, ": keepalive", time.Second)
+	stream.waitFor(t, ": keepalive", time.Second)
+	select {
+	case <-stream.closed:
+		t.Fatal("the stream closed")
+	default:
+	}
+	if got := w.state("bravo"); got != "connected" {
+		t.Fatalf("state: %q", got)
+	}
+}
+
+func TestASendWithNoDeliveryReportAnswers504AfterTheDeliveryTimeoutAndTheLogRecordsIt(t *testing.T) {
+	w := startHub(t, build(t), t.TempDir(), "", "--delivery-timeout", "500ms")
+	w.register("alpha", "bravo")
+	stream := w.openStream("bravo", false)
+	w.waitState("bravo", "connected")
+	started := time.Now()
+	status, body := w.sendHTTP("alpha", "bravo", "nobody reports this")
+	elapsed := time.Since(started)
+	if status != 504 || !strings.Contains(body, "no delivery report") {
+		t.Fatalf("got %d %s", status, body)
+	}
+	if elapsed < 400*time.Millisecond || elapsed > 3*time.Second {
+		t.Fatalf("the send answered after %s", elapsed)
+	}
+	if d := stream.next(t); d.Message == nil || !strings.Contains(d.Text, "nobody reports this") {
+		t.Fatalf("delivery: %+v", d)
+	}
+	eventually(t, "the log result", func() bool { return logResults(w.logText())["nobody reports this"] == "no delivery report" })
+}
+
+func TestAnAgentIsUnlistedAfterTheRetentionTimeButItsRegistrationStaysAndASendStillAnswersNotConnected(t *testing.T) {
+	w := startHub(t, build(t), t.TempDir(), "", "--retention", "1s")
+	w.register("alpha")
+	p, handle := w.selfRegistered("tutor", "claude-code")
+	p.stop()
+	w.waitState(handle, "disconnected")
+	stopped := time.Now()
+	if got := w.state(handle); got != "disconnected" {
+		t.Fatalf("at once: %q", got)
+	}
+	time.Sleep(time.Until(stopped.Add(1500 * time.Millisecond)))
+	eventually(t, handle+" to be unlisted", func() bool { return !strings.Contains(w.must("", "agents", "--as", "alpha"), handle) })
+	status, body := w.sendHTTP("alpha", handle, "after it was unlisted")
+	if status != 409 || !strings.Contains(body, notConnected) {
+		t.Fatalf("got %d %s", status, body)
+	}
+}
+
+func TestARestartedMCPProcessGetsANewHandleWhileAReconnectWithTheSameTokenKeepsIt(t *testing.T) {
+	w := start(t)
+	w.register("alpha", "bravo")
+	first, firstHandle := w.selfRegistered("tutor", "claude-code")
+	first.stop()
+	w.waitState(firstHandle, "disconnected")
+	_, secondHandle := w.selfRegistered("tutor", "claude-code")
+	if secondHandle == firstHandle {
+		t.Fatalf("the restarted process kept the handle %s", firstHandle)
+	}
+	if got := w.state(firstHandle); got != "disconnected" {
+		t.Fatalf("the old handle: %q", got)
+	}
+	if status, body := w.sendHTTP("alpha", firstHandle, "to the old handle"); status != 409 || !strings.Contains(body, notConnected) {
+		t.Fatalf("got %d %s", status, body)
+	}
+	w.openStream("bravo", true)
+	w.waitState("bravo", "connected")
+	w.openStream("bravo", true)
+	w.waitState("bravo", "connected")
+	if status, _ := w.sendHTTP("alpha", "bravo", "after the reconnect"); status != 200 {
+		t.Fatalf("after the reconnect: %d", status)
+	}
+}
+
+func TestTheSixthCodexChallengeInTheWindowAnswers429AndSendsNothingOnTheStream(t *testing.T) {
+	w := start(t)
+	w.register("alpha")
+	stream := w.openStream("alpha", true)
+	for i := 1; i <= 5; i++ {
+		status, body := w.post("/v1/attach", w.token("alpha"), map[string]string{"codex_thread": threadOne})
+		if status != 200 {
+			t.Fatalf("challenge %d: %d %s", i, status, body)
+		}
+		if d := stream.next(t); d.Kind != "challenge" || d.Target != threadOne {
+			t.Fatalf("challenge %d arrived as %+v", i, d)
+		}
+	}
+	status, body := w.post("/v1/attach", w.token("alpha"), map[string]string{"codex_thread": threadOne})
+	if status != 429 || !strings.Contains(body, "too many proof challenges, try again later") {
+		t.Fatalf("the sixth: %d %s", status, body)
+	}
+	stream.expectNothing(t)
+}
+
+func TestTheLogRecordsEachSendsResultAndALogWithoutResultLinesStillLoads(t *testing.T) {
+	bin, config := build(t), t.TempDir()
+	legacy := `{"seq":1,"id":"m-old","time":"2026-01-01T00:00:00Z","thread":"","from":"alpha","to":"bravo","kind":"message","body":"from before the change"}` + "\n"
+	if err := os.WriteFile(filepath.Join(config, "log.jsonl"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := startHub(t, bin, config, "", "--delivery-timeout", "500ms")
+	w.register("alpha", "bravo", "charlie", "delta")
+	if got := logResults(w.logText()); len(got) != 1 || got["from before the change"] != "" {
+		t.Fatalf("the old log: %v", got)
+	}
+	w.openStream("bravo", true)
+	w.openStream("delta", false)
+	w.waitState("bravo", "connected")
+	w.waitState("delta", "connected")
+	if status, body := w.sendHTTP("alpha", "bravo", "goes through"); status != 200 {
+		t.Fatalf("delivered: %d %s", status, body)
+	}
+	if status, _ := w.sendHTTP("alpha", "charlie", "nobody home"); status != 409 {
+		t.Fatalf("not connected: %d", status)
+	}
+	if status, _ := w.sendHTTP("alpha", "delta", "never reported"); status != 504 {
+		t.Fatalf("timeout: %d", status)
+	}
+	want := map[string]string{"from before the change": "", "goes through": "delivered", "nobody home": "not connected", "never reported": "no delivery report"}
+	eventually(t, "the results in the log", func() bool {
+		got := logResults(w.logText())
+		for body, result := range want {
+			if got[body] != result {
+				return false
+			}
+		}
+		return true
+	})
+	raw, _ := os.ReadFile(filepath.Join(config, "log.jsonl"))
+	for _, line := range []string{`{"seq":2,"result":"delivered"}`, `{"seq":3,"result":"not connected"}`, `{"seq":4,"result":"no delivery report"}`} {
+		if !strings.Contains(string(raw), line) {
+			t.Errorf("the log file lacks %s:\n%s", line, raw)
+		}
+	}
+	w.stop()
+	again := startHub(t, bin, config, w.addr, "--delivery-timeout", "500ms")
+	if got := logResults(again.logText()); got["goes through"] != "delivered" || got["never reported"] != "no delivery report" {
+		t.Fatalf("after a restart: %v", got)
 	}
 }
 
