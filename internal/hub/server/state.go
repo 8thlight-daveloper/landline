@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -11,9 +10,8 @@ import (
 )
 
 type snapshot struct {
-	Agents  []model.Agent     `json:"agents"`
-	Tokens  map[string]string `json:"tokens"`
-	Cursors map[string]int64  `json:"cursors"`
+	Agents []model.Agent     `json:"agents"`
+	Tokens map[string]string `json:"tokens"`
 }
 
 func (s *Server) loadState() {
@@ -23,28 +21,18 @@ func (s *Server) loadState() {
 	raw, err := os.ReadFile(s.cfg.StatePath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			s.cfg.Notify("the saved state could not be read, so every agent must register again. A re-registered agent starts at the end of the log, so its unread mail is skipped and stays in the log: " + err.Error())
+			s.cfg.Notify("the saved state could not be read, so every agent must register again: " + err.Error())
 		}
 		return
 	}
 	var snap snapshot
 	if json.Unmarshal(raw, &snap) != nil {
-		s.cfg.Notify("the saved state could not be read, so every agent must register again. A re-registered agent starts at the end of the log, so its unread mail is skipped and stays in the log")
+		s.cfg.Notify("the saved state could not be read, so every agent must register again")
 		return
 	}
 	s.agents = snap.Agents
 	if snap.Tokens != nil {
 		s.tokens = snap.Tokens
-	}
-	if snap.Cursors != nil {
-		s.cursors = snap.Cursors
-		head := s.store.LastSeq()
-		for name, cursor := range s.cursors {
-			if cursor > head {
-				s.cursors[name] = head
-				s.cfg.Notify(fmt.Sprintf("the read position of %s was past the end of the log, so it was moved back to %d", name, head))
-			}
-		}
 	}
 }
 
@@ -52,7 +40,7 @@ func (s *Server) saveLocked() {
 	if s.cfg.StatePath == "" {
 		return
 	}
-	raw, err := json.Marshal(snapshot{Agents: s.agents, Tokens: s.tokens, Cursors: s.cursors})
+	raw, err := json.Marshal(snapshot{Agents: s.agents, Tokens: s.tokens})
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(s.cfg.StatePath), 0o700)
 	}

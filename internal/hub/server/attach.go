@@ -65,11 +65,6 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 	var challengeText, challengeThread string
 	switch {
 	case body.CodexThread != "" && body.Code == "":
-		if s.cfg.Wakers["codex"] == nil && s.localHost(agent.Host) {
-			s.mu.Unlock()
-			fail(w, http.StatusBadRequest, "this hub has no codex wake method")
-			return
-		}
 		code := s.cfg.NewCode()
 		s.attach[name] = &attachChallenge{thread: body.CodexThread, code: code, expires: s.cfg.Now().Add(attachLifetime)}
 		challengeThread = body.CodexThread
@@ -96,10 +91,9 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		delete(s.attach, name)
-		agent.WakeKind, agent.WakeTarget = "codex", body.CodexThread
 		response.Attached = true
 	}
-	if len(updated) > 0 || response.Attached {
+	if len(updated) > 0 {
 		revised, err := s.reg.Register(s.agents, agent, s.cfg.Now())
 		if err != nil {
 			s.mu.Unlock()
@@ -109,35 +103,22 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 		s.agents = revised
 		s.saveLocked()
 	}
-	remote := !s.localHost(agent.Host)
-	host := agent.Host
 	s.mu.Unlock()
 	if challengeText != "" {
-		if err := s.deliverChallenge(name, host, remote, challengeThread, challengeText); err != nil {
+		status, problem := s.deliver(r.Context(), name, model.Delivery{Kind: model.DeliveryChallenge, Text: challengeText, Target: challengeThread})
+		if status != http.StatusOK {
 			s.mu.Lock()
 			delete(s.attach, name)
 			s.mu.Unlock()
-			fail(w, http.StatusBadGateway, "could not reach that session: "+err.Error())
+			s.cfg.Notify(fmt.Sprintf("attach code for %s could not be delivered: %s", name, problem))
+			if status == http.StatusConflict || status == http.StatusGatewayTimeout {
+				fail(w, status, problem)
+			} else {
+				fail(w, http.StatusBadGateway, "could not reach that session: "+problem)
+			}
 			return
 		}
+		s.cfg.Notify(fmt.Sprintf("sent an attach code for %s to a Codex session", name))
 	}
 	write(w, http.StatusOK, response)
-}
-
-func (s *Server) deliverChallenge(name, host string, remote bool, thread, text string) error {
-	if remote {
-		s.mu.Lock()
-		s.wakes[host] = append(s.wakes[host], &queuedWake{job: model.WakeJob{
-			ID: "attach-" + name + "-" + s.cfg.NewSuffix(), From: "landline", Agent: name, Kind: "codex", Target: thread, Text: text,
-		}})
-		s.mu.Unlock()
-		s.cfg.Notify(fmt.Sprintf("sent an attach code for %s to a Codex session on host %s through its daemon", name, host))
-		return nil
-	}
-	if err := s.cfg.Wakers["codex"].Wake(thread, text); err != nil {
-		s.cfg.Notify(fmt.Sprintf("attach code for %s could not be delivered: %v", name, err))
-		return err
-	}
-	s.cfg.Notify(fmt.Sprintf("sent an attach code for %s to a Codex session", name))
-	return nil
 }

@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -15,7 +17,6 @@ import (
 	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/agent/registry"
-	"github.com/8thlight-daveloper/landline/internal/message/inbox"
 	"github.com/8thlight-daveloper/landline/internal/message/router"
 	"github.com/8thlight-daveloper/landline/internal/model"
 )
@@ -26,23 +27,19 @@ type Store interface {
 	LastSeq() int64
 }
 
-type Waker interface {
-	Wake(target, text string) error
-}
-
 type Config struct {
-	Secret     string
-	Host       string
-	Window     time.Duration
-	IdleWindow time.Duration
-	Now        func() time.Time
-	NewID      func() string
-	NewToken   func() string
-	NewSuffix  func() string
-	NewCode    func() string
-	Wakers     map[string]Waker
-	Notify     func(string)
-	StatePath  string
+	Secret                string
+	Host                  string
+	KeepaliveInterval     time.Duration
+	DeliveryTimeout       time.Duration
+	DisconnectedRetention time.Duration
+	Now                   func() time.Time
+	NewID                 func() string
+	NewToken              func() string
+	NewSuffix             func() string
+	NewCode               func() string
+	Notify                func(string)
+	StatePath             string
 }
 
 type Server struct {
@@ -50,34 +47,26 @@ type Server struct {
 	store   Store
 	reg     registry.Registry
 	rt      router.Router
-	in      inbox.Inbox
 	mu      sync.Mutex
 	agents  []model.Agent
 	tokens  map[string]string
-	cursors map[string]int64
-	waiting map[string]int
 	seq     int64
-	changed chan struct{}
-	wakes   map[string][]*queuedWake
 	attach  map[string]*attachChallenge
+	streams map[string]*stream
+	pending map[string]*pendingDelivery
 }
 
-type queuedWake struct {
-	job        model.WakeJob
-	leaseUntil time.Time
+type stream struct {
+	out  chan model.Delivery
+	done chan struct{}
 }
 
-const wakeLease = 60 * time.Second
-
-var kindPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
-
-const maxQueuedWakes = 200
-
-const maxWaitSeconds = 60
+type pendingDelivery struct {
+	agent  string
+	report chan model.DeliveryReport
+}
 
 const minSecretLength = 16
-
-const maxPageBytes = 2 << 20
 
 const maxRequestBytes = 6*model.MaxBodyBytes + 4096
 
@@ -85,11 +74,14 @@ func New(cfg Config, store Store) (*Server, error) {
 	if len(cfg.Secret) < minSecretLength {
 		return nil, errors.New("the hub secret must be at least 16 characters")
 	}
-	if cfg.Window == 0 {
-		cfg.Window = 90 * time.Second
+	if cfg.KeepaliveInterval == 0 {
+		cfg.KeepaliveInterval = 15 * time.Second
 	}
-	if cfg.IdleWindow == 0 {
-		cfg.IdleWindow = 24 * time.Hour
+	if cfg.DeliveryTimeout == 0 {
+		cfg.DeliveryTimeout = 20 * time.Second
+	}
+	if cfg.DisconnectedRetention == 0 {
+		cfg.DisconnectedRetention = 10 * time.Minute
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -111,8 +103,9 @@ func New(cfg Config, store Store) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg, store: store,
-		tokens: map[string]string{}, cursors: map[string]int64{}, waiting: map[string]int{}, wakes: map[string][]*queuedWake{}, attach: map[string]*attachChallenge{},
-		seq: store.LastSeq(), changed: make(chan struct{}),
+		tokens: map[string]string{}, attach: map[string]*attachChallenge{},
+		streams: map[string]*stream{}, pending: map[string]*pendingDelivery{},
+		seq: store.LastSeq(),
 	}
 	s.loadState()
 	return s, nil
@@ -130,12 +123,11 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/register", s.register)
 	mux.HandleFunc("POST /v1/send", s.send)
-	mux.HandleFunc("GET /v1/inbox", s.inbox)
+	mux.HandleFunc("GET /v1/stream", s.openStream)
+	mux.HandleFunc("POST /v1/deliveries/{id}/report", s.report)
 	mux.HandleFunc("POST /v1/attach", s.attachClaims)
 	mux.HandleFunc("GET /v1/agents", s.list)
 	mux.HandleFunc("GET /v1/log", s.logRead)
-	mux.HandleFunc("GET /v1/wakes", s.wakePoll)
-	mux.HandleFunc("POST /v1/wakes/{id}/ack", s.wakeAck)
 	return mux
 }
 
@@ -203,18 +195,6 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.WakeKind != "" && !kindPattern.MatchString(body.WakeKind) {
-		fail(w, http.StatusBadRequest, "a wake method is 1 to 32 lowercase letters, digits, or -")
-		return
-	}
-	if body.WakeKind != "" && s.localHost(body.Host) && s.cfg.Wakers[body.WakeKind] == nil {
-		fail(w, http.StatusBadRequest, "this hub has no wake method "+body.WakeKind)
-		return
-	}
-	if body.WakeKind != "" && strings.TrimSpace(body.WakeTarget) == "" {
-		fail(w, http.StatusBadRequest, "a wake method needs a wake_target")
-		return
-	}
 	if (body.Name == "") == (body.Seed == "") {
 		fail(w, http.StatusBadRequest, "give either a name or a seed, and not both")
 		return
@@ -226,7 +206,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		name = s.newHandle(body.Seed)
 	}
 	entry := model.Agent{
-		Name: name, Harness: body.Harness, Host: body.Host, Session: body.Session, WakeKind: body.WakeKind, WakeTarget: body.WakeTarget,
+		Name: name, Harness: body.Harness, Host: body.Host, Session: body.Session,
 		Folder: body.Folder, Branch: body.Branch, Worktree: body.Worktree, HarnessVersion: body.HarnessVersion,
 		Model: body.Model, Effort: body.Effort, Label: body.Label,
 	}
@@ -243,9 +223,6 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	token := s.cfg.NewToken()
 	s.tokens[token] = name
-	if _, seen := s.cursors[name]; !seen {
-		s.cursors[name] = s.store.LastSeq()
-	}
 	s.saveLocked()
 	write(w, http.StatusOK, model.RegisterResponse{Name: name, Token: token})
 }
@@ -269,13 +246,9 @@ func (s *Server) newHandle(seed string) string {
 }
 
 func (s *Server) listed(now time.Time) []model.Agent {
-	online := map[string]bool{}
-	for _, a := range s.reg.Online(s.agents, now, s.cfg.Window) {
-		online[a.Name] = true
-	}
 	out := []model.Agent{}
 	for _, a := range s.agents {
-		if online[a.Name] || a.WakeKind != "" || now.Sub(a.LastSeen) <= s.cfg.IdleWindow {
+		if s.streams[a.Name] != nil || now.Sub(a.LastSeen) <= s.cfg.DisconnectedRetention {
 			out = append(out, a)
 		}
 	}
@@ -321,13 +294,23 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	}
 	s.seq = decision.Envelope.Seq
 	sender, _ := s.reg.Find(s.agents, from)
-	targets, queued := s.wakeTargets(decision.Envelope, sender, decision.Recipients)
-	close(s.changed)
-	s.changed = make(chan struct{})
 	s.mu.Unlock()
 
-	woken := s.wake(decision.Envelope, sender, targets)
-	write(w, http.StatusOK, model.SendResponse{ID: decision.Envelope.ID, Seq: decision.Envelope.Seq, Recipients: decision.Recipients, Woken: woken, Queued: queued})
+	envelope := decision.Envelope
+	text := model.Render(envelope, sender)
+	wire := model.WireEnvelope{
+		Seq: envelope.Seq, ID: envelope.ID, Time: envelope.Time, Thread: envelope.Thread, From: envelope.From,
+		FromInfo: fmt.Sprintf("%s on %s", sender.Harness, sender.Host),
+		To:       envelope.To, Kind: envelope.Kind, Body: envelope.Body, InReplyTo: envelope.InReplyTo, Text: text,
+	}
+	recipient := decision.Recipients[0]
+	status, problem := s.deliver(r.Context(), recipient, model.Delivery{Kind: model.DeliveryMessage, Text: text, Message: &wire})
+	if status != http.StatusOK {
+		s.cfg.Notify(fmt.Sprintf("delivery to %s of a message from %s, id %s, failed: %s", recipient, envelope.From, envelope.ID, problem))
+		fail(w, status, problem)
+		return
+	}
+	write(w, http.StatusOK, model.SendResponse{ID: envelope.ID, Seq: envelope.Seq, Recipients: decision.Recipients})
 }
 
 func statusOf(err error) int {
@@ -341,212 +324,140 @@ func statusOf(err error) int {
 	}
 }
 
-func (s *Server) wakeTargets(e model.Envelope, sender model.Agent, recipients []string) ([]model.Agent, []string) {
-	out := []model.Agent{}
-	queued := []string{}
-	for _, name := range recipients {
-		agent, found := s.reg.Find(s.agents, name)
-		if !found || agent.WakeKind == "" || s.waiting[name] != 0 {
-			continue
-		}
-		if s.localTo(agent) {
-			out = append(out, agent)
-			continue
-		}
-		s.wakes[agent.Host] = append(s.wakes[agent.Host], &queuedWake{job: model.WakeJob{
-			ID: e.ID + "-" + agent.Name, From: e.From, Agent: agent.Name, Kind: agent.WakeKind, Target: agent.WakeTarget, Text: model.Render(e, sender),
-		}})
-		queued = append(queued, agent.Name)
-		if len(s.wakes[agent.Host]) > maxQueuedWakes {
-			dropped := s.wakes[agent.Host][0].job
-			s.wakes[agent.Host] = s.wakes[agent.Host][1:]
-			s.cfg.Notify(fmt.Sprintf("the wake queue for host %s is full, so the oldest wake, for %s, was dropped. The message is still in its inbox", agent.Host, dropped.Agent))
-		}
+func (s *Server) deliver(ctx context.Context, name string, delivery model.Delivery) (int, string) {
+	s.mu.Lock()
+	open := s.streams[name]
+	if open == nil {
+		s.mu.Unlock()
+		return http.StatusConflict, "not connected"
 	}
-	return out, queued
-}
-
-func (s *Server) localHost(host string) bool {
-	return s.cfg.Host == "" || host == s.cfg.Host
-}
-
-func (s *Server) localTo(agent model.Agent) bool {
-	return s.localHost(agent.Host)
-}
-
-func (s *Server) wake(e model.Envelope, sender model.Agent, targets []model.Agent) []string {
-	text := model.Render(e, sender)
-	results := make([]bool, len(targets))
-	var group sync.WaitGroup
-	for i, target := range targets {
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			waker := s.cfg.Wakers[target.WakeKind]
-			if waker == nil {
-				s.cfg.Notify(fmt.Sprintf("wake of %s failed: this hub has no wake method %s", target.Name, target.WakeKind))
-				return
-			}
-			if err := waker.Wake(target.WakeTarget, text); err != nil {
-				s.cfg.Notify(fmt.Sprintf("wake of %s failed: %v", target.Name, err))
-				return
-			}
-			s.cfg.Notify(fmt.Sprintf("woke %s (%s) for a message from %s, id %s", target.Name, target.WakeKind, e.From, e.ID))
-			results[i] = true
-		}()
+	delivery.ID = "d-" + randomHex(8)
+	waiting := &pendingDelivery{agent: name, report: make(chan model.DeliveryReport, 1)}
+	s.pending[delivery.ID] = waiting
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.pending, delivery.ID)
+		s.mu.Unlock()
+	}()
+	timer := time.NewTimer(s.cfg.DeliveryTimeout)
+	defer timer.Stop()
+	select {
+	case open.out <- delivery:
+	case <-open.done:
+		return http.StatusConflict, "not connected"
+	case <-timer.C:
+		return http.StatusGatewayTimeout, "no delivery report"
+	case <-ctx.Done():
+		return http.StatusGatewayTimeout, "no delivery report"
 	}
-	group.Wait()
-	woken := []string{}
-	for i, target := range targets {
-		if results[i] {
-			woken = append(woken, target.Name)
+	select {
+	case report := <-waiting.report:
+		if report.OK {
+			return http.StatusOK, ""
 		}
+		return http.StatusBadGateway, report.Error
+	case <-timer.C:
+		return http.StatusGatewayTimeout, "no delivery report"
+	case <-ctx.Done():
+		return http.StatusGatewayTimeout, "no delivery report"
 	}
-	return woken
 }
 
-func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
+func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	name, ok := s.agentFor(r)
 	if !ok {
 		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
 		return
 	}
-	query := r.URL.Query()
-	if query.Get("peek") != "" {
-		s.mu.Lock()
-		cursor := s.cursors[name]
-		unread := s.in.Select(s.store.All(), name, cursor, nil, 0)
-		s.mu.Unlock()
-		write(w, http.StatusOK, model.InboxResponse{Messages: []model.WireEnvelope{}, Next: cursor, Remaining: len(unread.Messages), Head: s.store.LastSeq()})
+	var report model.DeliveryReport
+	if !decode(w, r, &report) {
 		return
 	}
-	wait := clamp(intOf(query.Get("wait")), 0, maxWaitSeconds)
-	limit := clamp(intOf(query.Get("limit")), 0, 200)
-	if limit == 0 {
-		limit = 50
-	}
-	var threads []string
-	if raw := query.Get("thread"); raw != "" {
-		threads = strings.Split(raw, ",")
-	}
-	deadline := time.NewTimer(time.Duration(wait) * time.Second)
-	defer deadline.Stop()
-	startWaiting := func() {
-		if len(threads) == 0 {
-			s.mu.Lock()
-			s.waiting[name]++
-			s.mu.Unlock()
-		}
-	}
-	stopWaiting := func() {
-		if len(threads) == 0 {
-			s.mu.Lock()
-			s.waiting[name]--
-			s.mu.Unlock()
-		}
-	}
-	closeOut := func(deliver bool) (model.Page, map[string]model.Agent, []model.Agent, model.Envelope, model.Agent) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(threads) == 0 {
-			s.waiting[name]--
-		}
-		cursor := s.cursors[name]
-		if len(threads) > 0 {
-			cursor = int64(intOf(query.Get("after")))
-		}
-		page := capPage(s.in.Select(s.store.All(), name, cursor, threads, limit))
-		senders := map[string]model.Agent{}
-		for _, each := range page.Messages {
-			if a, found := s.reg.Find(s.agents, each.From); found {
-				senders[each.From] = a
-			}
-		}
-		if len(page.Messages) == 0 {
-			return page, senders, nil, model.Envelope{}, model.Agent{}
-		}
-		if deliver {
-			if len(threads) == 0 {
-				s.cursors[name] = page.Next
-				s.saveLocked()
-			}
-			return page, senders, nil, model.Envelope{}, model.Agent{}
-		}
-		last := page.Messages[len(page.Messages)-1]
-		sender := senders[last.From]
-		targets, _ := s.wakeTargets(last, sender, []string{name})
-		return page, senders, targets, last, sender
-	}
-	for {
-		s.mu.Lock()
-		cursor := s.cursors[name]
-		if len(threads) > 0 {
-			cursor = int64(intOf(query.Get("after")))
-		}
-		page := capPage(s.in.Select(s.store.All(), name, cursor, threads, limit))
-		changed := s.changed
-		if len(page.Messages) > 0 && len(threads) == 0 {
-			s.cursors[name] = page.Next
-			s.saveLocked()
-		}
-		senders := map[string]model.Agent{}
-		for _, each := range page.Messages {
-			if a, found := s.reg.Find(s.agents, each.From); found {
-				senders[each.From] = a
-			}
-		}
+	s.mu.Lock()
+	waiting, found := s.pending[r.PathValue("id")]
+	if !found {
 		s.mu.Unlock()
-		if len(page.Messages) > 0 || wait == 0 {
-			write(w, http.StatusOK, s.withHead(toWire(page, senders)))
-			return
+		fail(w, http.StatusNotFound, "no such delivery")
+		return
+	}
+	if waiting.agent != name {
+		s.mu.Unlock()
+		fail(w, http.StatusForbidden, "that delivery went to another agent")
+		return
+	}
+	delete(s.pending, r.PathValue("id"))
+	s.mu.Unlock()
+	waiting.report <- report
+	write(w, http.StatusOK, struct{}{})
+}
+
+func (s *Server) openStream(w http.ResponseWriter, r *http.Request) {
+	name, ok := s.agentFor(r)
+	if !ok {
+		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
+		return
+	}
+	mine := &stream{out: make(chan model.Delivery), done: make(chan struct{})}
+	s.mu.Lock()
+	if previous := s.streams[name]; previous != nil {
+		close(previous.done)
+	}
+	s.streams[name] = mine
+	s.mu.Unlock()
+	defer s.closeStream(name, mine)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	controller := http.NewResponseController(w)
+	emit := func(text string) bool {
+		if err := controller.SetWriteDeadline(time.Now().Add(2 * s.cfg.KeepaliveInterval)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return false
 		}
-		startWaiting()
+		if _, err := io.WriteString(w, text); err != nil {
+			return false
+		}
+		return controller.Flush() == nil
+	}
+	if !emit("") {
+		return
+	}
+	ticker := time.NewTicker(s.cfg.KeepaliveInterval)
+	defer ticker.Stop()
+	for {
 		select {
-		case <-changed:
-			stopWaiting()
-		case <-deadline.C:
-			late, lateSenders, _, _, _ := closeOut(true)
-			write(w, http.StatusOK, s.withHead(toWire(late, lateSenders)))
+		case delivery := <-mine.out:
+			raw, err := json.Marshal(delivery)
+			if err != nil || !emit("event: delivery\ndata: "+string(raw)+"\n\n") {
+				return
+			}
+			ticker.Reset(s.cfg.KeepaliveInterval)
+		case <-ticker.C:
+			if !emit(": keepalive\n\n") {
+				return
+			}
+		case <-mine.done:
 			return
 		case <-r.Context().Done():
-			if _, _, targets, last, sender := closeOut(false); len(targets) > 0 {
-				s.wake(last, sender, targets)
-			}
 			return
 		}
 	}
 }
 
-func (s *Server) withHead(out model.InboxResponse) model.InboxResponse {
-	out.Head = s.store.LastSeq()
-	return out
-}
-
-func capPage(page model.Page) model.Page {
-	total := 0
-	for i, each := range page.Messages {
-		total += 2*len(each.Body) + 512
-		if total > maxPageBytes && i > 0 {
-			page.Remaining += len(page.Messages) - i
-			page.Messages = page.Messages[:i]
-			page.Next = page.Messages[i-1].Seq
-			return page
+func (s *Server) closeStream(name string, closing *stream) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.streams[name] != closing {
+		return
+	}
+	delete(s.streams, name)
+	close(closing.done)
+	if agent, found := s.reg.Find(s.agents, name); found {
+		if updated, err := s.reg.Register(s.agents, agent, s.cfg.Now()); err == nil {
+			s.agents = updated
 		}
 	}
-	return page
-}
-
-func toWire(page model.Page, senders map[string]model.Agent) model.InboxResponse {
-	out := model.InboxResponse{Messages: []model.WireEnvelope{}, Next: page.Next, Remaining: page.Remaining}
-	for _, e := range page.Messages {
-		sender := senders[e.From]
-		out.Messages = append(out.Messages, model.WireEnvelope{
-			Seq: e.Seq, ID: e.ID, Time: e.Time, Thread: e.Thread, From: e.From,
-			FromInfo: fmt.Sprintf("%s on %s", sender.Harness, sender.Host),
-			To:       e.To, Kind: e.Kind, Body: e.Body, InReplyTo: e.InReplyTo, Text: model.Render(e, sender),
-		})
-	}
-	return out
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
@@ -555,21 +466,18 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	online := map[string]bool{}
-	for _, a := range s.reg.Online(s.agents, s.cfg.Now(), s.cfg.Window) {
-		online[a.Name] = true
+	listed := s.listed(s.cfg.Now())
+	connected := map[string]bool{}
+	for name := range s.streams {
+		connected[name] = true
 	}
-	listed := append([]model.Agent(nil), s.agents...)
-	now := s.cfg.Now()
 	s.mu.Unlock()
 	out := []model.AgentInfo{}
 	for _, a := range listed {
-		if online[a.Name] || a.WakeKind != "" || now.Sub(a.LastSeen) <= s.cfg.IdleWindow {
-			out = append(out, model.AgentInfo{
-				Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, WakeKind: a.WakeKind, Online: online[a.Name], LastSeen: a.LastSeen,
-				Folder: a.Folder, Branch: a.Branch, Worktree: a.Worktree, HarnessVersion: a.HarnessVersion, Model: a.Model, Effort: a.Effort, Label: a.Label,
-			})
-		}
+		out = append(out, model.AgentInfo{
+			Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, Connected: connected[a.Name], LastSeen: a.LastSeen,
+			Folder: a.Folder, Branch: a.Branch, Worktree: a.Worktree, HarnessVersion: a.HarnessVersion, Model: a.Model, Effort: a.Effort, Label: a.Label,
+		})
 	}
 	write(w, http.StatusOK, out)
 }
@@ -592,91 +500,4 @@ func (s *Server) logRead(w http.ResponseWriter, r *http.Request) {
 func intOf(raw string) int {
 	n, _ := strconv.Atoi(raw)
 	return n
-}
-
-func clamp(n, lo, hi int) int {
-	return max(lo, min(n, hi))
-}
-
-func (s *Server) wakePoll(w http.ResponseWriter, r *http.Request) {
-	if !s.isSecret(r) {
-		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
-		return
-	}
-	query := r.URL.Query()
-	host := query.Get("host")
-	if host == "" {
-		fail(w, http.StatusBadRequest, "a wake poll needs a host")
-		return
-	}
-	wait := clamp(intOf(query.Get("wait")), 0, maxWaitSeconds)
-	deadline := time.NewTimer(time.Duration(wait) * time.Second)
-	defer deadline.Stop()
-	for {
-		s.mu.Lock()
-		jobs := s.leaseWakes(host)
-		changed := s.changed
-		s.mu.Unlock()
-		if len(jobs) > 0 || wait == 0 {
-			write(w, http.StatusOK, jobs)
-			return
-		}
-		select {
-		case <-changed:
-		case <-deadline.C:
-			write(w, http.StatusOK, jobs)
-			return
-		case <-r.Context().Done():
-			return
-		}
-	}
-}
-
-func (s *Server) leaseWakes(host string) []model.WakeJob {
-	now := s.cfg.Now()
-	jobs := []model.WakeJob{}
-	for _, queued := range s.wakes[host] {
-		if now.Before(queued.leaseUntil) {
-			continue
-		}
-		queued.leaseUntil = now.Add(wakeLease)
-		jobs = append(jobs, queued.job)
-	}
-	return jobs
-}
-
-func (s *Server) wakeAck(w http.ResponseWriter, r *http.Request) {
-	if !s.isSecret(r) {
-		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
-		return
-	}
-	var ack model.WakeAck
-	if !decode(w, r, &ack) {
-		return
-	}
-	job, found := s.removeWake(r.PathValue("id"))
-	if !found {
-		fail(w, http.StatusNotFound, "no such wake")
-		return
-	}
-	if ack.OK {
-		s.cfg.Notify(fmt.Sprintf("host daemon woke %s (%s) for a message from %s, wake %s", job.Agent, job.Kind, job.From, job.ID))
-	} else {
-		s.cfg.Notify(fmt.Sprintf("wake of %s failed on its host: %s", job.Agent, ack.Error))
-	}
-	write(w, http.StatusOK, struct{}{})
-}
-
-func (s *Server) removeWake(id string) (model.WakeJob, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for host, queue := range s.wakes {
-		for i, queued := range queue {
-			if queued.job.ID == id {
-				s.wakes[host] = append(queue[:i:i], queue[i+1:]...)
-				return queued.job, true
-			}
-		}
-	}
-	return model.WakeJob{}, false
 }
