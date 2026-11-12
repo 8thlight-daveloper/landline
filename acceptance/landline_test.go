@@ -2128,3 +2128,579 @@ func TestServerRestartEndsAnOpenStreamAndANewStreamOpensAfterIt(t *testing.T) {
 	}
 	again.Body.Close()
 }
+
+func (w *world) registerObserver(kind string) string {
+	w.t.Helper()
+	status, body := w.post("/v1/observers", secret, map[string]string{"kind": kind})
+	if status != http.StatusOK {
+		w.t.Fatalf("POST /v1/observers: %d %s", status, body)
+	}
+	var issued struct{ Token string }
+	if err := json.Unmarshal([]byte(body), &issued); err != nil || issued.Token == "" {
+		w.t.Fatalf("observer answer %q: %v", body, err)
+	}
+	return issued.Token
+}
+
+func (w *world) agentsBody(token string) string {
+	w.t.Helper()
+	status, body := w.request("GET", "/v1/agents", token, nil, nil)
+	if status != http.StatusOK {
+		w.t.Fatalf("GET /v1/agents: %d %s", status, body)
+	}
+	return body
+}
+
+func TestAnObserverIsRegisteredWithTheSecretAndAKindThatFollowsTheFreeTextRules(t *testing.T) {
+	w := start(t)
+	w.register("alpha")
+	status, body := w.post("/v1/observers", secret, map[string]string{"kind": "tui"})
+	var issued struct{ Token string }
+	if status != 200 || json.Unmarshal([]byte(body), &issued) != nil || issued.Token == "" {
+		t.Fatalf("a valid registration: %d %s", status, body)
+	}
+	if issued.Token == secret || issued.Token == w.token("alpha") {
+		t.Fatal("the observer token repeats another credential")
+	}
+	if status, _ := w.post("/v1/observers", secret, map[string]string{"kind": "web"}); status != 200 {
+		t.Errorf("kind web: %d", status)
+	}
+	if status, _ := w.post("/v1/observers", secret, map[string]string{"kind": strings.Repeat("k", 64)}); status != 200 {
+		t.Errorf("a 64 byte kind: %d", status)
+	}
+	for _, token := range []string{"", "wrong-secret-wrong-secret", w.token("alpha"), issued.Token} {
+		want := 401
+		if token == issued.Token {
+			want = 403
+		}
+		if status, _ := w.post("/v1/observers", token, map[string]string{"kind": "tui"}); status != want {
+			t.Errorf("POST /v1/observers with %q: %d, want %d", token, status, want)
+		}
+	}
+	for name, kind := range map[string]string{
+		"blank":     "   ",
+		"empty":     "",
+		"65 bytes":  strings.Repeat("k", 65),
+		"newline":   "tu\ni",
+		"escape":    "tu\x1bi",
+		"nul":       "tu\x00i",
+		"separator": "tu\u2028i",
+		"format":    "tu\u202ei",
+	} {
+		if status, body := w.post("/v1/observers", secret, map[string]string{"kind": kind}); status != 400 {
+			t.Errorf("%s kind: %d %s", name, status, body)
+		}
+	}
+	if status, _ := w.post("/v1/observers", secret, map[string]string{}); status != 400 {
+		t.Errorf("a missing kind: %d", status)
+	}
+}
+
+func withoutLastSeen(t *testing.T, body string) []byte {
+	t.Helper()
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(body), &entries); err != nil {
+		t.Fatalf("not a list: %v\n%s", err, body)
+	}
+	for _, entry := range entries {
+		delete(entry, "last_seen")
+	}
+	out, _ := json.Marshal(entries)
+	return out
+}
+
+func TestAnObserverIsNeverAnAgentAndSeesTheSameListAnAgentSees(t *testing.T) {
+	w := start(t)
+	w.watch()
+	w.register("alpha")
+	_, handle := w.selfRegistered("lead", "claude-code")
+	before := strings.Count(w.must("", "agents", "--as", "alpha"), "\n")
+	observer := w.registerObserver("tui")
+	w.registerObserver("web")
+	listed := w.agentsBody(observer)
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(listed), &entries); err != nil || len(entries) != before {
+		t.Fatalf("the observer's list has %d entries (%v), the agents are %d", len(entries), err, before)
+	}
+	if after := strings.Count(w.must("", "agents", "--as", "alpha"), "\n"); after != before {
+		t.Fatalf("the CLI list went from %d to %d lines", before, after)
+	}
+	for _, entry := range entries {
+		if entry["name"] == "tui" || entry["name"] == "web" || entry["name"] == observer {
+			t.Fatalf("an observer is listed: %v", entry)
+		}
+	}
+	if strings.Contains(w.must("", "agents", "--as", "alpha"), observer) {
+		t.Fatal("the CLI list shows the observer token")
+	}
+	if status, _ := w.sendHTTP("alpha", "tui", "to an observer"); status != 404 {
+		t.Errorf("a send to the observer kind: %d", status)
+	}
+	byAgent, byObserver := w.agentsBody(w.token(handle)), w.agentsBody(observer)
+	if !bytes.Equal(withoutLastSeen(t, byObserver), withoutLastSeen(t, byAgent)) {
+		t.Fatalf("the lists differ:\n%s\n%s", byObserver, byAgent)
+	}
+}
+
+func TestAnObserverTokenReadsTheAgentListAndEveryOtherRouteAnswers403WithNothingSentOrLogged(t *testing.T) {
+	w := start(t)
+	w.watch()
+	_, handle := w.selfRegistered("lead", "claude-code")
+	w.register("alpha")
+	stream := w.openStream("watcher", true)
+	logBefore := w.logText()
+	observer := w.registerObserver("tui")
+	if status, _ := w.request("GET", "/v1/agents", observer, nil, nil); status != 200 {
+		t.Fatalf("GET /v1/agents: %d", status)
+	}
+	requests := []struct {
+		method, path string
+		body         any
+	}{
+		{"POST", "/v1/send", map[string]string{"to": "watcher", "body": "from an observer"}},
+		{"GET", "/v1/stream", nil},
+		{"POST", "/v1/attach", map[string]string{"label": "mine"}},
+		{"POST", "/v1/deliveries/some-id/report", map[string]any{"ok": true}},
+		{"POST", "/v1/register", map[string]string{"name": "mallory", "harness": "x", "host": "mac"}},
+		{"POST", "/v1/observers", map[string]string{"kind": "tui"}},
+		{"GET", "/v1/log", nil},
+	}
+	for _, r := range requests {
+		status, body := w.request(r.method, r.path, observer, r.body, nil)
+		var refusal struct{ Error string }
+		if status != 403 || json.Unmarshal([]byte(body), &refusal) != nil || !strings.Contains(strings.ToLower(refusal.Error), "read-only") {
+			t.Errorf("%s %s: %d %s", r.method, r.path, status, body)
+		}
+	}
+	if status, _ := w.post("/v1/send", "unknown-token-unknown-token", map[string]string{"to": "watcher", "body": "x"}); status != 401 {
+		t.Errorf("an unknown token: %d", status)
+	}
+	stream.expectNothing(t)
+	if got := w.logText(); got != logBefore {
+		t.Fatalf("the log changed:\n%s\n--\n%s", logBefore, got)
+	}
+	if strings.Contains(w.state("mallory"), "connected") || w.state("mallory") != "" {
+		t.Fatal("an observer registered an agent")
+	}
+	if got := w.state(handle); got != "connected" {
+		t.Fatalf("the agent is %q", got)
+	}
+}
+
+func TestAnObserverIsForgottenAfterTheGraceWithoutARequestAndRequestsInsideTheGraceKeepItAlive(t *testing.T) {
+	w := startHub(t, build(t), t.TempDir(), "", "--grace", "3s")
+	idle := w.registerObserver("tui")
+	busy := w.registerObserver("tui")
+	for i := 0; i < 5; i++ {
+		time.Sleep(time.Second)
+		if status := w.get("/v1/agents", busy); status != 200 {
+			t.Fatalf("request %d inside the grace: %d", i, status)
+		}
+	}
+	if status := w.get("/v1/agents", idle); status != 401 {
+		t.Fatalf("an idle observer after the grace: %d", status)
+	}
+	again := w.registerObserver("tui")
+	if status := w.get("/v1/agents", again); status != 200 {
+		t.Fatalf("a new registration: %d", status)
+	}
+}
+
+func TestARefusedRequestOnEachRouteWithTheObserverTokenKeepsItAliveAndAnObserverWithNoRequestExpires(t *testing.T) {
+	w := startHub(t, build(t), t.TempDir(), "", "--grace", "3s")
+	routes := []struct {
+		name, method, path string
+		body               any
+	}{
+		{"send", "POST", "/v1/send", map[string]string{"to": "x", "body": "x"}},
+		{"stream", "GET", "/v1/stream", nil},
+		{"attach", "POST", "/v1/attach", map[string]string{"label": "mine"}},
+		{"report", "POST", "/v1/deliveries/x/report", map[string]any{"ok": true}},
+		{"register", "POST", "/v1/register", map[string]string{"name": "mallory", "harness": "x", "host": "mac"}},
+		{"observers", "POST", "/v1/observers", map[string]string{"kind": "tui"}},
+		{"log", "GET", "/v1/log", nil},
+	}
+	tokens := make([]string, len(routes))
+	for i := range routes {
+		tokens[i] = w.registerObserver("tui")
+	}
+	control := w.registerObserver("tui")
+	registered := time.Now()
+	time.Sleep(time.Until(registered.Add(2 * time.Second)))
+	refused := make([]int, len(routes))
+	var wg sync.WaitGroup
+	for i, route := range routes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var reader io.Reader
+			if route.body != nil {
+				raw, _ := json.Marshal(route.body)
+				reader = bytes.NewReader(raw)
+			}
+			req, _ := http.NewRequest(route.method, w.url+route.path, reader)
+			req.Header.Set("Authorization", "Bearer "+tokens[i])
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			refused[i] = resp.StatusCode
+		}()
+	}
+	wg.Wait()
+	time.Sleep(time.Until(registered.Add(4 * time.Second)))
+	for i, route := range routes {
+		if refused[i] != 403 {
+			t.Errorf("%s: the refused request answered %d", route.name, refused[i])
+		}
+		if status := w.get("/v1/agents", tokens[i]); status != 200 {
+			t.Errorf("%s: after one refused request at 2s, the observer answered %d at 4s of a 3s grace", route.name, status)
+		}
+	}
+	if status := w.get("/v1/agents", control); status != 401 {
+		t.Errorf("the control observer, with no request, at 4s of a 3s grace: %d", status)
+	}
+}
+
+func TestAHubRestartForgetsEveryObserver(t *testing.T) {
+	bin, config := build(t), t.TempDir()
+	first := startHub(t, bin, config, "")
+	observer := first.registerObserver("tui")
+	if status := first.get("/v1/agents", observer); status != 200 {
+		t.Fatalf("before the restart: %d", status)
+	}
+	first.stop()
+	second := startHub(t, bin, config, first.addr)
+	if status := second.get("/v1/agents", observer); status != 401 {
+		t.Fatalf("the old observer token: %d", status)
+	}
+	if status := second.get("/v1/agents", second.registerObserver("tui")); status != 200 {
+		t.Fatalf("registering again: %d", status)
+	}
+}
+
+func buildTUI(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "landline-tui")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd.Dir = "../tui"
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		text := string(out)
+		for _, offline := range []string{"dial tcp", "no such host", "network is unreachable", "i/o timeout", "proxy.golang.org", "connection refused"} {
+			if strings.Contains(text, offline) {
+				t.Skipf("landline-tui cannot be built without the network: %s", text)
+			}
+		}
+		t.Fatalf("build landline-tui: %v\n%s", err, text)
+	}
+	return bin
+}
+
+type tuiResult struct {
+	stdout, stderr string
+	code           int
+}
+
+func runTUI(t *testing.T, bin string, env []string, args ...string) tuiResult {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Env = env
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	result := tuiResult{stdout: out.String(), stderr: errb.String()}
+	var exit *exec.ExitError
+	switch {
+	case errors.As(err, &exit):
+		result.code = exit.ExitCode()
+	case err != nil:
+		t.Fatalf("landline-tui %v: %v", args, err)
+	}
+	return result
+}
+
+func withEnv(env []string, pairs ...string) []string {
+	out := append([]string{}, env...)
+	for _, pair := range pairs {
+		name := strings.SplitN(pair, "=", 2)[0] + "="
+		kept := out[:0:0]
+		for _, existing := range out {
+			if !strings.HasPrefix(existing, name) {
+				kept = append(kept, existing)
+			}
+		}
+		out = append(kept, pair)
+	}
+	return out
+}
+
+func (w *world) selfRegisteredWithLabel(folder, label string) string {
+	w.t.Helper()
+	dir := filepath.Join(w.t.TempDir(), folder)
+	os.MkdirAll(dir, 0o755)
+	p := w.startMCP(dir)
+	p.handshake("claude-code", "1.0.0")
+	arguments := `{"model":"opus"}`
+	if label != "" {
+		arguments = `{"model":"opus","label":"` + label + `"}`
+	}
+	claimed := p.tool("landline_register", arguments)
+	handle := strings.TrimRight(strings.Fields(strings.SplitN(claimed, "you are ", 2)[1])[0], ";,")
+	w.waitState(handle, "connected")
+	return handle
+}
+
+func (w *world) registerLabelled(name, label string) {
+	w.t.Helper()
+	if status, body := w.post("/v1/register", secret, map[string]string{"name": name, "harness": "claude-code", "host": "mac", "label": label}); status != http.StatusOK {
+		w.t.Fatalf("register %s: %d %s", name, status, body)
+	}
+}
+
+type listedAgent struct{ handle, state, label string }
+
+func listedAgentsOf(entries []map[string]any) []listedAgent {
+	var out []listedAgent
+	for _, entry := range entries {
+		label, _ := entry["label"].(string)
+		out = append(out, listedAgent{fmt.Sprint(entry["handle"]), fmt.Sprint(entry["state"]), label})
+	}
+	return out
+}
+
+func expectedListOrder(agents []listedAgent) []listedAgent {
+	rank := func(a listedAgent) int {
+		rank := 0
+		if a.state != "connected" {
+			rank += 2
+		}
+		if a.label == "" {
+			rank++
+		}
+		return rank
+	}
+	out := append([]listedAgent{}, agents...)
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if rank(a) != rank(b) {
+			return rank(a) < rank(b)
+		}
+		if a.label != b.label {
+			return a.label < b.label
+		}
+		return a.handle < b.handle
+	})
+	return out
+}
+
+func labelOrderDiffersFromHandleOrder(group []listedAgent) bool {
+	byLabel := append([]listedAgent{}, group...)
+	sort.Slice(byLabel, func(i, j int) bool { return byLabel[i].label < byLabel[j].label })
+	byHandle := append([]listedAgent{}, group...)
+	sort.Slice(byHandle, func(i, j int) bool { return byHandle[i].handle < byHandle[j].handle })
+	return fmt.Sprint(byLabel) != fmt.Sprint(byHandle)
+}
+
+func TestTheTUIJSONExportAgainstARealHubListsConnectedFirstThenLabelledThenLabelThenHandleAndPrintsNoSecretOrToken(t *testing.T) {
+	tui := buildTUI(t)
+	w := start(t)
+	w.register("tango", "alpha")
+	w.registerLabelled("delta", "yankee")
+	w.registerLabelled("foxtrot", "bravo-l")
+	labelledLate := w.selfRegisteredWithLabel("a-x", "zed")
+	labelledEarly := w.selfRegisteredWithLabel("b-x", "amy")
+	plainLate := w.selfRegisteredWithLabel("d-x", "")
+	plainEarly := w.selfRegisteredWithLabel("c-x", "")
+	connected := []string{labelledLate, labelledEarly, plainLate, plainEarly}
+	const total = 9
+	result := runTUI(t, tui, w.env, "agents", "--json")
+	if result.code != 0 || result.stderr != "" {
+		t.Fatalf("exit %d, stderr %q", result.code, result.stderr)
+	}
+	var snapshot struct {
+		Screen    string           `json:"screen"`
+		FetchedAt string           `json:"fetched_at"`
+		Hub       string           `json:"hub"`
+		Agents    []map[string]any `json:"agents"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &snapshot); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, result.stdout)
+	}
+	if snapshot.Screen != "agents" || snapshot.Hub != w.url {
+		t.Fatalf("screen %q hub %q, want agents %q", snapshot.Screen, snapshot.Hub, w.url)
+	}
+	if _, err := time.Parse(time.RFC3339, snapshot.FetchedAt); err != nil {
+		t.Fatalf("fetched_at %q: %v", snapshot.FetchedAt, err)
+	}
+	for _, interval := range []string{"500ms", "600ms"} {
+		at := runTUI(t, tui, w.env, "agents", "--json", "--interval", interval)
+		var again struct{ Agents []map[string]any }
+		if at.code != 0 || json.Unmarshal([]byte(at.stdout), &again) != nil || len(again.Agents) != total {
+			t.Errorf("--interval %s: %+v", interval, at)
+		}
+	}
+	if len(snapshot.Agents) != total {
+		t.Fatalf("agents: %v", snapshot.Agents)
+	}
+	allowed := map[string]bool{"handle": true, "label": true, "harness": true, "state": true, "landline_version": true, "harness_version": true,
+		"folder": true, "branch": true, "worktree": true, "model": true, "effort": true, "host": true}
+	for _, entry := range snapshot.Agents {
+		for key, value := range entry {
+			if !allowed[key] {
+				t.Errorf("undocumented key %q", key)
+			}
+			if value == "" {
+				t.Errorf("empty optional field %q is present", key)
+			}
+		}
+		for _, key := range []string{"handle", "harness", "state"} {
+			if _, ok := entry[key]; !ok {
+				t.Errorf("missing %q in %v", key, entry)
+			}
+		}
+	}
+	observed := listedAgentsOf(snapshot.Agents)
+	groups := map[string][]listedAgent{}
+	for _, agent := range observed {
+		key := agent.state + "/plain"
+		if agent.label != "" {
+			key = agent.state + "/labelled"
+		}
+		groups[key] = append(groups[key], agent)
+	}
+	for key, size := range map[string]int{"connected/labelled": 2, "connected/plain": 2, "disconnected/labelled": 2, "disconnected/plain": 3} {
+		if len(groups[key]) != size {
+			t.Fatalf("the group %s has %d agents, want %d: %v", key, len(groups[key]), size, observed)
+		}
+	}
+	for _, key := range []string{"connected/labelled", "disconnected/labelled"} {
+		if !labelOrderDiffersFromHandleOrder(groups[key]) {
+			t.Fatalf("in the group %s the label order equals the handle order, so the test cannot tell them apart: %v", key, groups[key])
+		}
+	}
+	wantLabels := map[string]string{labelledLate: "zed", labelledEarly: "amy", "delta": "yankee", "foxtrot": "bravo-l"}
+	for _, agent := range observed {
+		if agent.label != wantLabels[agent.handle] {
+			t.Errorf("%s has the label %q, want %q", agent.handle, agent.label, wantLabels[agent.handle])
+		}
+		isConnected := false
+		for _, handle := range connected {
+			isConnected = isConnected || handle == agent.handle
+		}
+		if isConnected != (agent.state == "connected") {
+			t.Errorf("%s is %s", agent.handle, agent.state)
+		}
+	}
+	if want := expectedListOrder(observed); fmt.Sprint(observed) != fmt.Sprint(want) {
+		t.Fatalf("the order is\n%v\nwant\n%v", observed, want)
+	}
+	for _, entry := range snapshot.Agents[:4] {
+		if entry["landline_version"] == nil {
+			t.Errorf("a connected agent shows no landline version: %v", entry)
+		}
+	}
+	for _, entry := range snapshot.Agents[4:] {
+		if _, ok := entry["landline_version"]; ok {
+			t.Errorf("a hand-registered name shows a landline version: %v", entry)
+		}
+	}
+	for _, text := range []string{result.stdout, result.stderr} {
+		for _, hidden := range []string{secret, w.token("alpha"), w.token(labelledLate), w.token(labelledEarly), w.token(plainLate), w.token(plainEarly)} {
+			if strings.Contains(text, hidden) {
+				t.Fatalf("a credential was printed: %s", text)
+			}
+		}
+	}
+	if lines := strings.Count(w.must("", "agents", "--as", "alpha"), "\n"); lines != total {
+		t.Fatalf("the TUI changed the agent list: %d lines", lines)
+	}
+}
+
+func TestTheTUIJSONExportFailsWithExitOneForAWrongSecretAndAnUnreachableHubWithoutEchoingTheSecret(t *testing.T) {
+	tui := buildTUI(t)
+	w := start(t)
+	wrong := "wrong-secret-0123456789-abcdef"
+	result := runTUI(t, tui, withEnv(w.env, "LANDLINE_SECRET="+wrong), "agents", "--json")
+	if result.code != 1 || result.stdout != "" || strings.TrimSpace(result.stderr) == "" {
+		t.Fatalf("a wrong secret: %+v", result)
+	}
+	if strings.Contains(result.stderr, wrong) || strings.Contains(result.stderr, secret) {
+		t.Fatalf("the message echoes a secret: %s", result.stderr)
+	}
+	dead := "127.0.0.1:" + strings.Split(freeAddr(t), ":")[1]
+	result = runTUI(t, tui, withEnv(w.env, "LANDLINE_URL=http://"+dead), "agents", "--json")
+	if result.code != 1 || result.stdout != "" || strings.TrimSpace(result.stderr) == "" || strings.Contains(result.stderr, secret) {
+		t.Fatalf("an unreachable hub: %+v", result)
+	}
+	result = runTUI(t, tui, withEnv(w.env, "LANDLINE_URL=http://user:hunter2@"+w.addr), "agents", "--json")
+	if result.code != 1 || strings.Contains(result.stderr+result.stdout, "hunter2") {
+		t.Fatalf("an address with credentials: %+v", result)
+	}
+}
+
+func TestTheHubRefusesHostileAgentFieldsSoNothingRawCanReachTheTUIOutput(t *testing.T) {
+	tui := buildTUI(t)
+	w := start(t)
+	w.register("alpha")
+	hostile := "x\x1b[2J\x1b]0;owned\x07y"
+	for _, field := range []string{"label", "folder", "branch", "model", "effort", "worktree", "harness_version"} {
+		status, body := w.post("/v1/register", secret, map[string]string{"name": "mallory", "harness": "claude-code", "host": "mac", field: hostile})
+		if status != 400 {
+			t.Errorf("%s %q: %d %s", field, hostile, status, body)
+		}
+	}
+	for _, args := range [][]string{{"agents", "--json"}, {"agents", "--json", "--interval", "1s"}} {
+		result := runTUI(t, tui, w.env, args...)
+		if result.code != 0 || strings.ContainsAny(result.stdout+result.stderr, "\x1b\x07") || strings.Contains(result.stdout, "mallory") {
+			t.Fatalf("%v: %+v", args, result)
+		}
+	}
+}
+
+func TestTheTUIRefusesAnIntervalBelowTheFloorWithExitTwo(t *testing.T) {
+	tui := buildTUI(t)
+	w := start(t)
+	for _, args := range [][]string{{"--interval", "100ms", "agents", "--json"}, {"agents", "--json", "--interval", "100ms"}, {"agents", "--json", "--interval", "499ms"}} {
+		result := runTUI(t, tui, w.env, args...)
+		if result.code != 2 || result.stdout != "" || !strings.Contains(result.stderr, "interval") {
+			t.Errorf("%v: %+v", args, result)
+		}
+	}
+	for _, args := range [][]string{{"--interval", "soon", "agents", "--json"}} {
+		result := runTUI(t, tui, w.env, args...)
+		if result.code != 2 || result.stdout != "" || !strings.Contains(result.stderr, "the interval must be a duration such as 2s") {
+			t.Errorf("%v: %+v", args, result)
+		}
+	}
+}
+
+func TestLandlineTUIRunsLandlineTUIFromThePathWithItsArgumentsAndSaysHowToInstallItWhenItIsMissing(t *testing.T) {
+	tui := buildTUI(t)
+	w := start(t)
+	w.selfRegistered("lead", "claude-code")
+	tuiDir := t.TempDir()
+	if err := os.Rename(tui, filepath.Join(tuiDir, "landline-tui")); err != nil {
+		t.Fatal(err)
+	}
+	withTUI := withEnv(w.env, "PATH="+tuiDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	direct := runTUI(t, filepath.Join(tuiDir, "landline-tui"), withTUI, "agents", "--json")
+	viaLauncher := runTUI(t, w.bin, withTUI, "tui", "agents", "--json")
+	normalize := regexp.MustCompile(`"fetched_at": ?"[^"]*"`)
+	if direct.code != 0 || viaLauncher.code != 0 || viaLauncher.stderr != "" {
+		t.Fatalf("direct %+v, launcher %+v", direct, viaLauncher)
+	}
+	if normalize.ReplaceAllString(direct.stdout, "") != normalize.ReplaceAllString(viaLauncher.stdout, "") {
+		t.Fatalf("the outputs differ:\n%s\n%s", direct.stdout, viaLauncher.stdout)
+	}
+	if bad := runTUI(t, w.bin, withTUI, "tui", "--interval", "100ms", "agents", "--json"); bad.code != 2 {
+		t.Errorf("the exit code of landline-tui is not passed on: %+v", bad)
+	}
+	empty := t.TempDir()
+	missing := runTUI(t, w.bin, withEnv(w.env, "PATH="+empty), "tui", "agents", "--json")
+	if missing.code != 1 || missing.stdout != "" || strings.TrimSpace(missing.stderr) != "landline-tui is not installed. Build it with: just install-tui" {
+		t.Fatalf("with no landline-tui on the path: %+v", missing)
+	}
+}
