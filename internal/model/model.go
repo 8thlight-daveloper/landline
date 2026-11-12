@@ -31,8 +31,6 @@ type Agent struct {
 	Harness        string    `json:"harness"`
 	Host           string    `json:"host"`
 	Session        string    `json:"session"`
-	WakeKind       string    `json:"wake_kind"`
-	WakeTarget     string    `json:"wake_target"`
 	LastSeen       time.Time `json:"last_seen"`
 	Folder         string    `json:"folder,omitempty"`
 	Branch         string    `json:"branch,omitempty"`

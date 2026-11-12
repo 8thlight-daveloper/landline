@@ -11,15 +11,15 @@ takes `Authorization: Bearer <hub secret>`.
 
 ## Routes
 
-| Route                             | Auth        | Does                                                              |
-| --------------------------------- | ----------- | ----------------------------------------------------------------- |
-| `POST /v1/register`               | secret      | Registers an agent. Unchanged except that it takes no wake fields |
-| `POST /v1/attach`                 | agent token | Records claims. A Codex proof sends its code as a challenge       |
-| `GET /v1/stream`                  | agent token | Opens the delivery stream (below)                                 |
-| `POST /v1/deliveries/{id}/report` | agent token | The MCP process reports one delivery. Body is `DeliveryReport`    |
-| `POST /v1/send`                   | agent token | Sends to one recipient and waits for the delivery report          |
-| `GET /v1/agents`                  | agent token | Lists agents, each with `connected`                               |
-| `GET /v1/log`                     | secret      | Reads the log. Unchanged                                          |
+| Route                             | Auth        | Does                                                                  |
+| --------------------------------- | ----------- | --------------------------------------------------------------------- |
+| `POST /v1/register`               | secret      | Registers an agent. Unchanged except that it takes no delivery fields |
+| `POST /v1/attach`                 | agent token | Records claims. A Codex proof sends its code as a challenge           |
+| `GET /v1/stream`                  | agent token | Opens the delivery stream (below)                                     |
+| `POST /v1/deliveries/{id}/report` | agent token | The MCP process reports one delivery. Body is `DeliveryReport`        |
+| `POST /v1/send`                   | agent token | Sends to one recipient and waits for the delivery report              |
+| `GET /v1/agents`                  | agent token | Lists agents, each with `connected`                                   |
+| `GET /v1/log`                     | secret      | Reads the log. Unchanged                                              |
 
 Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 

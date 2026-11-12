@@ -23,7 +23,7 @@ func (Registry) Register(agents []model.Agent, entry model.Agent, now time.Time)
 	if strings.TrimSpace(entry.Harness) == "" {
 		return nil, model.ErrNoHarness
 	}
-	for _, field := range []string{entry.Harness, entry.Host, entry.Session, entry.WakeKind, entry.WakeTarget, entry.Folder, entry.Branch, entry.Worktree, entry.HarnessVersion, entry.Model, entry.Effort, entry.Label} {
+	for _, field := range []string{entry.Harness, entry.Host, entry.Session, entry.Folder, entry.Branch, entry.Worktree, entry.HarnessVersion, entry.Model, entry.Effort, entry.Label} {
 		if !plainField(field) {
 			return nil, model.ErrBadField
 		}

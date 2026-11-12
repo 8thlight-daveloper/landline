@@ -1066,7 +1066,7 @@ func TestAProvedAttachRecordsNothingAboutTheThread(t *testing.T) {
 	h.hub.mu.Lock()
 	agent, found := h.hub.reg.Find(h.hub.agents, handle)
 	h.hub.mu.Unlock()
-	if !found || agent.WakeKind != "" || agent.WakeTarget != "" {
+	if !found {
 		t.Fatalf("%+v", agent)
 	}
 	raw, _ := os.ReadFile(statePath)

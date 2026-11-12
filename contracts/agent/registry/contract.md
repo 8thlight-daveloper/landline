@@ -19,11 +19,11 @@ Holds the list of registered agents as a value. Every call takes the list and re
 - A harness that is empty after trimming Unicode white space (the Unicode White_Space property, so a zero-width space is
   not white space), such as a space, a tab, a no-break space, or an em space, is `model.ErrNoHarness`. That check comes
   before the field rules, so a harness of only a tab is `model.ErrNoHarness`.
-- The harness, host, session, wake method, wake target, folder, branch, worktree, harness version, model, effort, and
-  label are each at most 64 bytes, counted in bytes. They hold no control character, no line or paragraph separator, and
-  no invisible formatting character such as a right-to-left override, which are the Unicode categories Cc, Zl, Zp, and
-  Cf. So none of them can break onto a new line or reorder the text around them. Anything else is `model.ErrBadField`.
-  An empty host, session, wake method, or wake target is allowed.
+- The harness, host, session, folder, branch, worktree, harness version, model, effort, and label are each at most 64
+  bytes, counted in bytes. They hold no control character, no line or paragraph separator, and no invisible formatting
+  character such as a right-to-left override, which are the Unicode categories Cc, Zl, Zp, and Cf. So none of them can
+  break onto a new line or reorder the text around them. Anything else is `model.ErrBadField`. An empty host or session
+  is allowed.
 - The returned list is sorted by name. The input list is never changed, including when `Register` replaces an entry.
 - `Online` returns the agents whose `LastSeen` is no more than `window` before `now`, sorted by name. An agent whose
   `LastSeen` is after `now` counts as heard from. The list passed in is never reordered.
@@ -42,11 +42,11 @@ None. It reads no clock, file, or environment. It **returns a changed copy** of 
 
 ## Decisions to know
 
-| Decision                                                                                                  | Reversal |
-| --------------------------------------------------------------------------------------------------------- | -------- |
-| Registering an existing name replaces its entry, so a re-registering agent takes over the name            | cheap    |
-| The wake fields are limited to 64 bytes and a printable character set, so they cannot forge a header line | hard     |
-| An agent whose last-heard time is in the future counts as online                                          | cheap    |
+| Decision                                                                                                       | Reversal |
+| -------------------------------------------------------------------------------------------------------------- | -------- |
+| Registering an existing name replaces its entry, so a re-registering agent takes over the name                 | cheap    |
+| The free-text fields are limited to 64 bytes and a printable character set, so they cannot forge a header line | hard     |
+| An agent whose last-heard time is in the future counts as online                                               | cheap    |
 
 ## Open questions
 
@@ -70,11 +70,11 @@ None.
 
 ## Wrong implementations tried
 
-| Wrong implementation                                       | Caught by                                                         |
-| ---------------------------------------------------------- | ----------------------------------------------------------------- |
-| Replace an entry inside the caller's list                  | `TestReplacingAnEntryLeavesTheCallersListUnchanged`               |
-| Sort the caller's list in place in `Register` or `Online`  | `TestNeitherRegisterNorOnlineReordersTheCallersList`              |
-| Accept a 33 character name or a leading `-`                | `TestANameOfExactlyThirtyTwoCharactersIsValidAndThirtyThreeIsNot` |
-| Accept a line separator or a bidi override in a wake field | `TestControlCharacterBoundaries`                                  |
-| Count characters and not bytes in the 64 byte limit        | `TestTheFieldLimitCountsBytesNotCharacters`                       |
-| Match names ignoring case                                  | `TestFindMatchesTheNameExactly`                                   |
+| Wrong implementation                                      | Caught by                                                         |
+| --------------------------------------------------------- | ----------------------------------------------------------------- |
+| Replace an entry inside the caller's list                 | `TestReplacingAnEntryLeavesTheCallersListUnchanged`               |
+| Sort the caller's list in place in `Register` or `Online` | `TestNeitherRegisterNorOnlineReordersTheCallersList`              |
+| Accept a 33 character name or a leading `-`               | `TestANameOfExactlyThirtyTwoCharactersIsValidAndThirtyThreeIsNot` |
+| Accept a line separator or a bidi override in a field     | `TestControlCharacterBoundaries`                                  |
+| Count characters and not bytes in the 64 byte limit       | `TestTheFieldLimitCountsBytesNotCharacters`                       |
+| Match names ignoring case                                 | `TestFindMatchesTheNameExactly`                                   |

@@ -174,10 +174,10 @@ func TestOnlineKeepsEveryFieldOfTheEntries(t *testing.T) {
 	t.Parallel()
 	r := newImpl()
 	entry := agent("alpha")
-	entry.WakeKind, entry.WakeTarget = "codex", "thread-1"
+	entry.Folder, entry.Label = "threnos", "tutor"
 	agents, _ := r.Register(nil, entry, t0)
 	got := r.Online(agents, t0, time.Minute)
-	if len(got) != 1 || got[0].WakeKind != "codex" || got[0].WakeTarget != "thread-1" || got[0].Host != "mac" {
+	if len(got) != 1 || got[0].Folder != "threnos" || got[0].Label != "tutor" || got[0].Host != "mac" {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -189,7 +189,7 @@ func TestReplacingAnEntryLeavesTheCallersListUnchanged(t *testing.T) {
 	agents, _ = r.Register(agents, agent("bravo"), t0)
 	before := append([]model.Agent(nil), agents...)
 	moved := agent("alpha")
-	moved.Host = "linux"
+	moved.Session = "s-new"
 	got, err := r.Register(agents, moved, t0.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestReplacingAnEntryLeavesTheCallersListUnchanged(t *testing.T) {
 	if !reflect.DeepEqual(agents, before) {
 		t.Fatalf("the input changed: %+v then %+v", before, agents)
 	}
-	if got[0].Host != "linux" || got[1].Name != "bravo" {
+	if got[0].Session != "s-new" || got[1].Name != "bravo" {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -229,7 +229,7 @@ func TestAHarnessOfOnlySpacesIsRefused(t *testing.T) {
 
 func TestFreeTextFieldsAreOneShortLineOfPrintableCharacters(t *testing.T) {
 	t.Parallel()
-	for _, field := range []string{"Harness", "Host", "Session", "WakeKind", "WakeTarget"} {
+	for _, field := range []string{"Harness", "Host", "Session"} {
 		for _, bad := range []string{"two\nlines", "tab\there", "bell\a", strings.Repeat("x", 65)} {
 			entry := agent("alpha")
 			switch field {
@@ -239,10 +239,6 @@ func TestFreeTextFieldsAreOneShortLineOfPrintableCharacters(t *testing.T) {
 				entry.Host = bad
 			case "Session":
 				entry.Session = bad
-			case "WakeKind":
-				entry.WakeKind = bad
-			case "WakeTarget":
-				entry.WakeTarget = bad
 			}
 			if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
 				t.Errorf("%s %q: %v", field, bad, err)
@@ -355,7 +351,7 @@ func TestNamesAreLowercaseOnlyAndOnlyTheExactNameAllIsReserved(t *testing.T) {
 
 func TestRegisterStoresEveryFieldAsGiven(t *testing.T) {
 	t.Parallel()
-	entry := model.Agent{Name: "alpha", Harness: "Codex CLI", Host: " mac book ", Session: " s 1 ", WakeKind: "", WakeTarget: "left over"}
+	entry := model.Agent{Name: "alpha", Harness: "Codex CLI", Host: " mac book ", Session: " s 1 "}
 	got, err := newImpl().Register(nil, entry, t0)
 	if err != nil {
 		t.Fatal(err)
@@ -415,10 +411,6 @@ func setField(entry *model.Agent, field, value string) {
 		entry.Host = value
 	case "Session":
 		entry.Session = value
-	case "WakeKind":
-		entry.WakeKind = value
-	case "WakeTarget":
-		entry.WakeTarget = value
 	case "Folder":
 		entry.Folder = value
 	case "Branch":
@@ -438,7 +430,7 @@ func setField(entry *model.Agent, field, value string) {
 
 func TestEveryFieldAcceptsExactlySixtyFourBytesAndRefusesTheUnicodeLineBreaks(t *testing.T) {
 	t.Parallel()
-	for _, field := range []string{"Harness", "Host", "Session", "WakeKind", "WakeTarget", "Folder", "Branch", "Worktree", "HarnessVersion", "Model", "Effort", "Label"} {
+	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "Model", "Effort", "Label"} {
 		entry := agent("alpha")
 		setField(&entry, field, strings.Repeat("h", 64))
 		if _, err := newImpl().Register(nil, entry, t0); err != nil {
@@ -492,12 +484,11 @@ func TestReRegisteringWithEmptyOptionalFieldsReplacesTheOldValues(t *testing.T) 
 	t.Parallel()
 	r := newImpl()
 	first := agent("alpha")
-	first.WakeKind, first.WakeTarget = "codex", "thread-1"
 	agents, _ := r.Register(nil, first, t0)
 	second := agent("alpha")
-	second.Host, second.Session, second.WakeKind, second.WakeTarget = "", "", "", ""
+	second.Host, second.Session = "", ""
 	got, err := r.Register(agents, second, t0.Add(time.Second))
-	if err != nil || len(got) != 1 || got[0].WakeKind != "" || got[0].WakeTarget != "" || got[0].Host != "" || got[0].Session != "" {
+	if err != nil || len(got) != 1 || got[0].Host != "" || got[0].Session != "" {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 }
