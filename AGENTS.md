@@ -17,6 +17,7 @@ The documents a person chooses. The shared rules and skills read them from here.
 | Further behavior rules | none                                   |
 | Testing stack doc      | `docs/stack/testing.md`                |
 | Issue sizing examples  | none                                   |
+| Future directions      | `docs/future/`                         |
 
 ## Project rules
 
