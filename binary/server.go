@@ -19,7 +19,7 @@ import (
 
 const serverUsage = `landline server <command>
 
-  up [flags]        start the hub in the background. Flags: --addr, --log, --state, --host, --window
+  up [flags]        start the hub in the background. Flags: --addr, --log, --state, --host
   run [flags]       run the hub in this terminal
   down              stop the hub that "up" started
   status            say whether the hub is running
@@ -109,7 +109,7 @@ func hubPID(dataDir string) (int, bool) {
 }
 
 func serverUp(args []string, env command.Env, dataDir string) int {
-	values, err := flagValues(args, "--addr", "--log", "--state", "--host", "--window")
+	values, err := flagValues(args, "--addr", "--log", "--state", "--host")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline server up:", err)
 		return 2

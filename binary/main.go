@@ -7,16 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 
 	"github.com/8thlight-daveloper/landline/internal/cli/command"
-	client "github.com/8thlight-daveloper/landline/internal/client/http"
-	"github.com/8thlight-daveloper/landline/internal/daemon/agentd"
 	"github.com/8thlight-daveloper/landline/internal/hub/server"
 	"github.com/8thlight-daveloper/landline/internal/log/store"
 	mcp "github.com/8thlight-daveloper/landline/internal/mcp/server"
@@ -44,8 +40,6 @@ func main() {
 			os.Exit(runSetup(os.Args[2:]))
 		case "claude":
 			os.Exit(runClaude(os.Args[2:]))
-		case "agentd":
-			os.Exit(runDaemon(os.Args[2:], host))
 		case "mcp":
 			os.Exit(runMCP(os.Args[2:], env))
 		case "version":
@@ -102,7 +96,7 @@ func notifyToStderr(line string) {
 }
 
 func runHub(args []string, env command.Env, home, host string) int {
-	values, err := flagValues(args, "--addr", "--log", "--host", "--state", "--window")
+	values, err := flagValues(args, "--addr", "--log", "--host", "--state")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
 		return 2
@@ -111,15 +105,6 @@ func runHub(args []string, env command.Env, home, host string) int {
 	logPath := or(values["--log"], filepath.Join(home, ".local", "share", "landline", "log.jsonl"))
 	statePath := or(values["--state"], filepath.Join(filepath.Dir(logPath), "state.json"))
 	host = or(values["--host"], host)
-	window := time.Duration(0)
-	if raw := values["--window"]; raw != "" {
-		parsed, err := time.ParseDuration(raw)
-		if err != nil || parsed <= 0 {
-			fmt.Fprintln(os.Stderr, "landline hub: --window must be a duration such as 90s")
-			return 2
-		}
-		window = parsed
-	}
 	warnIfExposed(addr)
 	log, err := store.Open(logPath)
 	if err != nil {
@@ -136,8 +121,7 @@ func runHub(args []string, env command.Env, home, host string) int {
 		return 1
 	}
 	hub, err := server.New(server.Config{
-		Secret: secret, Host: host, StatePath: statePath, Window: window,
-		Wakers: map[string]server.Waker{"codex": codex.New()},
+		Secret: secret, Host: host, StatePath: statePath,
 		Notify: notifyToStderr,
 	}, log)
 	if err != nil {
@@ -154,29 +138,6 @@ func runHub(args []string, env command.Env, home, host string) int {
 	srv := &http.Server{Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
 	if err := srv.Serve(listener); err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
-		return 1
-	}
-	return 0
-}
-
-func runDaemon(args []string, host string) int {
-	values, err := flagValues(args, "--host")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "landline agentd:", err)
-		return 2
-	}
-	url, secret := os.Getenv("LANDLINE_URL"), os.Getenv("LANDLINE_SECRET")
-	if url == "" || secret == "" {
-		fmt.Fprintln(os.Stderr, "landline agentd: set LANDLINE_URL and LANDLINE_SECRET")
-		return 2
-	}
-	host = or(values["--host"], host)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	fmt.Fprintf(os.Stderr, "landline agentd waking agents on host %q for the hub at %s\n", host, url)
-	err = agentd.Run(ctx, client.New(url, secret), host, map[string]agentd.Waker{"codex": codex.New()}, notifyToStderr)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "landline agentd:", err)
 		return 1
 	}
 	return 0
@@ -209,7 +170,7 @@ func runMCP(args []string, env command.Env) int {
 		*target = args[i+1]
 		i++
 	}
-	options := mcp.Options{Channel: channel, Notify: notifyToStderr}
+	options := mcp.Options{Channel: channel, Waker: codex.New(), Notify: notifyToStderr}
 	if as == "" {
 		as = os.Getenv("LANDLINE_AS")
 	}

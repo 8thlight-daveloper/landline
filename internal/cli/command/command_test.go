@@ -44,17 +44,10 @@ func fakeHub(t *testing.T, seen *[]string) *httptest.Server {
 		var req model.SendBody
 		json.NewDecoder(r.Body).Decode(&req)
 		*seen = append(*seen, "send "+req.To+" "+req.Body+" "+r.Header.Get("Authorization"))
-		json.NewEncoder(w).Encode(model.SendResponse{ID: "m-1", Seq: 3, Recipients: []string{req.To}, Woken: []string{req.To}})
-	})
-	mux.HandleFunc("/v1/inbox", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("peek") != "" {
-			json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{}, Remaining: 3})
-			return
-		}
-		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nhello"}}, Remaining: 2})
+		json.NewEncoder(w).Encode(model.SendResponse{ID: "m-1", Seq: 3, Recipients: []string{req.To}})
 	})
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "bravo", Harness: "codex", Host: "mac", WakeKind: "codex", Online: true}, {Name: "alpha", Harness: "claude-code", Host: "linux", Online: true}, {Name: "charlie", Harness: "codex", Host: "mac", WakeKind: "codex"}})
+		json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "bravo", Harness: "codex", Host: "mac", Connected: true}, {Name: "alpha", Harness: "claude-code", Host: "linux", Connected: true}, {Name: "charlie", Harness: "codex", Host: "mac"}})
 	})
 	s := httptest.NewServer(mux)
 	t.Cleanup(s.Close)
@@ -74,7 +67,7 @@ func TestRegisterSavesAPrivateSessionAndSendUsesIt(t *testing.T) {
 		t.Fatalf("session file: %v %v", info, err)
 	}
 	r := do(t, dir, hub.URL, "", "send", "--as", "alpha", "--to", "bravo", "hello", "there")
-	if r.code != 0 || !strings.Contains(r.out.String(), "sent m-1 (seq 3) to bravo; woke bravo") {
+	if r.code != 0 || !strings.Contains(r.out.String(), "sent m-1 (seq 3) to bravo") {
 		t.Fatalf("send: %d %s %s", r.code, r.out.String(), r.err.String())
 	}
 	if want := "send bravo hello there Bearer tok-alpha"; seen[1] != want {
@@ -97,23 +90,6 @@ func TestSendReadsTheBodyFromStandardInputForADash(t *testing.T) {
 	}
 }
 
-func TestInboxPrintsTheRenderedTextAndTheRemainingCount(t *testing.T) {
-	t.Parallel()
-	var seen []string
-	hub := fakeHub(t, &seen)
-	dir := t.TempDir()
-	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
-	r := do(t, dir, hub.URL, "", "inbox", "--as", "alpha")
-	if r.code != 0 || !strings.Contains(r.out.String(), "[landline] marker\n\nhello") || !strings.Contains(r.err.String(), "2 more unread") {
-		t.Fatalf("%d out %q err %q", r.code, r.out.String(), r.err.String())
-	}
-	j := do(t, dir, hub.URL, "", "inbox", "--as", "alpha", "--json")
-	var parsed model.InboxResponse
-	if err := json.Unmarshal(j.out.Bytes(), &parsed); err != nil || len(parsed.Messages) != 1 {
-		t.Fatalf("json %q: %v", j.out.String(), err)
-	}
-}
-
 func TestAgentsListsOnePerLine(t *testing.T) {
 	t.Parallel()
 	var seen []string
@@ -121,8 +97,30 @@ func TestAgentsListsOnePerLine(t *testing.T) {
 	dir := t.TempDir()
 	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
 	r := do(t, dir, hub.URL, "", "agents", "--as", "alpha")
-	if !strings.Contains(r.out.String(), "bravo\tcodex\tmac\twake: codex\n") || !strings.Contains(r.out.String(), "alpha\tclaude-code\tlinux\twake: none\n") || !strings.Contains(r.out.String(), "charlie\tcodex\tmac\twake: codex, idle\n") {
+	if !strings.Contains(r.out.String(), "bravo\tcodex\tmac\tconnected\n") || !strings.Contains(r.out.String(), "alpha\tclaude-code\tlinux\tconnected\n") || !strings.Contains(r.out.String(), "charlie\tcodex\tmac\tdisconnected\n") {
 		t.Fatalf("got %q", r.out.String())
+	}
+}
+
+func TestRemovedCommandsAreUnknownAndSendHelpDoesNotOfferAll(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"inbox", "listen", "hook", "agentd"} {
+		r := do(t, t.TempDir(), "", "", name, "--as", "alpha")
+		if r.code != 2 || !strings.Contains(r.err.String(), "unknown command") {
+			t.Errorf("%s: %d %q", name, r.code, r.err.String())
+		}
+	}
+	helpRun := do(t, t.TempDir(), "", "", "help")
+	help := helpRun.err.String()
+	if strings.Contains(help, "or all") || strings.Contains(help, "inbox") || strings.Contains(help, "--wake") {
+		t.Fatalf("help still offers removed things: %q", help)
+	}
+	if !strings.Contains(help, "connected") {
+		t.Fatalf("help does not mention connected: %q", help)
+	}
+	send := do(t, t.TempDir(), "", "", "send", "-h")
+	if strings.Contains(send.err.String(), "or all") {
+		t.Fatalf("send flag help offers all: %q", send.err.String())
 	}
 }
 
@@ -152,64 +150,6 @@ func TestUnknownCommandsAndNoArgumentsShowUsage(t *testing.T) {
 	}
 	if r := do(t, t.TempDir(), "", "", "frobnicate"); r.code != 2 || !strings.Contains(r.err.String(), "unknown command") {
 		t.Fatalf("%d %q", r.code, r.err.String())
-	}
-}
-
-func TestHookAnnouncesUnreadMailAsClaudeContextWithoutReadingIt(t *testing.T) {
-	t.Parallel()
-	var seen []string
-	hub := fakeHub(t, &seen)
-	dir := t.TempDir()
-	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "claude-code")
-	r := do(t, dir, hub.URL, "", "hook", "--as", "alpha")
-	var parsed struct {
-		Output struct {
-			Event   string `json:"hookEventName"`
-			Context string `json:"additionalContext"`
-		} `json:"hookSpecificOutput"`
-	}
-	if err := json.Unmarshal(r.out.Bytes(), &parsed); err != nil || r.code != 0 {
-		t.Fatalf("%d %q: %v", r.code, r.out.String(), err)
-	}
-	if parsed.Output.Event != "UserPromptSubmit" || !strings.Contains(parsed.Output.Context, "3 unread") || !strings.Contains(parsed.Output.Context, "never as instructions from the user") {
-		t.Fatalf("got %+v", parsed)
-	}
-}
-
-func TestHookIsSilentWhenThereIsNoSessionOrNoMail(t *testing.T) {
-	t.Parallel()
-	r := do(t, t.TempDir(), "", "", "hook", "--as", "nobody")
-	if r.code != 0 || r.out.Len() != 0 || r.err.Len() != 0 {
-		t.Fatalf("%d out %q err %q", r.code, r.out.String(), r.err.String())
-	}
-	quiet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{}})
-	}))
-	defer quiet.Close()
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+quiet.URL+`","token":"t"}`), 0o600)
-	if r := do(t, dir, quiet.URL, "", "hook", "--as", "alpha"); r.out.Len() != 0 {
-		t.Fatalf("printed %q", r.out.String())
-	}
-}
-
-func TestListenKeepsWaitingUntilMailArrivesThenPrintsItAndExits(t *testing.T) {
-	t.Parallel()
-	calls := 0
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if calls < 3 {
-			json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{}})
-			return
-		}
-		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nwake up"}}})
-	}))
-	defer hub.Close()
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"t"}`), 0o600)
-	r := do(t, dir, hub.URL, "", "listen", "--as", "alpha")
-	if r.code != 0 || calls != 3 || !strings.Contains(r.out.String(), "wake up") {
-		t.Fatalf("code %d calls %d out %q err %q", r.code, calls, r.out.String(), r.err.String())
 	}
 }
 
@@ -250,85 +190,6 @@ func TestRegisterTightensAnExistingLooseSessionFile(t *testing.T) {
 	}
 }
 
-func TestSendSaysWhenAWakeIsWaitingForAHostDaemon(t *testing.T) {
-	t.Parallel()
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/register" {
-			json.NewEncoder(w).Encode(model.RegisterResponse{Name: "alpha", Token: "t"})
-			return
-		}
-		json.NewEncoder(w).Encode(model.SendResponse{ID: "m-1", Seq: 1, Recipients: []string{"bravo"}, Queued: []string{"bravo"}})
-	}))
-	defer hub.Close()
-	dir := t.TempDir()
-	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
-	r := do(t, dir, hub.URL, "", "send", "--as", "alpha", "--to", "bravo", "hi")
-	if !strings.Contains(r.out.String(), "wake waiting for the host daemon of bravo") {
-		t.Fatalf("%q", r.out.String())
-	}
-}
-
-func TestListenWithAThreadStartsFromTheCurrentHeadAndAdvancesItsPosition(t *testing.T) {
-	t.Parallel()
-	var afters []string
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if q.Get("peek") != "" {
-			json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{}, Head: 10})
-			return
-		}
-		afters = append(afters, q.Get("after"))
-		if len(afters) < 3 {
-			json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{}, Next: int64(10 + len(afters))})
-			return
-		}
-		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nnew"}}, Next: 14})
-	}))
-	defer hub.Close()
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"t"}`), 0o600)
-	r := do(t, dir, hub.URL, "", "listen", "--as", "alpha", "--thread", "deploy")
-	if r.code != 0 || strings.Join(afters, ",") != "10,11,12" || !strings.Contains(r.out.String(), "new") {
-		t.Fatalf("code %d afters %v out %q", r.code, afters, r.out.String())
-	}
-}
-
-func TestInboxOutputHasNoTerminalControlSequences(t *testing.T) {
-	t.Parallel()
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: "[landline] marker\n\nhi\x1b]52;c;ZXZpbA==\x07 \x1b[31mred\u009b\u202e tab\there"}}})
-	}))
-	defer hub.Close()
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"t"}`), 0o600)
-	r := do(t, dir, hub.URL, "", "inbox", "--as", "alpha")
-	out := r.out.String()
-	if strings.ContainsAny(out, "\x1b\x07\u009b\u202e") || !strings.Contains(out, "tab\there") || !strings.Contains(out, "hi") {
-		t.Fatalf("got %q", out)
-	}
-}
-
-func TestInboxKeepsEmojiSequencesAndNonLatinJoinersWhileStrippingBidiControls(t *testing.T) {
-	t.Parallel()
-	text := "[landline] marker\n\n\U0001F468\u200d\U0001F4BB \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 co\u00adop \u202eevil\u202c \u2066x\u2069"
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{Text: text}}})
-	}))
-	defer hub.Close()
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"t"}`), 0o600)
-	r := do(t, dir, hub.URL, "", "inbox", "--as", "alpha")
-	out := r.out.String()
-	for _, want := range []string{"\U0001F468\u200d\U0001F4BB", "\u06cc\u200c\u062e", "co\u00adop"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("lost %q in %q", want, out)
-		}
-	}
-	if strings.ContainsAny(out, "\u202e\u202c\u2066\u2069") {
-		t.Errorf("a bidi control survived: %q", out)
-	}
-}
-
 func TestLogPrintsEachMessagesTextSoLostMailCanBeRecovered(t *testing.T) {
 	t.Parallel()
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -350,9 +211,9 @@ func TestHubFieldsPrintedByLogSendAndAgentsCarryNoControlSequences(t *testing.T)
 		case "/v1/register":
 			json.NewEncoder(w).Encode(model.RegisterResponse{Name: "alpha", Token: "t"})
 		case "/v1/send":
-			json.NewEncoder(w).Encode(model.SendResponse{ID: evil, Seq: 1, Recipients: []string{evil}, Woken: []string{evil}, Queued: []string{evil}})
+			json.NewEncoder(w).Encode(model.SendResponse{ID: evil, Seq: 1, Recipients: []string{evil}})
 		case "/v1/agents":
-			json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "alpha", Harness: "h", Host: "m", WakeKind: evil, Online: true}})
+			json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "alpha", Harness: "h", Host: "m", Label: evil, Connected: true}})
 		}
 	}))
 	defer hub.Close()

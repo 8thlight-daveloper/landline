@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -185,9 +186,12 @@ func (s *Session) Send(body model.SendBody) (out model.SendResponse, err error) 
 	return
 }
 
-func (s *Session) Inbox(wait int, threads string, after int64) (out model.InboxResponse, err error) {
-	err = s.call(func(c *client.Client) (e error) { out, e = c.Inbox(wait, threads, after); return })
-	return
+func (s *Session) Deliveries(ctx context.Context, handle func(model.Delivery)) error {
+	return s.call(func(c *client.Client) error { return c.Stream(ctx, handle) })
+}
+
+func (s *Session) Report(id string, report model.DeliveryReport) error {
+	return s.call(func(c *client.Client) error { return c.Report(id, report) })
 }
 
 func (s *Session) Agents() (out []model.AgentInfo, err error) {

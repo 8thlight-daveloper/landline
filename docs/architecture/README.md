@@ -1,7 +1,7 @@
 # Architecture
 
-One Go program with four parts: a hub, a host daemon, a command line, and an MCP server. They share one module and one
-set of components. [architecture.yaml](../../architecture.yaml) holds the dependency rules.
+One Go program with three parts: a hub, a command line, and an MCP server. They share one module and one set of
+components. [architecture.yaml](../../architecture.yaml) holds the dependency rules.
 
 ## Components
 
@@ -15,5 +15,11 @@ in.
 
 1. A client posts a send request. `hub/server` authenticates it and hands the authenticated name to `message/router`.
 1. The router returns the stamped envelope and its recipients, or a refusal.
-1. `log/store` appends the envelope. The hub then wakes any recipient that has a wake method.
-1. A recipient reads its mail through `message/inbox`, by long poll or by a prompt hook.
+1. `log/store` appends the envelope.
+1. If the recipient is not connected, the send fails and nothing is held. Otherwise the hub writes a delivery to the
+   recipient's stream, which the recipient's `landline mcp` process opened with `GET /v1/stream`.
+1. The MCP process delivers the text, as a channel event or, for Codex, with `codex queue` through `wake/codex`, and
+   posts a delivery report. The hub answers the sender with that outcome.
+
+The hub keeps no inbox and no wake queue. [../reference/delivery-protocol.md](../reference/delivery-protocol.md) defines
+the stream and the report.

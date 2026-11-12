@@ -67,9 +67,3 @@ type Decision struct {
 	Envelope   Envelope
 	Recipients []string
 }
-
-type Page struct {
-	Messages  []Envelope
-	Next      int64
-	Remaining int
-}

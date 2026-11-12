@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,8 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
+	client "github.com/8thlight-daveloper/landline/internal/client/http"
 	"github.com/8thlight-daveloper/landline/internal/model"
 )
 
@@ -66,11 +67,13 @@ func TestTheHarnessNameComesFromTheClientThenTheEnvironment(t *testing.T) {
 }
 
 type recordingHub struct {
-	mu       sync.Mutex
-	register []model.RegisterRequest
-	tokens   int
-	rejected int
-	slow     chan struct{}
+	mu          sync.Mutex
+	register    []model.RegisterRequest
+	tokens      int
+	rejected    int
+	reports     []string
+	streams     []string
+	failReports bool
 }
 
 func (r *recordingHub) handler() http.Handler {
@@ -99,11 +102,41 @@ func (r *recordingHub) handler() http.Handler {
 		}
 		json.NewEncoder(w).Encode(model.SendResponse{ID: "m-1", Seq: 1})
 	})
-	mux.HandleFunc("/v1/inbox", func(w http.ResponseWriter, req *http.Request) {
-		if r.slow != nil {
-			<-r.slow
+	mux.HandleFunc("/v1/deliveries/", func(w http.ResponseWriter, req *http.Request) {
+		r.mu.Lock()
+		reject := r.rejected > 0
+		if reject {
+			r.rejected--
 		}
-		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{}})
+		r.reports = append(r.reports, req.URL.Path+" "+req.Header.Get("Authorization"))
+		r.mu.Unlock()
+		if reject {
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(model.ErrorResponse{Error: "missing or unknown agent token"})
+			return
+		}
+		if r.failReports {
+			w.WriteHeader(404)
+			json.NewEncoder(w).Encode(model.ErrorResponse{Error: "no such delivery"})
+			return
+		}
+		w.Write([]byte("{}"))
+	})
+	mux.HandleFunc("/v1/stream", func(w http.ResponseWriter, req *http.Request) {
+		r.mu.Lock()
+		reject := r.rejected > 0
+		if reject {
+			r.rejected--
+		}
+		r.streams = append(r.streams, req.Header.Get("Authorization"))
+		r.mu.Unlock()
+		if reject {
+			w.WriteHeader(401)
+			json.NewEncoder(w).Encode(model.ErrorResponse{Error: "missing or unknown agent token"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("event: delivery\ndata: {\"id\":\"d-1\",\"kind\":\"challenge\",\"text\":\"code\"}\n\n"))
 	})
 	return mux
 }
@@ -196,24 +229,94 @@ func TestNoSecretGivesAnErrorThatSaysHowToGetOne(t *testing.T) {
 	}
 }
 
-func TestALongPollDoesNotBlockOtherCalls(t *testing.T) {
+func TestDeliveriesRegistersLazilyAndHandsOverEachDelivery(t *testing.T) {
 	t.Parallel()
-	hub := &recordingHub{slow: make(chan struct{})}
+	hub := &recordingHub{}
 	srv := httptest.NewServer(hub.handler())
 	defer srv.Close()
-	defer close(hub.slow)
 	s, _ := newSession(t, srv, "0123456789abcdef")
-	go s.Inbox(50, "", 0)
-	time.Sleep(200 * time.Millisecond)
-	done := make(chan error, 1)
-	go func() { _, err := s.Send(model.SendBody{To: "x", Body: "b"}); done <- err }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("a send waited for a long poll to end")
+	var got []model.Delivery
+	if err := s.Deliveries(context.Background(), func(d model.Delivery) { got = append(got, d) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "d-1" || got[0].Kind != model.DeliveryChallenge || len(hub.register) != 1 || hub.streams[0] != "Bearer tok1" {
+		t.Fatalf("got %+v registrations %d streams %v", got, len(hub.register), hub.streams)
+	}
+}
+
+func TestDeliveriesRenewsAnExpiredTokenOnceAndOpensTheStreamAgain(t *testing.T) {
+	t.Parallel()
+	hub := &recordingHub{rejected: 1}
+	srv := httptest.NewServer(hub.handler())
+	defer srv.Close()
+	s, _ := newSession(t, srv, "0123456789abcdef")
+	count := 0
+	if err := s.Deliveries(context.Background(), func(model.Delivery) { count++ }); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || len(hub.register) != 2 || hub.streams[1] != "Bearer tok2" {
+		t.Fatalf("count %d registrations %d streams %v", count, len(hub.register), hub.streams)
+	}
+	hub.mu.Lock()
+	hub.rejected = 5
+	hub.mu.Unlock()
+	if err := s.Deliveries(context.Background(), func(model.Delivery) {}); err == nil {
+		t.Fatal("a permanent 401 should end as an error after one retry")
+	}
+}
+
+func TestReportRegistersLazilyAndSendsTheReportWithTheToken(t *testing.T) {
+	t.Parallel()
+	hub := &recordingHub{}
+	srv := httptest.NewServer(hub.handler())
+	defer srv.Close()
+	s, _ := newSession(t, srv, "0123456789abcdef")
+	if err := s.Report("d-1", model.DeliveryReport{OK: true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(hub.register) != 1 || hub.reports[0] != "/v1/deliveries/d-1/report Bearer tok1" {
+		t.Fatalf("registrations %d reports %v", len(hub.register), hub.reports)
+	}
+}
+
+func TestReportRenewsAnExpiredTokenOnceAndRetries(t *testing.T) {
+	t.Parallel()
+	hub := &recordingHub{rejected: 1}
+	srv := httptest.NewServer(hub.handler())
+	defer srv.Close()
+	s, _ := newSession(t, srv, "0123456789abcdef")
+	if err := s.Report("d-1", model.DeliveryReport{OK: false, Error: "no way to receive"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(hub.register) != 2 || len(hub.reports) != 2 || !strings.HasSuffix(hub.reports[1], "Bearer tok2") {
+		t.Fatalf("registrations %d reports %v", len(hub.register), hub.reports)
+	}
+}
+
+func TestReportMapsAHubRefusalToAStatusError(t *testing.T) {
+	t.Parallel()
+	hub := &recordingHub{failReports: true}
+	srv := httptest.NewServer(hub.handler())
+	defer srv.Close()
+	s, _ := newSession(t, srv, "0123456789abcdef")
+	err := s.Report("d-9", model.DeliveryReport{OK: true})
+	var status *client.StatusError
+	if !errors.As(err, &status) || status.Status != 404 || !strings.Contains(err.Error(), "no such delivery") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestDeliveriesAndReportToAHubThatIsNotRunningSayWhatToDo(t *testing.T) {
+	t.Parallel()
+	env := Env{ConfigDir: t.TempDir(), Host: "mac", Getenv: func(k string) string {
+		return map[string]string{"LANDLINE_URL": "http://127.0.0.1:1", "LANDLINE_SECRET": "0123456789abcdef"}[k]
+	}}
+	s := NewSession(env, func() Identity { return Identity{Seed: "x", Folder: "x"} }, Identity{})
+	if err := s.Report("d-1", model.DeliveryReport{OK: true}); err == nil || !strings.Contains(err.Error(), "landline server up") {
+		t.Fatalf("%v", err)
+	}
+	if err := s.Deliveries(context.Background(), func(model.Delivery) {}); err == nil || !strings.Contains(err.Error(), "landline server up") {
+		t.Fatalf("%v", err)
 	}
 }
 
