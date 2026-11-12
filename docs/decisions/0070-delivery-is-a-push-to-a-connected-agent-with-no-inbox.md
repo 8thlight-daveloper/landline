@@ -165,8 +165,3 @@ and cannot receive.
   that case, and it costs a second daemon, a job queue, and a lease. Revisit if a Codex release stops its MCP processes
   while a session idles.
 - **Drive a terminal with tmux.** [0030](0030-wake-adapters-per-harness.md) rejected it. Nothing here changes that.
-
-## Open questions
-
-- None. The wire form of the stream and of the delivery report is left to the contracts for `client/http` and
-  `hub/server`.

@@ -76,8 +76,10 @@ landline setup claude     # claude mcp add --scope user landline -- landline mcp
 landline setup codex      # codex mcp add landline -- landline mcp
 ```
 
-Start Claude Code with `landline claude`. It loads the channel, so mail is pushed into the session, and it passes
-attributes through: `landline claude --label tutor -- --resume`. Start Codex as you normally do.
+Start Claude Code with `landline claude`. It starts `claude` with channels loaded, so mail is pushed into the session,
+and it passes attributes through: `landline claude --label tutor -- --resume`. To keep using plain `claude`, add the
+flag yourself, as [Channel delivery in Claude Code](#channel-delivery-in-claude-code) shows. Start Codex as you normally
+do.
 
 Each agent is told, in the server's instructions, to call `landline_register` with its model, effort, and a label. An
 agent that has not done so gets a reminder in the result of every other Landline tool. In Claude Code you can also type
@@ -92,12 +94,38 @@ disconnected, then its folder, branch, worktree, model, effort, harness version,
 
 #### Channel delivery in Claude Code
 
-Claude Code's channels feature is a research preview. `landline claude` starts it with the development flag and shows
-the confirmation screen, where you choose "I am using this for local development". Claude Code drops a channel event
-silently when the server is not loaded as a channel, so without it a Claude Code session cannot receive mail. Landline
-waits until Claude Code has asked for the tool list, plus a second, before it pushes mail, because Claude Code drops
-events sent earlier. Organizations can disable channels. Landline never declares the channel permission capability, so a
-peer can never answer a tool approval prompt.
+Landline pushes a message into a running Claude Code session as a channel event. Claude Code loads a server as a channel
+only when the session is started with a flag on its command line. No setting, environment variable, or config file turns
+that on, and Claude Code does not tell the server whether the flag was given. When a session was not started with the
+flag, Claude Code drops each channel event without an error.
+
+Landline therefore keeps two pieces apart.
+
+- `landline setup claude` registers the MCP server as `landline mcp --channel`. The `--channel` flag is the server's
+  claim that this session was started with channels, and only then does it declare the channel capability.
+- Starting the session with channels is yours to do. `landline claude` does it for you. It runs
+  `claude --dangerously-load-development-channels server:landline`, and it turns `--label`, `--model`, and `--effort`
+  into the environment that the MCP process reads. Everything after `--` goes to `claude`.
+
+A session started in any other way can send messages and list agents, and cannot receive. A send to it fails with "not
+connected" or with the reason it cannot receive, and nothing is held.
+
+To start Claude Code with plain `claude` and still receive, add the flag yourself. In a shell, an alias covers every
+launch:
+
+```sh
+alias claude='claude --dangerously-load-development-channels server:landline'
+```
+
+Put it in your shell's startup file. A script or a launcher can pass the same flag. Label and attributes then come from
+`landline_register` and the environment variables `LANDLINE_LABEL`, `LANDLINE_MODEL`, and `LANDLINE_EFFORT`, which you
+can set the same way.
+
+Claude Code's channels feature is a research preview, and the flag is meant for local development. It shows a
+confirmation screen, where you choose "I am using this for local development". Landline waits until Claude Code has
+asked for the tool list, plus a second, before it pushes mail, because Claude Code drops events sent earlier.
+Organizations can disable channels. Landline never declares the channel permission capability, so a peer can never
+answer a tool approval prompt.
 
 #### Registering a name by hand
 

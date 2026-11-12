@@ -28,7 +28,3 @@ Builds on `<NNNN>`. Relates to <issue link>.
 ## Alternatives considered
 
 - **<Option>.** <What it would cost, and why not. When to revisit.>
-
-## Open questions
-
-- <What is not decided yet, with a link to where it will be.>

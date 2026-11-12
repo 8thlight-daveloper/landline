@@ -1,10 +1,10 @@
 ---
 category: architecture
-status: proposed
-approval: unrecorded
+status: accepted
+approval: person
 affects: [mcp/server, hub/server, wake/codex, cli/command]
 builds-on: ['0020', '0030', '0040']
-note: Drafted on 2026-11-11 after reading Claude Code's cross-session messaging and channels documentation. Not yet approved.
+note: Drafted on 2026-11-11 after reading Claude Code's cross-session messaging and channels documentation. Delivery by inbox, hub-side wake, and the long poll is superseded by 0070.
 partly-superseded-by: ['0070']
 ---
 
@@ -66,6 +66,17 @@ protocols fall back to.
   after the hub answers ([0040](0040-hub-defaults-and-saved-state.md)). If the hub cannot be reached, the server prints
   the error, waits with growing delays up to 30 seconds, and tries again.
 - The `send`, `inbox`, and `agents` tools stay available in channel mode.
+- Claude Code does not say during `initialize` whether it loaded a server as a channel, and it never acknowledges a
+  channel event. Its documentation names no setting, environment variable, or plugin field that loads a channel without
+  `--channels` or `--dangerously-load-development-channels` on the command line, and the client's `initialize`
+  capabilities hold only `roots` and `elicitation`. So the flag on `landline mcp` is the claim that this session was
+  launched with channels, and the server never declares the capability without it. A session that was not launched with
+  channels can send and list agents and cannot receive.
+- Landline does not seek a place on an organization's `allowedChannelPlugins`. The development flag bypasses that list.
+  An organization that turns `channelsEnabled` off blocks channels, the development flag included, and its sessions
+  cannot receive. Packaging Landline as a marketplace plugin is revisited only if the development flag goes away.
+- A person who does not want to start Claude Code through `landline claude` puts the flag in their own launcher. The
+  documentation says what `landline claude` adds, why, and how to add it by hand, for example as a shell alias.
 
 **Rules every strategy keeps.**
 
@@ -125,9 +136,3 @@ A prototype ran on 2026-11-11 against Claude Code 2.1.296, in a pseudo-terminal,
   startup and is acted on.
 - **The one-second grace is a measured heuristic.** It rests on one version and one machine. A change in Claude Code
   could move the registration later, so the inbox stays the recovery for any message that is lost this way.
-
-## Open questions
-
-- Whether Claude Code tells an MCP server that it supports channels during `initialize`. The client's `initialize`
-  capabilities hold `roots` and `elicitation` and nothing about channels, so `--channel` stays a flag.
-- Whether a Landline channel can be listed on an allowlist for an organization that sets `allowedChannelPlugins`.

@@ -10,9 +10,9 @@ are not rewritten.
 1. Fill in the front matter. `docs/reference/decision-record-front-matter.md` holds the fields, the categories, and the
    checks. `nix flake check` runs those checks.
 1. Link the records and contracts that depend on it. Put language and tooling details in `docs/stack/`, not here.
-1. Settle the open questions before approval. Put each question in "Open questions" to a person, one at a time, with a
-   recommendation. Write the answer into the record's text and remove the question. When the section reads "None", ask
-   for approval. A question that stays open blocks approval.
+1. Settle every question before approval. A record has no "Open questions" section. Put each question to a person, one
+   at a time, with a recommendation, and write the answer into the record's text. A question that cannot be settled yet
+   waits in an issue or a conversation, and the record waits with it.
 
 ## First file
 
