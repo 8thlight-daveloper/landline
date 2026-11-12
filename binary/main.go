@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -42,6 +43,8 @@ func main() {
 			os.Exit(runClaude(os.Args[2:]))
 		case "mcp":
 			os.Exit(runMCP(os.Args[2:], env))
+		case "tui":
+			os.Exit(runTUI(os.Args[2:], env))
 		case "version":
 			fmt.Print(bannerFor(os.Stdout))
 			fmt.Println("landline", version)
@@ -230,6 +233,19 @@ func runMCP(args []string, env command.Env) int {
 		return 1
 	}
 	return 0
+}
+
+func runTUI(args []string, env command.Env) int {
+	self, _ := os.Executable()
+	return command.RunTUI(args, env, command.TUI{
+		Executable: self,
+		LookPath:   exec.LookPath,
+		IsFile: func(path string) bool {
+			info, err := os.Stat(path)
+			return err == nil && info.Mode().IsRegular()
+		},
+		Exec: func(path string, argv []string) error { return syscall.Exec(path, argv, os.Environ()) },
+	})
 }
 
 func or(value, fallback string) string {

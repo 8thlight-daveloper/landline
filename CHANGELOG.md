@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `landline tui` opens a terminal screen of the connected agents, and `landline-tui agents --json` prints a snapshot as
+  JSON ([0090](docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)). `landline-tui`
+  is its own binary and Go module in `tui/`, built on Bubble Tea. `just install-tui` installs it, `landline tui` runs
+  it, and `nix build .#landline-tui` builds it. The `landline` module still has no third-party dependencies. `just check`
+  also tests and vets `tui/`.
 - `POST /v1/observers` registers an observer, a read-only client that is not an agent
   ([0090](docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)). Its token may call
   `GET /v1/agents` and gets 403 on every other route. The hub holds it in memory and forgets it after 2 minutes without

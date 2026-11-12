@@ -32,6 +32,7 @@ drivers:
   - hub/server
   - cli/command
   - mcp/server
+  - agent/viewer
 
 # A component may depend only on components at an earlier position, and on
 # the model. Two components at one position may not depend on each other.
@@ -58,6 +59,10 @@ components:
     position: 3
     depends_on: [client/http]
   - name: mcp/server
+    position: 3
+    depends_on: []
+  # The tui/ module, which is its own Go module outside components_root. It reaches the hub over HTTP, so it imports no component.
+  - name: agent/viewer
     position: 3
     depends_on: []
 

@@ -1,7 +1,9 @@
 # Architecture
 
 One Go program with three parts: a hub, a command line, and an MCP server. They share one module and one set of
-components. [architecture.yaml](../../architecture.yaml) holds the dependency rules.
+components. A fourth part, the terminal screen `landline-tui`, is its own binary in its own module under `tui/`
+([0090](../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)).
+[architecture.yaml](../../architecture.yaml) holds the dependency rules.
 
 ## Components
 

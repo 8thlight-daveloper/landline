@@ -154,6 +154,28 @@ hand-registered name holds no stream, so it can send and cannot receive, unless 
 process runs for it. A session that registers itself writes a file for its handle too, so the same commands work with
 `--as <handle>` while that session runs.
 
+## Terminal screen
+
+`landline tui` opens a screen with every connected agent: handle, label, harness, state, landline version, folder,
+branch, model, and effort. It refreshes every 2 seconds (`--interval D`, at least 500ms). `r` refreshes at once and `q`
+quits. It only reads. It registers with the hub as an observer, a read-only client that never appears in the agent list
+([0090](docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)).
+
+```sh
+just install-tui
+landline tui
+landline-tui agents --json
+```
+
+The screen is a separate binary, `landline-tui`, built from the `tui/` module. `just install-tui` puts it in
+`~/.local/bin` (`just install-tui /usr/local` picks another prefix). `landline tui` runs it from the path or from the
+folder that holds `landline`, and says how to install it when it is missing. `landline-tui agents --json` prints one
+snapshot as JSON and exits, for scripts. It prints no secret.
+
+It finds the hub the way the other commands do: `LANDLINE_URL` and `LANDLINE_SECRET`, then the address and secret that
+`landline server up` or `landline join` saved, then `http://127.0.0.1:8787` (`LANDLINE_PORT` changes the port). See
+[tui/README.md](tui/README.md).
+
 ## Two hosts
 
 There is one hub, and every machine uses it. Keep the hub on localhost and reach it through an SSH tunnel, or let it
@@ -189,6 +211,7 @@ landline setup codex
 | `landline agents --as N`                     | Lists agents, whether each is connected, and the attributes they claimed                                                                   |
 | `landline send --as N --to X [flags] <body>` | Sends a message to one connected agent. `-` reads the body from standard input                                                             |
 | `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests. It receives only while `mcp --as N --channel` runs                                        |
+| `landline tui [args]`                        | Opens the agent screen by running `landline-tui`. `landline-tui agents --json` prints a snapshot                                           |
 | `landline log [--after SEQ]`                 | Prints the hub's message log, with each message's text and its delivery result                                                             |
 
 `landline server run` also takes `--keepalive`, `--delivery-timeout`, and `--grace`, Go durations for the 15 second
@@ -202,7 +225,8 @@ keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LA
 - "Delivered" means the channel event was written or `codex queue` returned 0. It never means the agent read or acted on
   the text.
 - A WebSocket transport. The hub streams over HTTP server-sent events for now.
-- A dashboard. The hub prints each delivery, and `landline log` shows the history.
+- A dashboard beyond the agent list. The hub prints each delivery, `landline log` shows the history, and the terminal
+  screen only reads and cannot send.
 - Tokens live in the hub's memory only and end 2 minutes after the agent was last seen. The hub secret is the only
   credential that can register an agent.
 
@@ -214,6 +238,7 @@ keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LA
 | [docs/architecture/](docs/architecture/README.md) | How the parts fit together                            |
 | [docs/decisions/](docs/decisions/)                | Decision records                                      |
 | `internal/`                                       | One package per component, and the shared model       |
+| [tui/](tui/README.md)                             | `landline-tui`, its own Go module and binary          |
 | `contracts/`                                      | One contract per core component                       |
 | `acceptance/`                                     | Scenarios that start the built binary                 |
 

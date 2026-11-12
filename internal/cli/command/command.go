@@ -38,6 +38,7 @@ const usage = `landline <command> [flags]
   setup     claude|codex   add the Landline MCP server to a harness, once
   claude    [--label L] [-- args]   start Claude Code with the channel loaded
   mcp       the MCP server a harness starts. It registers itself
+  tui       [args]   open the agent screen. Runs landline-tui, which "just install-tui" builds
 
   register  --name N --harness H [--host H] [--session S]   needs LANDLINE_URL and LANDLINE_SECRET.
             A hand-registered name holds no delivery stream, so it can send but cannot receive

@@ -38,6 +38,27 @@ osv-scanner scan source --offline --download-offline-databases --recursive .
 Check both commands against the [usage reference](https://google.github.io/osv-scanner/usage/) before you commit them to
 a script. A finding makes the command exit nonzero. Keep that behavior so a check can fail on it.
 
+## This project
+
+Landline commits two lockfiles: `go.mod` at the root, which lists no third-party dependency, and `tui/go.mod` with
+`tui/go.sum`, which lists the dependencies of `landline-tui`. The recursive scan covers both, so run it from the
+repository root:
+
+```sh
+osv-scanner scan source --recursive .
+```
+
+The scanner finds `tui/go.mod` by its file name. No configuration file names it, and the project has no OSV-Scanner
+configuration and no ignore entry. To scan only the TUI module:
+
+```sh
+osv-scanner scan source tui/go.mod
+```
+
+The scan sends package names and versions to OSV.dev. Landline's dependencies are public libraries, so that is allowed
+here. The version in use was `osv-scanner 2.7.0` from the Nix store. Pin it in the flake before a scheduled job relies
+on it.
+
 ## Use during ordinary development
 
 Run the scan before merging a dependency change, and on a schedule. New advisories appear without any change to your

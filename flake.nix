@@ -26,6 +26,16 @@
           postInstall = "mv $out/bin/binary $out/bin/landline";
           meta.mainProgram = "landline";
         };
+        landline-tui = pkgs.buildGoModule {
+          pname = "landline-tui";
+          version = releaseVersion;
+          src = self + "/tui";
+          vendorHash = "sha256-BFgYkN4zthQGlL7fMh0IBAnQ9rQ+4k4JUwKMNUWthzI=";
+          env.CGO_ENABLED = 0;
+          doCheck = false;
+          postInstall = "mv $out/bin/tui $out/bin/landline-tui";
+          meta.mainProgram = "landline-tui";
+        };
       };
     };
 }
