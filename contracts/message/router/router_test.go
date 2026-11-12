@@ -41,28 +41,6 @@ func TestADirectMessageIsStampedFromTheAuthenticatedSender(t *testing.T) {
 	}
 }
 
-func TestABroadcastGoesToEveryoneButTheSender(t *testing.T) {
-	t.Parallel()
-	got, err := send(t, "bravo", model.SendRequest{To: model.Broadcast, Thread: "deploy", Body: "ready"}, "alpha", "bravo", "charlie")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got.Recipients, []string{"alpha", "charlie"}) {
-		t.Fatalf("recipients %v", got.Recipients)
-	}
-	if got.Envelope.To != model.Broadcast || got.Envelope.Thread != "deploy" {
-		t.Fatalf("envelope %+v", got.Envelope)
-	}
-}
-
-func TestABroadcastWithNobodyElseHasNoRecipientsAndIsNotAnError(t *testing.T) {
-	t.Parallel()
-	got, err := send(t, "alpha", model.SendRequest{To: model.Broadcast, Body: "anyone?"}, "alpha")
-	if err != nil || len(got.Recipients) != 0 {
-		t.Fatalf("got %+v, %v", got, err)
-	}
-}
-
 func TestAReplyKeepsItsKindAndInReplyTo(t *testing.T) {
 	t.Parallel()
 	got, err := send(t, "alpha", model.SendRequest{To: "bravo", Kind: model.KindReply, Body: "done", InReplyTo: "m-0"}, "alpha", "bravo")
@@ -111,8 +89,8 @@ func TestRoutingLeavesItsInputsUnchangedAndIsDeterministic(t *testing.T) {
 	agents := known("alpha", "bravo", "charlie")
 	before := append([]model.Agent(nil), agents...)
 	r := newImpl()
-	a, _ := r.Route(agents, "alpha", model.SendRequest{To: model.Broadcast, Body: "x"}, "m-1", 1, t0)
-	b, _ := r.Route(agents, "alpha", model.SendRequest{To: model.Broadcast, Body: "x"}, "m-1", 1, t0)
+	a, _ := r.Route(agents, "alpha", model.SendRequest{To: "bravo", Body: "x"}, "m-1", 1, t0)
+	b, _ := r.Route(agents, "alpha", model.SendRequest{To: "bravo", Body: "x"}, "m-1", 1, t0)
 	if !reflect.DeepEqual(agents, before) || !reflect.DeepEqual(a, b) {
 		t.Fatalf("inputs %+v, results %+v and %+v", agents, a, b)
 	}
@@ -128,7 +106,7 @@ func TestDirectionDoesNotMatterForADirectMessage(t *testing.T) {
 	}
 }
 
-func TestANameThatSortsBeforeAllIsADirectRecipientNotABroadcast(t *testing.T) {
+func TestANameThatSortsBeforeTheOthersIsStillTheOneRecipient(t *testing.T) {
 	t.Parallel()
 	got, err := send(t, "bravo", model.SendRequest{To: "aaa", Body: "x"}, "aaa", "alpha", "bravo")
 	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"aaa"}) || got.Envelope.To != "aaa" {
@@ -145,14 +123,6 @@ func TestAnUnknownSenderOrRecipientIsRefusedWhateverItsSortOrder(t *testing.T) {
 		if _, err := send(t, "alpha", model.SendRequest{To: name, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownRecipient) {
 			t.Errorf("recipient %q: %v", name, err)
 		}
-	}
-}
-
-func TestBroadcastRecipientsAreSortedWhateverTheOrderOfTheKnownList(t *testing.T) {
-	t.Parallel()
-	got, err := send(t, "bravo", model.SendRequest{To: model.Broadcast, Body: "x"}, "charlie", "alpha", "bravo", "delta")
-	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"alpha", "charlie", "delta"}) {
-		t.Fatalf("got %+v, %v", got, err)
 	}
 }
 
@@ -300,14 +270,6 @@ func TestABodyOfOnlyUnicodeWhiteSpaceIsEmptyAndTheEmptyCheckComesBeforeTheSizeCh
 	}
 }
 
-func TestRecipientsAreNeverNil(t *testing.T) {
-	t.Parallel()
-	got, err := send(t, "alpha", model.SendRequest{To: model.Broadcast, Body: "x"}, "alpha")
-	if err != nil || got.Recipients == nil || len(got.Recipients) != 0 {
-		t.Fatalf("got %#v, %v", got.Recipients, err)
-	}
-}
-
 func TestTheEnvelopeCarriesTheGivenIdSequenceAndExactTime(t *testing.T) {
 	t.Parallel()
 	exact := time.Date(2031, 2, 3, 4, 5, 6, 789012345, time.UTC)
@@ -334,41 +296,22 @@ func TestRoutingNeverReordersTheCallersAgentList(t *testing.T) {
 	t.Parallel()
 	descending := known("charlie", "bravo", "alpha")
 	before := append([]model.Agent(nil), descending...)
-	newImpl().Route(descending, "bravo", model.SendRequest{To: model.Broadcast, Body: "x"}, "m-1", 1, t0)
 	newImpl().Route(descending, "bravo", model.SendRequest{To: "alpha", Body: "x"}, "m-1", 1, t0)
 	if !reflect.DeepEqual(descending, before) {
 		t.Fatalf("the list was reordered: %+v", descending)
 	}
 }
 
-func TestABroadcastNeverNamesTheSenderAmongItsRecipients(t *testing.T) {
-	t.Parallel()
-	for _, from := range []string{"alpha", "bravo", "charlie"} {
-		got, err := send(t, from, model.SendRequest{To: model.Broadcast, Body: "x"}, "alpha", "bravo", "charlie")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, r := range got.Recipients {
-			if r == from {
-				t.Errorf("%s is among its own recipients %v", from, got.Recipients)
-			}
-		}
-		if len(got.Recipients) != 2 {
-			t.Errorf("%s: %v", from, got.Recipients)
-		}
-	}
-}
-
 func TestAnUnregisteredSenderIsRefusedWhateverItSends(t *testing.T) {
 	t.Parallel()
-	for _, to := range []string{model.Broadcast, "bravo", "ghost"} {
+	for _, to := range []string{"all", "bravo", "ghost"} {
 		if _, err := send(t, "ghost", model.SendRequest{To: to, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownSender) {
 			t.Errorf("to %q: %v", to, err)
 		}
 	}
 }
 
-func TestOnlyTheExactNameAllIsABroadcast(t *testing.T) {
+func TestAnAgentWhoseNameStartsWithAllIsADirectRecipient(t *testing.T) {
 	t.Parallel()
 	got, err := send(t, "alpha", model.SendRequest{To: "allied", Body: "x"}, "alpha", "allied", "bravo")
 	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"allied"}) || got.Envelope.To != "allied" {
@@ -404,8 +347,8 @@ func TestEveryKindOfUnicodeWhiteSpaceAloneIsAnEmptyBody(t *testing.T) {
 
 func TestADuplicateNameInTheAgentListIsOneRecipient(t *testing.T) {
 	t.Parallel()
-	got, err := send(t, "alpha", model.SendRequest{To: model.Broadcast, Body: "x"}, "alpha", "bravo", "bravo", "charlie", "bravo")
-	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"bravo", "charlie"}) {
+	got, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: "x"}, "alpha", "bravo", "bravo", "charlie", "bravo")
+	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"bravo"}) {
 		t.Fatalf("got %v, %v", got.Recipients, err)
 	}
 }
@@ -435,18 +378,6 @@ func TestAZeroWidthSpaceIsNotWhiteSpaceSoAloneItIsAValidBodyKeptAsSent(t *testin
 	}
 }
 
-func TestABroadcastKeepsItsKindAndInReplyToAndReachesEveryoneBeyondFive(t *testing.T) {
-	t.Parallel()
-	agents := []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "sender"}
-	got, err := send(t, "sender", model.SendRequest{To: model.Broadcast, Kind: model.KindReview, InReplyTo: "m-9", Body: "x"}, agents...)
-	if err != nil || len(got.Recipients) != 8 {
-		t.Fatalf("recipients %v, %v", got.Recipients, err)
-	}
-	if got.Envelope.Kind != model.KindReview || got.Envelope.InReplyTo != "m-9" {
-		t.Fatalf("envelope %+v", got.Envelope)
-	}
-}
-
 func TestASenderThatDiffersOnlyByCaseIsUnknownAndBlankThreadsAndKindsAreRefused(t *testing.T) {
 	t.Parallel()
 	if _, err := send(t, "ALPHA", model.SendRequest{To: "bravo", Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownSender) {
@@ -466,5 +397,72 @@ func TestTheBodyIsKeptByteForByteIncludingCarriageReturns(t *testing.T) {
 	got, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: body}, "alpha", "bravo")
 	if err != nil || got.Envelope.Body != body {
 		t.Fatalf("got %q, %v", got.Envelope.Body, err)
+	}
+}
+
+func TestTheNameAllIsNotARecipientAtAll(t *testing.T) {
+	t.Parallel()
+	got, err := send(t, "alpha", model.SendRequest{To: "all", Body: "x"}, "alpha", "bravo", "charlie")
+	if !errors.Is(err, model.ErrUnknownRecipient) {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestAllInAnyCaseIsAnUnknownRecipientToo(t *testing.T) {
+	t.Parallel()
+	for _, to := range []string{"all", "ALL", "All", "aLL", model.Broadcast} {
+		for _, from := range []string{"alpha", "bravo"} {
+			if _, err := send(t, from, model.SendRequest{To: to, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrUnknownRecipient) {
+				t.Errorf("from %s to %q: %v", from, to, err)
+			}
+		}
+	}
+}
+
+func TestAnUnknownRecipientNamedAllIsNeitherASelfSendNorASuccess(t *testing.T) {
+	t.Parallel()
+	for _, only := range [][]string{{"alpha"}, {"alpha", "bravo"}} {
+		_, err := send(t, "alpha", model.SendRequest{To: "all", Body: "x"}, only...)
+		if errors.Is(err, model.ErrSelfSend) || !errors.Is(err, model.ErrUnknownRecipient) {
+			t.Errorf("%v: %v", only, err)
+		}
+	}
+}
+
+func TestAnAllRecipientStillFollowsTheFixedOrderOfRules(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		from string
+		req  model.SendRequest
+		want error
+	}{
+		{"sender before recipient", "ghost", model.SendRequest{To: "all", Body: "x"}, model.ErrUnknownSender},
+		{"thread before recipient", "alpha", model.SendRequest{To: "all", Thread: "Bad", Body: "x"}, model.ErrBadThread},
+		{"kind before recipient", "alpha", model.SendRequest{To: "all", Kind: "shout", Body: "x"}, model.ErrBadKind},
+		{"reply before recipient", "alpha", model.SendRequest{To: "all", InReplyTo: "a b", Body: "x"}, model.ErrBadReplyTo},
+		{"body before recipient", "alpha", model.SendRequest{To: "all", Body: ""}, model.ErrEmptyBody},
+		{"size before recipient", "alpha", model.SendRequest{To: "all", Body: strings.Repeat("x", model.MaxBodyBytes+1)}, model.ErrBodyTooLarge},
+	}
+	for _, c := range cases {
+		if _, err := send(t, c.from, c.req, "alpha", "bravo"); !errors.Is(err, c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, err, c.want)
+		}
+	}
+}
+
+func TestADecisionNamesExactlyOneRecipientAndNeverNil(t *testing.T) {
+	t.Parallel()
+	for _, to := range []string{"alpha", "bravo", "charlie"} {
+		got, err := send(t, "delta", model.SendRequest{To: to, Body: "x"}, "alpha", "bravo", "charlie", "delta")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Recipients == nil || len(got.Recipients) != 1 || got.Recipients[0] != to {
+			t.Errorf("to %s: recipients %#v", to, got.Recipients)
+		}
+		if got.Envelope.To != to {
+			t.Errorf("to %s: envelope %+v", to, got.Envelope)
+		}
 	}
 }

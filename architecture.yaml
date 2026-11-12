@@ -1,4 +1,5 @@
-# The rules of docs/decisions/0010-one-go-program-over-http.md and 0030-wake-adapters-per-harness.md, as data.
+# The rules of docs/decisions/0010-one-go-program-over-http.md, 0030-wake-adapters-per-harness.md, and
+# 0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md, as data.
 # The dependency rules, as data. A checker compares this with a graph that a
 # language adapter extracts from the code. Protected like a contract.
 
@@ -30,7 +31,6 @@ drivers:
   - client/http
   - hub/server
   - cli/command
-  - daemon/agentd
   - mcp/server
 
 # A component may depend only on components at an earlier position, and on
@@ -40,9 +40,6 @@ components:
     position: 1
     depends_on: []
   - name: message/router
-    position: 1
-    depends_on: []
-  - name: message/inbox
     position: 1
     depends_on: []
   - name: log/store
@@ -56,16 +53,13 @@ components:
     depends_on: []
   - name: hub/server
     position: 3
-    depends_on: [agent/registry, message/router, message/inbox]
+    depends_on: [agent/registry, message/router]
   - name: cli/command
     position: 3
     depends_on: [client/http]
-  - name: daemon/agentd
-    position: 3
-    depends_on: []
   - name: mcp/server
     position: 3
-    depends_on: []
+    depends_on: [wake/codex]
 
 contracts:
   may_import: [model]
