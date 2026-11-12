@@ -11,8 +11,6 @@ type RegisterRequest struct {
 	Harness        string `json:"harness"`
 	Host           string `json:"host"`
 	Session        string `json:"session"`
-	WakeKind       string `json:"wake_kind"`
-	WakeTarget     string `json:"wake_target"`
 	Folder         string `json:"folder,omitempty"`
 	Branch         string `json:"branch,omitempty"`
 	Worktree       string `json:"worktree,omitempty"`
@@ -54,8 +52,6 @@ type SendResponse struct {
 	ID         string   `json:"id"`
 	Seq        int64    `json:"seq"`
 	Recipients []string `json:"recipients"`
-	Woken      []string `json:"woken"`
-	Queued     []string `json:"queued"`
 }
 
 type WireEnvelope struct {
@@ -72,20 +68,12 @@ type WireEnvelope struct {
 	Text      string    `json:"text"`
 }
 
-type InboxResponse struct {
-	Messages  []WireEnvelope `json:"messages"`
-	Next      int64          `json:"next"`
-	Remaining int            `json:"remaining"`
-	Head      int64          `json:"head"`
-}
-
 type AgentInfo struct {
 	Name           string    `json:"name"`
 	Harness        string    `json:"harness"`
 	Host           string    `json:"host"`
 	Session        string    `json:"session"`
-	WakeKind       string    `json:"wake_kind"`
-	Online         bool      `json:"online"`
+	Connected      bool      `json:"connected"`
 	LastSeen       time.Time `json:"last_seen"`
 	Folder         string    `json:"folder,omitempty"`
 	Branch         string    `json:"branch,omitempty"`
@@ -100,16 +88,22 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-type WakeJob struct {
-	ID     string `json:"id"`
-	From   string `json:"from"`
-	Agent  string `json:"agent"`
-	Kind   string `json:"kind"`
-	Target string `json:"target"`
-	Text   string `json:"text"`
+type DeliveryKind string
+
+const (
+	DeliveryMessage   DeliveryKind = "message"
+	DeliveryChallenge DeliveryKind = "challenge"
+)
+
+type Delivery struct {
+	ID      string        `json:"id"`
+	Kind    DeliveryKind  `json:"kind"`
+	Text    string        `json:"text"`
+	Target  string        `json:"target,omitempty"`
+	Message *WireEnvelope `json:"message,omitempty"`
 }
 
-type WakeAck struct {
+type DeliveryReport struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 }
