@@ -19,7 +19,7 @@ takes `Authorization: Bearer <hub secret>`.
 | `POST /v1/deliveries/{id}/report` | agent token | The MCP process reports one delivery. Body is `DeliveryReport`        |
 | `POST /v1/send`                   | agent token | Sends to one recipient and waits for the delivery report              |
 | `GET /v1/agents`                  | agent token | Lists agents, each with `connected`                                   |
-| `GET /v1/log`                     | secret      | Reads the log. Unchanged                                              |
+| `GET /v1/log`                     | secret      | Reads the log. Each entry has `result`                                |
 
 Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 
@@ -51,6 +51,10 @@ or label). It then:
 1. Report not `ok`: answers `502` with `{"error": "<reported error>"}`.
 1. No report in time: answers `504` with `{"error": "no delivery report"}`.
 
+After the delivery ends, the hub appends a result line to the log for the envelope: `{"seq": N, "result": "..."}`, where
+the result is `delivered` or the error the sender saw. `GET /v1/log` returns each envelope with its `result`, empty when
+none was recorded, as in a log from before this change.
+
 A recipient named `all` is an unknown recipient. A message to oneself is refused as before.
 
 ## Reporting
@@ -64,14 +68,23 @@ it, otherwise `403`. An unknown or already reported id is `404`. "Delivered" mea
 `POST /v1/attach` with a `codex_thread` and no code answers as today, except that the hub sends the code as a
 `challenge` delivery down the caller's own stream and waits for its report. With no open stream it answers `409`
 `not connected`. The MCP process runs `codex queue --thread <target> --message <text>` for a challenge and reports the
-result. The second call with the code is unchanged, except that a proved agent records nothing about the thread on the
-hub: the MCP process keeps the thread and runs the adapter itself.
+result. The hub sends at most 5 challenges per agent in any 5 minutes. Past that, `POST /v1/attach` answers `429` with
+`{"error": "too many proof challenges, try again later"}` and sends nothing. The second call with the code is unchanged,
+except that a proved agent records nothing about the thread on the hub: the MCP process keeps the thread and runs the
+adapter itself.
 
 ## Listing
 
 `GET /v1/agents` lists an agent while it is connected, or for 10 minutes after its stream closed. After that the entry
 is unlisted only: the token and the registration stay, so a later reconnect works. Each entry has `connected`. A
 disconnected entry is not dropped from a send's resolution: a send to it answers `409` `not connected`.
+
+## Timing flags
+
+`landline server run` takes `--keepalive`, `--delivery-timeout`, and `--retention`, each a Go duration such as `200ms`,
+for the 15 second keepalive, the 20 second report wait, and the 10 minute listing time. A zero, negative, or unparsable
+value is refused. They exist so a test can run the timing rules fast. `LANDLINE_PORT` sets the default port, 8787, for a
+hub with no `--addr` and for a client with no saved hub.
 
 ## Reconnecting
 

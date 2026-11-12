@@ -226,3 +226,20 @@ func TestHubFieldsPrintedByLogSendAndAgentsCarryNoControlSequences(t *testing.T)
 		}
 	}
 }
+
+func TestLogPrintsTheDeliveryResultAfterTheKindAndNothingWhenThereIsNone(t *testing.T) {
+	t.Parallel()
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]model.Envelope{
+			{Seq: 1, ID: "m-1", From: "alpha", To: "bravo", Thread: "main", Kind: model.KindChat, Body: "one", Result: "delivered"},
+			{Seq: 2, ID: "m-2", From: "alpha", To: "bravo", Thread: "main", Kind: model.KindChat, Body: "two"},
+			{Seq: 3, ID: "m-3", From: "alpha", To: "bravo", Thread: "main", Kind: model.KindChat, Body: "three", Result: "bad \x1b[2J reply"},
+		})
+	}))
+	defer hub.Close()
+	r := do(t, t.TempDir(), hub.URL, "", "log")
+	lines := strings.Split(r.out.String(), "\n")
+	if r.code != 0 || !strings.HasSuffix(lines[0], "\tmain\tchat\tdelivered") || !strings.HasSuffix(lines[2], "\tmain\tchat") || !strings.HasSuffix(lines[4], "\tchat\tbad  [2J reply") {
+		t.Fatalf("%d %q", r.code, lines)
+	}
+}

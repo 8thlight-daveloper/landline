@@ -16,6 +16,7 @@ type Store struct {
 	mu   sync.Mutex
 	file *os.File
 	log  []model.Envelope
+	at   map[int64]int
 }
 
 func Open(path string) (*Store, error) {
@@ -30,13 +31,17 @@ func Open(path string) (*Store, error) {
 		file.Close()
 		return nil, fmt.Errorf("make the log private: %w", err)
 	}
-	s := &Store{file: file}
+	s := &Store{file: file, at: map[int64]int{}}
 	reader := bufio.NewReader(file)
 	for {
 		line, err := reader.ReadBytes('\n')
 		var e model.Envelope
-		if len(line) > 0 && json.Unmarshal(line, &e) == nil && e.Seq > 0 && e.ID != "" {
-			s.log = append(s.log, e)
+		if len(line) > 0 && json.Unmarshal(line, &e) == nil && e.Seq > 0 {
+			if e.ID != "" {
+				s.add(e)
+			} else if e.Result != "" {
+				s.merge(e.Seq, e.Result)
+			}
 		}
 		if err == io.EOF {
 			break
@@ -68,8 +73,41 @@ func (s *Store) Append(e model.Envelope) error {
 	if _, err := s.file.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("write the log: %w", err)
 	}
-	s.log = append(s.log, e)
+	s.add(e)
 	return nil
+}
+
+type resultLine struct {
+	Seq    int64  `json:"seq"`
+	Result string `json:"result"`
+}
+
+func (s *Store) Result(seq int64, result string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, known := s.at[seq]; !known {
+		return fmt.Errorf("the log has no message %d", seq)
+	}
+	line, err := json.Marshal(resultLine{Seq: seq, Result: result})
+	if err != nil {
+		return err
+	}
+	if _, err := s.file.Write(append(line, '\n')); err != nil {
+		return fmt.Errorf("write the log: %w", err)
+	}
+	s.merge(seq, result)
+	return nil
+}
+
+func (s *Store) add(e model.Envelope) {
+	s.at[e.Seq] = len(s.log)
+	s.log = append(s.log, e)
+}
+
+func (s *Store) merge(seq int64, result string) {
+	if index, known := s.at[seq]; known {
+		s.log[index].Result = result
+	}
 }
 
 func (s *Store) All() []model.Envelope {

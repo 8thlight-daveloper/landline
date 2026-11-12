@@ -253,7 +253,11 @@ func logRead(args []string, env Env) error {
 		return err
 	}
 	for _, e := range entries {
-		fmt.Fprintf(env.Stdout, "%d\t%s\t%s -> %s\t%s\t%s\n", e.Seq, e.Time.Format("2006-01-02T15:04:05Z07:00"), printable(string(e.From)), printable(e.To), printable(e.Thread), printable(string(e.Kind)))
+		line := fmt.Sprintf("%d\t%s\t%s -> %s\t%s\t%s", e.Seq, e.Time.Format("2006-01-02T15:04:05Z07:00"), printable(string(e.From)), printable(e.To), printable(e.Thread), printable(string(e.Kind)))
+		if e.Result != "" {
+			line += "\t" + printable(e.Result)
+		}
+		fmt.Fprintln(env.Stdout, line)
 		for _, line := range strings.Split(printable(e.Body), "\n") {
 			fmt.Fprintf(env.Stdout, "    %s\n", line)
 		}

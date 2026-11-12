@@ -4,13 +4,40 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
+const (
+	DefaultPort = 8787
+	loopback    = "127.0.0.1"
+)
+
 const DefaultURL = "http://127.0.0.1:8787"
+
+func portFrom(getenv func(string) string) (int, error) {
+	raw := getenv("LANDLINE_PORT")
+	if raw == "" {
+		return DefaultPort, nil
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("LANDLINE_PORT must be an integer from 1 to 65535, not %q", raw)
+	}
+	return port, nil
+}
+
+func DefaultAddr(getenv func(string) string) (string, error) {
+	port, err := portFrom(getenv)
+	if err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(loopback, strconv.Itoa(port)), nil
+}
 
 type Config struct {
 	URL    string `json:"url"`
@@ -74,7 +101,11 @@ func HubURL(env Env) string {
 	if value := withConfig(env).Getenv("LANDLINE_URL"); value != "" {
 		return value
 	}
-	return DefaultURL
+	port, err := portFrom(withConfig(env).Getenv)
+	if err != nil {
+		return DefaultURL
+	}
+	return "http://" + net.JoinHostPort(loopback, strconv.Itoa(port))
 }
 
 func validHubURL(text string) error {

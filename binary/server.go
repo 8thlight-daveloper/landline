@@ -19,8 +19,11 @@ import (
 
 const serverUsage = `landline server <command>
 
-  up [flags]        start the hub in the background. Flags: --addr, --log, --state, --host
+  up [flags]        start the hub in the background
   run [flags]       run the hub in this terminal
+                    Flags for up and run: --addr, --log, --state, --host, and the timing flags --keepalive D,
+                    --delivery-timeout D and --retention D, which take durations such as 200ms or 15s.
+                    Without --addr the hub listens on 127.0.0.1:8787, or on the port in LANDLINE_PORT
   down              stop the hub that "up" started
   status            say whether the hub is running
   log               print the hub's message log
@@ -109,7 +112,7 @@ func hubPID(dataDir string) (int, bool) {
 }
 
 func serverUp(args []string, env command.Env, dataDir string) int {
-	values, err := flagValues(args, "--addr", "--log", "--state", "--host")
+	values, err := flagValues(args, "--addr", "--log", "--state", "--host", "--keepalive", "--delivery-timeout", "--retention")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline server up:", err)
 		return 2
@@ -118,7 +121,16 @@ func serverUp(args []string, env command.Env, dataDir string) int {
 		fmt.Printf("the hub is already running (pid %d) at %s\n", pid, command.HubURL(env))
 		return 0
 	}
-	addr := or(values["--addr"], "127.0.0.1:8787")
+	defaultAddr, err := command.DefaultAddr(os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline server up:", err)
+		return 2
+	}
+	if _, err := timingFrom(values); err != nil {
+		fmt.Fprintln(os.Stderr, "landline server up:", err)
+		return 2
+	}
+	addr := or(values["--addr"], defaultAddr)
 	if err := ensureLocalConfig(env, addr); err != nil {
 		fmt.Fprintln(os.Stderr, "landline server up:", err)
 		return 1

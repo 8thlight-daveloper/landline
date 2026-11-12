@@ -65,6 +65,11 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 	var challengeText, challengeThread string
 	switch {
 	case body.CodexThread != "" && body.Code == "":
+		if !s.takeChallengeSlot(name) {
+			s.mu.Unlock()
+			fail(w, http.StatusTooManyRequests, "too many proof challenges, try again later")
+			return
+		}
 		code := s.cfg.NewCode()
 		s.attach[name] = &attachChallenge{thread: body.CodexThread, code: code, expires: s.cfg.Now().Add(attachLifetime)}
 		challengeThread = body.CodexThread
@@ -121,4 +126,20 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Notify(fmt.Sprintf("sent an attach code for %s to a Codex session", name))
 	}
 	write(w, http.StatusOK, response)
+}
+
+func (s *Server) takeChallengeSlot(name string) bool {
+	now := s.cfg.Now()
+	recent := []time.Time{}
+	for _, at := range s.sent[name] {
+		if now.Sub(at) < s.cfg.ChallengeWindow {
+			recent = append(recent, at)
+		}
+	}
+	if len(recent) >= s.cfg.ChallengeLimit {
+		s.sent[name] = recent
+		return false
+	}
+	s.sent[name] = append(recent, now)
+	return true
 }

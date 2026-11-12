@@ -92,3 +92,50 @@ func TestJoinSavesTheAddressAndSecretAndRefusesBadOnes(t *testing.T) {
 		t.Fatal("a short secret was accepted")
 	}
 }
+
+func TestLandlinePortSetsTheDefaultHubURL(t *testing.T) {
+	t.Parallel()
+	withPort := func(port string) Env {
+		return Env{ConfigDir: t.TempDir(), Getenv: func(key string) string {
+			if key == "LANDLINE_PORT" {
+				return port
+			}
+			return ""
+		}}
+	}
+	if got := HubURL(withPort("9191")); got != "http://127.0.0.1:9191" {
+		t.Fatalf("%q", got)
+	}
+	if got := HubURL(withPort("")); got != DefaultURL {
+		t.Fatalf("%q", got)
+	}
+	if got := HubURL(withPort("nope")); got != DefaultURL {
+		t.Fatalf("%q", got)
+	}
+	dir := t.TempDir()
+	SaveConfig(Env{ConfigDir: dir}, Config{URL: "http://tailnet-mac:8787", Secret: "0123456789abcdef"})
+	saved := Env{ConfigDir: dir, Getenv: func(key string) string {
+		if key == "LANDLINE_PORT" {
+			return "9191"
+		}
+		return ""
+	}}
+	if got := HubURL(saved); got != "http://tailnet-mac:8787" {
+		t.Fatalf("a saved address must win over the port: %q", got)
+	}
+}
+
+func TestDefaultAddrReadsLandlinePortAndRefusesBadValues(t *testing.T) {
+	t.Parallel()
+	with := func(value string) func(string) string { return func(string) string { return value } }
+	for value, want := range map[string]string{"": "127.0.0.1:8787", "1": "127.0.0.1:1", "65535": "127.0.0.1:65535", "9191": "127.0.0.1:9191"} {
+		if got, err := DefaultAddr(with(value)); err != nil || got != want {
+			t.Errorf("%q: %q %v", value, got, err)
+		}
+	}
+	for _, bad := range []string{"0", "65536", "-1", "80a", "1.5", " 80"} {
+		if _, err := DefaultAddr(with(bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}

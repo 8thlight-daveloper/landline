@@ -27,6 +27,7 @@ type Store interface {
 	Append(model.Envelope) error
 	All() []model.Envelope
 	LastSeq() int64
+	Result(seq int64, result string) error
 }
 
 type Config struct {
@@ -35,6 +36,8 @@ type Config struct {
 	KeepaliveInterval     time.Duration
 	DeliveryTimeout       time.Duration
 	DisconnectedRetention time.Duration
+	ChallengeLimit        int
+	ChallengeWindow       time.Duration
 	Now                   func() time.Time
 	NewID                 func() string
 	NewToken              func() string
@@ -56,6 +59,7 @@ type Server struct {
 	attach  map[string]*attachChallenge
 	streams map[string]*stream
 	pending map[string]*pendingDelivery
+	sent    map[string][]time.Time
 }
 
 type stream struct {
@@ -87,6 +91,12 @@ func New(cfg Config, store Store) (*Server, error) {
 	if cfg.DisconnectedRetention == 0 {
 		cfg.DisconnectedRetention = 10 * time.Minute
 	}
+	if cfg.ChallengeLimit == 0 {
+		cfg.ChallengeLimit = 5
+	}
+	if cfg.ChallengeWindow == 0 {
+		cfg.ChallengeWindow = 5 * time.Minute
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -109,7 +119,8 @@ func New(cfg Config, store Store) (*Server, error) {
 		cfg: cfg, store: store,
 		tokens: map[string]string{}, attach: map[string]*attachChallenge{},
 		streams: map[string]*stream{}, pending: map[string]*pendingDelivery{},
-		seq: store.LastSeq(),
+		sent: map[string][]time.Time{},
+		seq:  store.LastSeq(),
 	}
 	s.loadState()
 	return s, nil
@@ -309,6 +320,13 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	}
 	recipient := decision.Recipients[0]
 	status, problem := s.deliver(r.Context(), recipient, model.Delivery{Kind: model.DeliveryMessage, Text: text, Message: &wire})
+	result := "delivered"
+	if status != http.StatusOK {
+		result = problem
+	}
+	if err := s.store.Result(envelope.Seq, result); err != nil {
+		s.cfg.Notify(fmt.Sprintf("could not record the result of message %s: %v", envelope.ID, err))
+	}
 	if status != http.StatusOK {
 		s.cfg.Notify(fmt.Sprintf("delivery to %s of a message from %s, id %s, failed: %s", recipient, envelope.From, envelope.ID, problem))
 		fail(w, status, problem)

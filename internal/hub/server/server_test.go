@@ -1310,3 +1310,236 @@ func TestAHostileReportedErrorIsCutAndFlattenedBeforeTheSenderTheNotifierAndTheA
 		t.Fatalf("%d", attached.status)
 	}
 }
+
+func (h *harness) challengeStatus(token string, stream *streamClient, ok bool) int {
+	h.t.Helper()
+	answer := h.attachAsync(token, model.AttachRequest{CodexThread: threadID})
+	delivery := stream.nextDelivery()
+	if status := h.report(token, delivery.ID, ok, "nope"); status != 200 {
+		h.t.Fatalf("report: %d", status)
+	}
+	return awaitAttach(h.t, answer).status
+}
+
+func (h *harness) assertNothingSent(stream *streamClient) {
+	h.t.Helper()
+	deadline := time.After(100 * time.Millisecond)
+	for {
+		select {
+		case line := <-stream.lines:
+			if line != "" {
+				h.t.Fatalf("the hub sent %q", line)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+func TestOnlyFiveProofChallengesPerAgentPerWindowAreSentAndTheSixthIs429WithNothingSent(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	_, token := h.registerSeed("tutor", nil)
+	stream := h.openStream(token)
+	for i := 1; i <= 5; i++ {
+		if status := h.challengeStatus(token, stream, true); status != 200 {
+			t.Fatalf("challenge %d: %d", i, status)
+		}
+	}
+	status, raw := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID})
+	if status != 429 || strings.TrimSpace(string(raw)) != `{"error":"too many proof challenges, try again later"}` {
+		t.Fatalf("%d %s", status, raw)
+	}
+	h.assertNothingSent(stream)
+}
+
+func TestFailedChallengesCountTowardTheCap(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	_, token := h.registerSeed("tutor", nil)
+	stream := h.openStream(token)
+	for i := 1; i <= 5; i++ {
+		if status := h.challengeStatus(token, stream, false); status != 502 {
+			t.Fatalf("challenge %d: %d", i, status)
+		}
+	}
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID}); status != 429 {
+		t.Fatalf("%d", status)
+	}
+}
+
+func TestTheChallengeWindowPassingAllowsChallengesAgain(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	_, token := h.registerSeed("tutor", nil)
+	stream := h.openStream(token)
+	for i := 0; i < 5; i++ {
+		h.challengeStatus(token, stream, true)
+	}
+	h.advance(5*time.Minute - time.Second)
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID}); status != 429 {
+		t.Fatalf("just inside the window: %d", status)
+	}
+	h.advance(time.Second)
+	if status := h.challengeStatus(token, stream, true); status != 200 {
+		t.Fatalf("after the window: %d", status)
+	}
+}
+
+func TestEachAgentHasItsOwnChallengeCount(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	_, tutor := h.registerSeed("tutor", nil)
+	_, coach := h.registerSeed("coach", nil)
+	tutorStream := h.openStream(tutor)
+	coachStream := h.openStream(coach)
+	for i := 0; i < 5; i++ {
+		h.challengeStatus(tutor, tutorStream, true)
+	}
+	if status, _ := h.call("POST", "/v1/attach", tutor, model.AttachRequest{CodexThread: threadID}); status != 429 {
+		t.Fatalf("%d", status)
+	}
+	if status := h.challengeStatus(coach, coachStream, true); status != 200 {
+		t.Fatalf("another agent was refused: %d", status)
+	}
+}
+
+func TestTheChallengeLimitAndWindowCanBeConfigured(t *testing.T) {
+	t.Parallel()
+	h := startWith(t, func(c *Config) { c.ChallengeLimit = 1; c.ChallengeWindow = time.Minute })
+	_, token := h.registerSeed("tutor", nil)
+	stream := h.openStream(token)
+	h.challengeStatus(token, stream, true)
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID}); status != 429 {
+		t.Fatalf("%d", status)
+	}
+	h.advance(time.Minute)
+	if status := h.challengeStatus(token, stream, true); status != 200 {
+		t.Fatalf("%d", status)
+	}
+}
+
+func (h *harness) resultOf(seq int64) string {
+	h.t.Helper()
+	for _, e := range h.logged() {
+		if e.Seq == seq {
+			return e.Result
+		}
+	}
+	h.t.Fatalf("no message %d in the log", seq)
+	return ""
+}
+
+func TestTheLogRecordsWhatBecameOfEachSend(t *testing.T) {
+	t.Parallel()
+	h := startWith(t, func(c *Config) { c.DeliveryTimeout = 300 * time.Millisecond })
+	alpha := h.register("alpha")
+	bravo := h.register("bravo")
+	charlie := h.register("charlie")
+	delta := h.register("delta")
+	echo := h.register("echo")
+
+	h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "offline"})
+	if got := h.resultOf(1); got != "not connected" {
+		t.Fatalf("409: %q", got)
+	}
+
+	bravoStream := h.openStream(bravo)
+	if _, sent := h.deliveredSend(alpha, bravoStream, bravo, model.SendBody{To: "bravo", Body: "ok"}); sent.status != 200 {
+		t.Fatalf("%d", sent.status)
+	}
+	if got := h.resultOf(2); got != "delivered" {
+		t.Fatalf("200: %q", got)
+	}
+
+	charlieStream := h.openStream(charlie)
+	pending := h.sendAsync(alpha, model.SendBody{To: "charlie", Body: "bad"})
+	delivery := charlieStream.nextDelivery()
+	h.report(charlie, delivery.ID, false, "line one\nline two")
+	if got := h.await(pending); got.status != 502 {
+		t.Fatalf("%d", got.status)
+	}
+	if got := h.resultOf(3); got != "line one line two" {
+		t.Fatalf("502: %q", got)
+	}
+
+	deltaStream := h.openStream(delta)
+	pending = h.sendAsync(alpha, model.SendBody{To: "delta", Body: "silent"})
+	deltaStream.nextDelivery()
+	if got := h.await(pending); got.status != 504 {
+		t.Fatalf("%d", got.status)
+	}
+	if got := h.resultOf(4); got != "no delivery report" {
+		t.Fatalf("504: %q", got)
+	}
+
+	echoStream := h.openStream(echo)
+	pending = h.sendAsync(alpha, model.SendBody{To: "echo", Body: "second"})
+	second := echoStream.nextDelivery()
+	h.report(echo, second.ID, true, "")
+	h.await(pending)
+	if h.resultOf(5) != "delivered" || h.resultOf(2) != "delivered" || h.resultOf(3) != "line one line two" {
+		t.Fatalf("results landed on the wrong messages: %+v", h.logged())
+	}
+}
+
+func TestAHostileReportedErrorIsStoredAsOneLogEntryResult(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	log, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	hub, err := New(Config{Secret: secret}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(hub.Handler())
+	t.Cleanup(server.Close)
+	h := &harness{t: t, srv: server, hub: hub}
+	alpha := h.register("alpha")
+	bravo := h.register("bravo")
+	stream := h.openStream(bravo)
+	pending := h.sendAsync(alpha, model.SendBody{To: "bravo", Body: "hi"})
+	delivery := stream.nextDelivery()
+	h.report(bravo, delivery.ID, false, "x\"}\n{\"seq\":9,\"id\":\"forged\",\"result\":\"delivered\"}")
+	h.await(pending)
+	raw, _ := os.ReadFile(path)
+	if lines := strings.Split(strings.TrimSpace(string(raw)), "\n"); len(lines) != 2 {
+		t.Fatalf("%q", lines)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Fatalf("%v", info.Mode())
+	}
+}
+
+type failingResultStore struct{ *store.Store }
+
+func (failingResultStore) Result(int64, string) error { return fmt.Errorf("disk full") }
+
+func TestAFailureToRecordTheResultIsReportedAndTheSendAnswerStandsUnchanged(t *testing.T) {
+	t.Parallel()
+	log, err := store.Open(filepath.Join(t.TempDir(), "log.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	h := &harness{t: t}
+	hub, err := New(Config{Secret: secret, Notify: func(s string) { h.mu.Lock(); h.notes = append(h.notes, s); h.mu.Unlock() }}, failingResultStore{log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.hub = hub
+	h.srv = httptest.NewServer(hub.Handler())
+	t.Cleanup(h.srv.Close)
+	alpha := h.register("alpha")
+	bravo := h.register("bravo")
+	stream := h.openStream(bravo)
+	if _, sent := h.deliveredSend(alpha, stream, bravo, model.SendBody{To: "bravo", Body: "hi"}); sent.status != 200 {
+		t.Fatalf("%d %s", sent.status, sent.raw)
+	}
+	if notes := h.notesCopy(); len(notes) != 1 || !strings.Contains(notes[0], "disk full") {
+		t.Fatalf("%q", notes)
+	}
+}

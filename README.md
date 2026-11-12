@@ -141,7 +141,11 @@ landline setup codex
 | `landline agents --as N`                     | Lists agents, whether each is connected, and the attributes they claimed                                                                   |
 | `landline send --as N --to X [flags] <body>` | Sends a message to one connected agent. `-` reads the body from standard input                                                             |
 | `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests. It receives only while `mcp --as N --channel` runs                                        |
-| `landline log [--after SEQ]`                 | Prints the hub's message log, with each message's text                                                                                     |
+| `landline log [--after SEQ]`                 | Prints the hub's message log, with each message's text and its delivery result                                                             |
+
+`landline server run` also takes `--keepalive`, `--delivery-timeout`, and `--retention`, Go durations for the 15 second
+keepalive, the 20 second wait for a delivery report, and the 10 minute listing time. `LANDLINE_PORT` changes the default
+port, 8787, for the hub and its clients.
 
 ## Not built yet
 

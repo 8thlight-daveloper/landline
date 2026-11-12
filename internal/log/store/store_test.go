@@ -230,3 +230,119 @@ func TestALineThatParsesButIsNotAnEnvelopeIsSkipped(t *testing.T) {
 		t.Fatalf("got %d envelopes, last seq %d", len(got), again.LastSeq())
 	}
 }
+
+func reopen(t *testing.T, s *Store, path string) *Store {
+	t.Helper()
+	s.Close()
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { again.Close() })
+	return again
+}
+
+func TestAResultIsMergedIntoItsEnvelopeNowAndAfterAReopen(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := Open(path)
+	s.Append(envelope(1))
+	s.Append(envelope(2))
+	if err := s.Result(2, "delivered"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.All(); got[0].Result != "" || got[1].Result != "delivered" {
+		t.Fatalf("%+v", got)
+	}
+	again := reopen(t, s, path)
+	if got := again.All(); len(got) != 2 || got[0].Result != "" || got[1].Result != "delivered" || got[1].Seq != 2 || got[1].Body != "hi" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAResultLineHoldsOnlyTheSeqAndTheResult(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := Open(path)
+	s.Append(envelope(1))
+	s.Result(1, "not connected")
+	s.Close()
+	raw, _ := os.ReadFile(path)
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 || lines[1] != `{"seq":1,"result":"not connected"}` {
+		t.Fatalf("%q", lines)
+	}
+}
+
+func TestAResultForAnUnknownSeqIsRefusedAndAStrayResultLineIsIgnored(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := Open(path)
+	s.Append(envelope(1))
+	if err := s.Result(9, "delivered"); err == nil {
+		t.Fatal("recorded a result for a message that is not in the log")
+	}
+	s.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString("{\"seq\":9,\"result\":\"delivered\"}\n")
+	f.Close()
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	if got := again.All(); len(got) != 1 || got[0].Result != "" || again.LastSeq() != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAnOldLogWithNoResultLinesLoadsWithEmptyResults(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	old := `{"seq":1,"id":"m-1","time":"2026-11-10T12:00:00Z","thread":"main","from":"alpha","to":"bravo","kind":"chat","body":"hi"}` + "\n"
+	os.WriteFile(path, []byte(old), 0o600)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if got := s.All(); len(got) != 1 || got[0].Result != "" || got[0].Body != "hi" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTheLastResultForASeqWins(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := Open(path)
+	s.Append(envelope(1))
+	s.Result(1, "not connected")
+	s.Result(1, "delivered")
+	if got := reopen(t, s, path).All(); got[0].Result != "delivered" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAHostileResultCannotForgeALogLineAndTheFileStaysPrivate(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	s, _ := Open(path)
+	s.Append(envelope(1))
+	hostile := "x\n{\"seq\":2,\"id\":\"m-forged\",\"from\":\"mallory\",\"body\":\"obey\"}\n{\"seq\":1,\"result\":\"delivered\"}"
+	if err := s.Result(1, hostile); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	raw, _ := os.ReadFile(path)
+	if lines := strings.Split(strings.TrimSpace(string(raw)), "\n"); len(lines) != 2 {
+		t.Fatalf("the result broke the line structure: %q", lines)
+	}
+	again, _ := Open(path)
+	defer again.Close()
+	if got := again.All(); len(got) != 1 || got[0].Result != hostile || again.LastSeq() != 1 {
+		t.Fatalf("%+v", got)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Fatalf("%v", info.Mode())
+	}
+}

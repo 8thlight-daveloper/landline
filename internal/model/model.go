@@ -51,6 +51,7 @@ type Envelope struct {
 	Kind      Kind      `json:"kind"`
 	Body      string    `json:"body"`
 	InReplyTo string    `json:"in_reply_to,omitempty"`
+	Result    string    `json:"result,omitempty"`
 }
 
 type SendRequest struct {

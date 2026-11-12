@@ -96,12 +96,22 @@ func notifyToStderr(line string) {
 }
 
 func runHub(args []string, env command.Env, home, host string) int {
-	values, err := flagValues(args, "--addr", "--log", "--host", "--state")
+	values, err := flagValues(args, "--addr", "--log", "--host", "--state", "--keepalive", "--delivery-timeout", "--retention")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
 		return 2
 	}
-	addr := or(values["--addr"], "127.0.0.1:8787")
+	defaultAddr, err := command.DefaultAddr(os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline hub:", err)
+		return 2
+	}
+	addr := or(values["--addr"], defaultAddr)
+	timing, err := timingFrom(values)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline hub:", err)
+		return 2
+	}
 	logPath := or(values["--log"], filepath.Join(home, ".local", "share", "landline", "log.jsonl"))
 	statePath := or(values["--state"], filepath.Join(filepath.Dir(logPath), "state.json"))
 	host = or(values["--host"], host)
@@ -122,6 +132,7 @@ func runHub(args []string, env command.Env, home, host string) int {
 	}
 	hub, err := server.New(server.Config{
 		Secret: secret, Host: host, StatePath: statePath,
+		KeepaliveInterval: timing.keepalive, DeliveryTimeout: timing.deliveryTimeout, DisconnectedRetention: timing.retention,
 		Notify: notifyToStderr,
 	}, log)
 	if err != nil {
@@ -141,6 +152,26 @@ func runHub(args []string, env command.Env, home, host string) int {
 		return 1
 	}
 	return 0
+}
+
+type hubTiming struct {
+	keepalive, deliveryTimeout, retention time.Duration
+}
+
+func timingFrom(values map[string]string) (hubTiming, error) {
+	var out hubTiming
+	for flag, target := range map[string]*time.Duration{"--keepalive": &out.keepalive, "--delivery-timeout": &out.deliveryTimeout, "--retention": &out.retention} {
+		raw, given := values[flag]
+		if !given {
+			continue
+		}
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return hubTiming{}, fmt.Errorf("%s needs a positive duration such as 200ms or 15s, not %q", flag, raw)
+		}
+		*target = d
+	}
+	return out, nil
 }
 
 func gitRunner(dir string, args ...string) (string, error) {
