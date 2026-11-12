@@ -1,11 +1,11 @@
 ---
 category: behavior
-status: proposed
-approval: unrecorded
+status: accepted
+approval: person
 affects: [agent/registry, hub/server, mcp/server, cli/command, client/http]
 builds-on: ['0010', '0020', '0040', '0050']
 partly-supersedes: ['0020']
-note: Decided in conversation on 2026-11-11 and not yet approved. It replaces the part of 0020 that has the person who holds the hub secret choose agent names.
+note: Decided in conversation on 2026-11-11. It replaces the part of 0020 that has the person who holds the hub secret choose agent names. Wake and delivery details are superseded by 0070.
 partly-superseded-by: ['0070']
 ---
 
@@ -78,6 +78,12 @@ automatic discovery.
 **The hub secret is still the root credential.** A registering process reads it from its private file, so any process
 that runs as the same operating system user can read it too. The earlier advice to keep it out of an agent's environment
 was a speed bump and not a boundary, and the README says so.
+
+**A single-use registration ticket is not built.** A launcher could ask the hub for a ticket tied to a folder and a
+harness, and the MCP process would redeem it in place of the secret. The launcher would still need the secret to ask, so
+a process of the same operating system user could still register any agent. Codex passes almost none of its environment
+to an MCP server, and a plain `claude` session has no launcher, so a ticket would break the one-line setup. The hub
+secret stays the registration credential. Agents that must be kept apart run as separate operating system users.
 
 **A Codex agent proves it controls the session it names.** `landline_register` takes a Codex `CODEX_THREAD_ID`, which
 the agent reads from its shell tool's environment, because the MCP server cannot read it. The hub accepts only a UUID,
@@ -165,8 +171,3 @@ A real Claude Code 2.1.296 session was started with only `landline server up` an
 - **What follows.** A Claude Code launcher can set the label and the model without the model's help, from its own
   arguments. A Codex agent still has to register its session, because its wake needs the session id, and whether Codex
   follows the instruction has not been tested.
-
-## Open questions
-
-- Whether a single-use registration ticket, issued by a launcher and tied to a folder and a harness, should replace the
-  shared hub secret for registration. It is deferred, because the shared secret limit above is already accepted.
