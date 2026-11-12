@@ -921,13 +921,16 @@ func TestASeedThatSanitizesToNothingStillGetsAHandleAndALongOneIsCut(t *testing.
 func TestAttributesAreRegisteredShownInTheListAndChecked(t *testing.T) {
 	t.Parallel()
 	h := start(t)
-	handle, token := h.registerSeed("threnos", map[string]string{"folder": "threnos", "branch": "fix/login", "harness_version": "2.1.296", "model": "claude-opus-5-5", "effort": "medium", "label": "lead"})
+	handle, token := h.registerSeed("threnos", map[string]string{"folder": "threnos", "branch": "fix/login", "harness_version": "2.1.296", "landline_version": "0.2.0", "model": "claude-opus-5-5", "effort": "medium", "label": "lead"})
 	found, _ := h.agent(token, handle)
-	if found.Folder != "threnos" || found.Branch != "fix/login" || found.HarnessVersion != "2.1.296" || found.Model != "claude-opus-5-5" || found.Effort != "medium" || found.Label != "lead" {
+	if found.Folder != "threnos" || found.Branch != "fix/login" || found.HarnessVersion != "2.1.296" || found.LandlineVersion != "0.2.0" || found.Model != "claude-opus-5-5" || found.Effort != "medium" || found.Label != "lead" {
 		t.Fatalf("%+v", found)
 	}
 	if status, _ := h.call("POST", "/v1/register", secret, map[string]string{"seed": "x", "harness": "h", "branch": "bad\nbranch"}); status != 400 {
 		t.Fatalf("a branch with a line break registered: %d", status)
+	}
+	if status, _ := h.call("POST", "/v1/register", secret, map[string]string{"seed": "x", "harness": "h", "landline_version": "0.2\u202e.0"}); status != 400 {
+		t.Fatalf("a landline version with an override character registered: %d", status)
 	}
 }
 

@@ -148,7 +148,7 @@ func newSession(t *testing.T, hub *httptest.Server, secret string) (*Session, En
 		return map[string]string{"LANDLINE_URL": hub.URL, "LANDLINE_SECRET": secret, "CLAUDE_CODE_SESSION_ID": "cc-1"}[k]
 	}}
 	detect := func() Identity { return Identity{Seed: "threnos", Folder: "threnos", Branch: "main"} }
-	return NewSession(env, detect, Identity{Label: "lead"}), env
+	return NewSession(env, detect, Identity{Label: "lead", LandlineVersion: "0.2.0"}), env
 }
 
 func TestTheSessionRegistersOnFirstUseWithTheSeedTheAttributesAndTheClientInfo(t *testing.T) {
@@ -166,7 +166,7 @@ func TestTheSessionRegistersOnFirstUseWithTheSeedTheAttributesAndTheClientInfo(t
 	}
 	got := hub.register[0]
 	if got.Seed != "threnos" || got.Name != "" || got.Harness != "claude-code" || got.HarnessVersion != "2.1.296" || got.Host != "mac" ||
-		got.Session != "cc-1" || got.Folder != "threnos" || got.Branch != "main" || got.Label != "lead" {
+		got.Session != "cc-1" || got.Folder != "threnos" || got.Branch != "main" || got.Label != "lead" || got.LandlineVersion != "0.2.0" {
 		t.Fatalf("%+v", got)
 	}
 	if s.Handle() != "threnos-a" {

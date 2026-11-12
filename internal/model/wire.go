@@ -6,18 +6,19 @@ import (
 )
 
 type RegisterRequest struct {
-	Name           string `json:"name"`
-	Seed           string `json:"seed,omitempty"`
-	Harness        string `json:"harness"`
-	Host           string `json:"host"`
-	Session        string `json:"session"`
-	Folder         string `json:"folder,omitempty"`
-	Branch         string `json:"branch,omitempty"`
-	Worktree       string `json:"worktree,omitempty"`
-	HarnessVersion string `json:"harness_version,omitempty"`
-	Model          string `json:"model,omitempty"`
-	Effort         string `json:"effort,omitempty"`
-	Label          string `json:"label,omitempty"`
+	Name            string `json:"name"`
+	Seed            string `json:"seed,omitempty"`
+	Harness         string `json:"harness"`
+	Host            string `json:"host"`
+	Session         string `json:"session"`
+	Folder          string `json:"folder,omitempty"`
+	Branch          string `json:"branch,omitempty"`
+	Worktree        string `json:"worktree,omitempty"`
+	HarnessVersion  string `json:"harness_version,omitempty"`
+	LandlineVersion string `json:"landline_version,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
+	Label           string `json:"label,omitempty"`
 }
 
 type RegisterResponse struct {
@@ -69,19 +70,20 @@ type WireEnvelope struct {
 }
 
 type AgentInfo struct {
-	Name           string    `json:"name"`
-	Harness        string    `json:"harness"`
-	Host           string    `json:"host"`
-	Session        string    `json:"session"`
-	Connected      bool      `json:"connected"`
-	LastSeen       time.Time `json:"last_seen"`
-	Folder         string    `json:"folder,omitempty"`
-	Branch         string    `json:"branch,omitempty"`
-	Worktree       string    `json:"worktree,omitempty"`
-	HarnessVersion string    `json:"harness_version,omitempty"`
-	Model          string    `json:"model,omitempty"`
-	Effort         string    `json:"effort,omitempty"`
-	Label          string    `json:"label,omitempty"`
+	Name            string    `json:"name"`
+	Harness         string    `json:"harness"`
+	Host            string    `json:"host"`
+	Session         string    `json:"session"`
+	Connected       bool      `json:"connected"`
+	LastSeen        time.Time `json:"last_seen"`
+	Folder          string    `json:"folder,omitempty"`
+	Branch          string    `json:"branch,omitempty"`
+	Worktree        string    `json:"worktree,omitempty"`
+	HarnessVersion  string    `json:"harness_version,omitempty"`
+	LandlineVersion string    `json:"landline_version,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Effort          string    `json:"effort,omitempty"`
+	Label           string    `json:"label,omitempty"`
 }
 
 type ErrorResponse struct {
@@ -112,7 +114,7 @@ func (a AgentInfo) Attributes() string {
 	parts := []string{}
 	for _, each := range []struct{ name, value string }{
 		{"label", a.Label}, {"folder", a.Folder}, {"branch", a.Branch}, {"worktree", a.Worktree},
-		{"model", a.Model}, {"effort", a.Effort}, {"version", a.HarnessVersion},
+		{"model", a.Model}, {"effort", a.Effort}, {"version", a.HarnessVersion}, {"landline", a.LandlineVersion},
 	} {
 		if each.value != "" {
 			parts = append(parts, each.name+": "+oneLine(each.value))

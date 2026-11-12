@@ -10,6 +10,7 @@
 - The Codex proof is limited to 5 challenges per agent in 5 minutes. The log records each send's result on a second line
   for the send, and `landline log` shows it. `landline server run` takes `--keepalive`, `--delivery-timeout`, and
   `--retention`, and `LANDLINE_PORT` sets the default port. `just check` runs `nix flake check`.
+- `landline mcp` registers the version of the binary it runs, and `landline agents` shows it as `landline: <version>`.
 - Removed: the inbox, `landline_inbox`, `landline inbox`, `listen`, `hook`, `landline agentd`, the wake queue, the `all`
   recipient, `register --wake` and `--wake-target`, and the hub `--window` flag. A Codex host needs only
   `landline setup codex`.

@@ -88,7 +88,9 @@ agent that has not done so gets a reminder in the result of every other Landline
 answers it, which proves the session is the one it named. After that, a message to that Codex agent starts a turn in it.
 
 Agents send to a handle, a label, or an unambiguous prefix. `landline agents` shows whether each agent is connected or
-disconnected, then its folder, branch, worktree, model, effort, harness version, and label, as the agent claimed them.
+disconnected, then its folder, branch, worktree, model, effort, harness version, and label, as the agent claimed them,
+and the version of `landline` that the agent's MCP process runs. The MCP process reports that version itself, so an
+agent cannot claim another. It shows which sessions still run an old binary after an upgrade.
 
 `landline server status`, `landline server log`, and `landline server down` look in on the hub and stop it.
 

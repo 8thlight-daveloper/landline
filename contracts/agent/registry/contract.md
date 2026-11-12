@@ -25,11 +25,11 @@ Holds the list of registered agents as a value. Every call takes the list and re
   before the field rules, so a harness of only a tab is `model.ErrNoHarness`. A harness of only a zero-width space or
   another invisible formatting character is not empty after trimming, so it is `model.ErrBadField`.
 
-- The harness, host, session, folder, branch, worktree, harness version, model, effort, and label are each at most 64
-  bytes, counted in bytes. They hold no control character, no line or paragraph separator, and no invisible formatting
-  character such as a right-to-left override, which are the Unicode categories Cc, Zl, Zp, and Cf. So none of them can
-  break onto a new line or reorder the text around them. Anything else is `model.ErrBadField`. An empty host or session
-  is allowed.
+- The harness, host, session, folder, branch, worktree, harness version, landline version, model, effort, and label are
+  each at most 64 bytes, counted in bytes. They hold no control character, no line or paragraph separator, and no
+  invisible formatting character such as a right-to-left override, which are the Unicode categories Cc, Zl, Zp, and Cf.
+  So none of them can break onto a new line or reorder the text around them. Anything else is `model.ErrBadField`. An
+  empty host or session is allowed.
 
 - The returned list is sorted by name. The input list is never changed, including when `Register` replaces an entry.
 
@@ -94,6 +94,8 @@ None.
 | List an agent twice when its handle and label both start with the query          | `TestResolveListsAnAgentOnceWhenItsHandleAndItsLabelBothStartWithTheQuery`         |
 | Skip the invisible-character check on the harness, or let it count as no harness | `TestAHarnessOfOnlyAnInvisibleCharacterThatIsNotWhiteSpaceIsABadFieldNotNoHarness` |
 | Check only some Cf characters, or only some fields                               | `TestEveryFieldRefusesInvisibleFormattingCharacters`                               |
+| Check every field except the landline version, or give it a different limit      | `TestAnOverLongOrInvisibleLandlineVersionIsRefused`                                |
+| Drop the landline version when storing, or keep the old one when it is empty     | `TestALandlineVersionIsStoredAndFoundUnchanged`                                    |
 
 ## Fixture sources
 
@@ -101,6 +103,8 @@ None.
   fictional agent names, as `AGENTS.md` requires.
 - The query forms for trimming and case come from the rules above: the contract says the query is matched exactly and
   not trimmed. The Unicode White_Space characters used are the ones the harness rule names.
+- The landline versions `0.2.0`, `0.2.0-rc 1`, and `dev` are invented values that look like a release, a pre-release,
+  and a development build. They are not read from a real build.
 - The invisible characters are Unicode category Cf code points from the Unicode Character Database (`UnicodeData.txt`,
   general category `Cf`): U+00AD, U+0600, U+061C, U+180E, U+200B to U+200F, U+202A, U+202D, U+202E, U+2060, U+2066,
   U+2069, U+FEFF, and the tag characters U+E0001 and U+E0041.

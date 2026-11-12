@@ -1737,3 +1737,82 @@ func TestSetupClaudeInstallsTheLandlineSkillThatTheUserRunsAsSlashLandlineRegist
 		t.Fatal("running setup again changed the skill")
 	}
 }
+
+func (w *world) agentsJSON() []map[string]any {
+	w.t.Helper()
+	status, body := w.request("GET", "/v1/agents", w.token(w.observer()), nil, nil)
+	if status != http.StatusOK {
+		w.t.Fatalf("GET /v1/agents: %d %s", status, body)
+	}
+	var listed []map[string]any
+	if err := json.Unmarshal([]byte(body), &listed); err != nil {
+		w.t.Fatal(err)
+	}
+	return listed
+}
+
+func (w *world) agentJSON(name string) map[string]any {
+	w.t.Helper()
+	for _, entry := range w.agentsJSON() {
+		if entry["name"] == name {
+			return entry
+		}
+	}
+	w.t.Fatalf("%s is not in /v1/agents", name)
+	return nil
+}
+
+func (w *world) agentLine(name string) string {
+	w.t.Helper()
+	for _, line := range strings.Split(w.must("", "agents", "--as", w.observer()), "\n") {
+		if strings.HasPrefix(line, name+"\t") {
+			return line
+		}
+	}
+	w.t.Fatalf("%s is not in the agent list", name)
+	return ""
+}
+
+func TestASelfRegisteredMCPProcessShowsTheBinaryVersionAsLandlineVersionInTheListAndTheWireJSON(t *testing.T) {
+	w := start(t)
+	printed := strings.TrimSpace(w.must("", "version"))
+	version := strings.TrimPrefix(printed, "landline ")
+	if version == printed || version == "" {
+		t.Fatalf("version output: %q", printed)
+	}
+	_, handle := w.selfRegistered("demo-folder", "claude-code")
+	if line := w.agentLine(handle); !strings.Contains(line, "landline: "+version) {
+		t.Fatalf("the list line lacks landline: %s:\n%s", version, line)
+	}
+	if shown := w.agentJSON(handle)["landline_version"]; shown != version {
+		t.Fatalf("landline_version = %v, want %s", shown, version)
+	}
+}
+
+func TestALandlineRegisterCallCannotSetTheLandlineVersion(t *testing.T) {
+	w := start(t)
+	version := strings.TrimPrefix(strings.TrimSpace(w.must("", "version")), "landline ")
+	p, handle := w.selfRegistered("demo-folder", "claude-code")
+	reply := p.request("tools/call", `{"name":"landline_register","arguments":{"label":"lead","landline_version":"forged-9.9.9"}}`)
+	if _, failed := reply["error"]; !failed {
+		p.tool("landline_agents", `{}`)
+	}
+	w.waitState(handle, "connected")
+	if shown := w.agentJSON(handle)["landline_version"]; shown != version {
+		t.Fatalf("landline_version = %v after a forged claim, want %s", shown, version)
+	}
+	if line := w.agentLine(handle); strings.Contains(line, "forged") || !strings.Contains(line, "landline: "+version) {
+		t.Fatalf("the list line shows a forged value or lacks the real one:\n%s", line)
+	}
+}
+
+func TestAHandRegisteredNameShowsNoLandlineAttribute(t *testing.T) {
+	w := start(t)
+	w.register("alpha")
+	if line := w.agentLine("alpha"); strings.Contains(line, "landline:") {
+		t.Fatalf("a hand-registered name shows a landline attribute:\n%s", line)
+	}
+	if _, present := w.agentJSON("alpha")["landline_version"]; present {
+		t.Fatal("a hand-registered name carries landline_version in /v1/agents")
+	}
+}

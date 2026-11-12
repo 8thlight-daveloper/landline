@@ -15,15 +15,16 @@ import (
 )
 
 type Identity struct {
-	Seed           string
-	Folder         string
-	Branch         string
-	Worktree       string
-	Harness        string
-	HarnessVersion string
-	Model          string
-	Effort         string
-	Label          string
+	Seed            string
+	Folder          string
+	Branch          string
+	Worktree        string
+	Harness         string
+	HarnessVersion  string
+	LandlineVersion string
+	Model           string
+	Effort          string
+	Label           string
 }
 
 type GitRunner func(dir string, args ...string) (string, error)
@@ -55,7 +56,8 @@ func (base Identity) With(over Identity) Identity {
 	return Identity{
 		Seed: pick(over.Seed, base.Seed), Folder: pick(over.Folder, base.Folder), Branch: pick(over.Branch, base.Branch),
 		Worktree: pick(over.Worktree, base.Worktree), Harness: pick(over.Harness, base.Harness),
-		HarnessVersion: pick(over.HarnessVersion, base.HarnessVersion), Model: pick(over.Model, base.Model),
+		HarnessVersion:  pick(over.HarnessVersion, base.HarnessVersion),
+		LandlineVersion: pick(over.LandlineVersion, base.LandlineVersion), Model: pick(over.Model, base.Model),
 		Effort: pick(over.Effort, base.Effort), Label: pick(over.Label, base.Label),
 	}
 }
@@ -125,7 +127,7 @@ func (s *Session) register() error {
 	url := HubURL(s.env)
 	out, err := client.New(url, secret).Register(model.RegisterRequest{
 		Seed: identity.Seed, Harness: identity.Harness, Host: host, Session: s.env.Getenv("CLAUDE_CODE_SESSION_ID"),
-		Folder: identity.Folder, Branch: identity.Branch, Worktree: identity.Worktree, HarnessVersion: identity.HarnessVersion,
+		Folder: identity.Folder, Branch: identity.Branch, Worktree: identity.Worktree, HarnessVersion: identity.HarnessVersion, LandlineVersion: identity.LandlineVersion,
 		Model: identity.Model, Effort: identity.Effort, Label: identity.Label,
 	})
 	if err != nil {

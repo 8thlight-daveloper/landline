@@ -183,7 +183,7 @@ func gitRunner(dir string, args ...string) (string, error) {
 
 func runMCP(args []string, env command.Env) int {
 	channel, as := false, ""
-	overrides := command.Identity{}
+	overrides := command.Identity{LandlineVersion: version}
 	targets := map[string]*string{
 		"--as": &as, "--label": &overrides.Label, "--model": &overrides.Model, "--effort": &overrides.Effort,
 		"--folder": &overrides.Folder, "--branch": &overrides.Branch,

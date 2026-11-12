@@ -367,6 +367,8 @@ func setField(entry *model.Agent, field, value string) {
 		entry.Worktree = value
 	case "HarnessVersion":
 		entry.HarnessVersion = value
+	case "LandlineVersion":
+		entry.LandlineVersion = value
 	case "Model":
 		entry.Model = value
 	case "Effort":
@@ -378,7 +380,7 @@ func setField(entry *model.Agent, field, value string) {
 
 func TestEveryFieldAcceptsExactlySixtyFourBytesAndRefusesTheUnicodeLineBreaks(t *testing.T) {
 	t.Parallel()
-	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "Model", "Effort", "Label"} {
+	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "Model", "Effort", "Label"} {
 		entry := agent("alpha")
 		setField(&entry, field, strings.Repeat("h", 64))
 		if _, err := newImpl().Register(nil, entry, t0); err != nil {
@@ -437,6 +439,7 @@ func TestEveryAttributeIsStoredAsGivenAndMayBeEmpty(t *testing.T) {
 	t.Parallel()
 	entry := agent("alpha")
 	entry.Folder, entry.Branch, entry.Worktree, entry.HarnessVersion = "threnos", "fix/login", "wt-2", "2.1.296"
+	entry.LandlineVersion = "0.2.0"
 	entry.Model, entry.Effort, entry.Label = "claude-opus-5-5", "medium", "  main reviewer  "
 	got, err := newImpl().Register(nil, entry, t0)
 	if err != nil {
@@ -626,7 +629,7 @@ func TestAHarnessOfOnlyAnInvisibleCharacterThatIsNotWhiteSpaceIsABadFieldNotNoHa
 func TestEveryFieldRefusesInvisibleFormattingCharacters(t *testing.T) {
 	t.Parallel()
 	formatting := []string{"\u00ad", "\u0600", "\u061c", "\u180e", "\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202d", "\u202e", "\u2060", "\u2066", "\u2069", "\ufeff", "\U000e0001", "\U000e0041"}
-	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "Model", "Effort", "Label"} {
+	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "Model", "Effort", "Label"} {
 		for _, char := range formatting {
 			for _, text := range []string{"a" + char + "b", char + "codex", "codex" + char} {
 				entry := agent("alpha")
@@ -635,6 +638,37 @@ func TestEveryFieldRefusesInvisibleFormattingCharacters(t *testing.T) {
 					t.Errorf("%s %q: %v", field, text, err)
 				}
 			}
+		}
+	}
+}
+
+func TestALandlineVersionIsStoredAndFoundUnchanged(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"0.2.0", "dev", " 0.2.0-rc 1 ", strings.Repeat("v", 64)} {
+		entry := agent("alpha")
+		entry.LandlineVersion = version
+		agents, err := newImpl().Register(nil, entry, t0)
+		if err != nil {
+			t.Fatalf("%q: %v", version, err)
+		}
+		found, ok := newImpl().Find(agents, "alpha")
+		if !ok || found.LandlineVersion != version {
+			t.Fatalf("%q: found %+v, %v", version, found, ok)
+		}
+		bare, _ := newImpl().Register(agents, agent("alpha"), t0)
+		if bare[0].LandlineVersion != "" {
+			t.Fatalf("re-registering without a version kept %q", bare[0].LandlineVersion)
+		}
+	}
+}
+
+func TestAnOverLongOrInvisibleLandlineVersionIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{strings.Repeat("v", 65), "0.2.0\u202e", "\u200b0.2.0", "0.\u20602.0", "0.2\n.0", "0.2.0\u2028"} {
+		entry := agent("alpha")
+		entry.LandlineVersion = version
+		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
+			t.Errorf("%q: %v", version, err)
 		}
 	}
 }
