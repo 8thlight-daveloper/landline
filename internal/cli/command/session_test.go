@@ -88,6 +88,9 @@ func (r *recordingHub) handler() http.Handler {
 		r.mu.Unlock()
 		json.NewEncoder(w).Encode(model.RegisterResponse{Name: body.Seed + "-" + string(rune('a'+n-1)), Token: "tok" + string(rune('0'+n))})
 	})
+	mux.HandleFunc("/v1/attach", func(w http.ResponseWriter, req *http.Request) {
+		json.NewEncoder(w).Encode(model.AttachResponse{Name: "x"})
+	})
 	mux.HandleFunc("/v1/send", func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
 		reject := r.rejected > 0
@@ -327,5 +330,62 @@ func TestTheEnvironmentSuppliesTheLabelModelAndEffort(t *testing.T) {
 	}})
 	if got.Label != "tutor" || got.Model != "gpt-6.1-sol" || got.Effort != "medium" || got.Folder != "f" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAClaimMadeThroughAttachSurvivesARegistrationAfterTheHubForgetsTheAgent(t *testing.T) {
+	t.Parallel()
+	hub := &recordingHub{}
+	srv := httptest.NewServer(hub.handler())
+	defer srv.Close()
+	s, _ := newSession(t, srv, "0123456789abcdef")
+	if _, err := s.Attach(model.AttachRequest{Model: "claude-opus-5-5", Effort: "high", Label: "tutor"}); err != nil {
+		t.Fatal(err)
+	}
+	hub.mu.Lock()
+	hub.rejected = 1
+	hub.mu.Unlock()
+	if _, err := s.Send(model.SendBody{To: "x", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	last := hub.register[len(hub.register)-1]
+	if len(hub.register) != 2 || last.Model != "claude-opus-5-5" || last.Effort != "high" || last.Label != "tutor" {
+		t.Fatalf("%d registrations, the last %+v", len(hub.register), last)
+	}
+}
+
+func TestRenewingATokenRemovesTheSessionFileOfTheHandleItReplaced(t *testing.T) {
+	t.Parallel()
+	hub := &recordingHub{}
+	srv := httptest.NewServer(hub.handler())
+	defer srv.Close()
+	s, env := newSession(t, srv, "0123456789abcdef")
+	if _, err := s.Send(model.SendBody{To: "x", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(env.ConfigDir, "session-threnos-a.json")
+	if _, err := os.Stat(old); err != nil {
+		t.Fatal(err)
+	}
+	hub.mu.Lock()
+	hub.rejected = 1
+	hub.mu.Unlock()
+	if _, err := s.Send(model.SendBody{To: "x", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); err == nil {
+		t.Fatal("the file of the replaced handle is still there")
+	}
+	if _, err := os.Stat(filepath.Join(env.ConfigDir, "session-threnos-b.json")); err != nil {
+		t.Fatalf("the new session file is missing: %v", err)
+	}
+	os.Remove(filepath.Join(env.ConfigDir, "session-threnos-b.json"))
+	hub.mu.Lock()
+	hub.rejected = 1
+	hub.mu.Unlock()
+	if _, err := s.Send(model.SendBody{To: "x", Body: "b"}); err != nil {
+		t.Fatalf("a missing old file broke the renewal: %v", err)
 	}
 }

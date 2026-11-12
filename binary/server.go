@@ -21,11 +21,12 @@ const serverUsage = `landline server <command>
 
   up [flags]        start the hub in the background
   run [flags]       run the hub in this terminal
-                    Flags for up and run: --addr, --log, --state, --host, and the timing flags --keepalive D,
-                    --delivery-timeout D and --retention D, which take durations such as 200ms or 15s.
+                    Flags for up and run: --addr, --log, --host, and the timing flags --keepalive D,
+                    --delivery-timeout D and --grace D, which take durations such as 200ms or 15s.
+                    --grace is how long the hub keeps an agent after it was last seen, 2 minutes by default.
                     Without --addr the hub listens on 127.0.0.1:8787, or on the port in LANDLINE_PORT
   down              stop the hub that "up" started
-  restart [flags]   stop that hub and start it again with the flags given, so every agent reconnects
+  restart [flags]   stop that hub and start it again with the flags given. The hub keeps no agents, so each one registers again
   status            say whether the hub is running
   log               print the hub's message log
   join <address>    use a hub on another machine, with its secret from LANDLINE_SECRET or standard input
@@ -114,7 +115,7 @@ func hubPID(dataDir string) (int, bool) {
 	return pid, true
 }
 
-var hubFlags = []string{"--addr", "--log", "--state", "--host", "--keepalive", "--delivery-timeout", "--retention"}
+var hubFlags = []string{"--addr", "--log", "--host", "--keepalive", "--delivery-timeout", "--grace"}
 
 func serverUp(args []string, env command.Env, dataDir string) int {
 	values, err := flagValues(args, hubFlags...)

@@ -133,6 +133,7 @@ func (s *Session) register() error {
 	if err != nil {
 		return s.hubDown(err)
 	}
+	replaced := s.handle
 	s.identity, s.handle, s.client = identity, out.Name, client.New(url, out.Token)
 	raw, _ := json.Marshal(session{URL: url, Token: out.Token})
 	if os.MkdirAll(s.env.ConfigDir, 0o700) == nil {
@@ -140,6 +141,9 @@ func (s *Session) register() error {
 		if os.WriteFile(path, raw, 0o600) == nil {
 			os.Chmod(path, 0o600)
 		}
+	}
+	if replaced != "" && replaced != out.Name {
+		os.Remove(filepath.Join(s.env.ConfigDir, "session-"+replaced+".json"))
 	}
 	return nil
 }
@@ -203,6 +207,11 @@ func (s *Session) Agents() (out []model.AgentInfo, err error) {
 
 func (s *Session) Attach(req model.AttachRequest) (out model.AttachResponse, err error) {
 	err = s.call(func(c *client.Client) (e error) { out, e = c.Attach(req); return })
+	if err == nil {
+		s.mu.Lock()
+		s.overrides = s.overrides.With(Identity{Model: req.Model, Effort: req.Effort, Label: req.Label})
+		s.mu.Unlock()
+	}
 	return
 }
 

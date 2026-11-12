@@ -106,7 +106,6 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.agents = revised
-		s.saveLocked()
 	}
 	s.mu.Unlock()
 	if challengeText != "" {

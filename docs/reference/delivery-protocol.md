@@ -77,18 +77,33 @@ adapter itself.
 
 ## Listing
 
-`GET /v1/agents` lists an agent while it is connected, or for 10 minutes after its stream closed. After that the entry
-is unlisted only: the token and the registration stay, so a later reconnect works. Each entry has `connected`. A
-disconnected entry is not dropped from a send's resolution: a send to it answers `409` `not connected`.
+[0080](../decisions/0080-the-hub-keeps-only-connected-agents.md) holds agents in memory only, and only while they are
+present. An agent is present while its stream is open, and for 2 minutes after its stream closes. A hand-registered
+agent has no stream, and it is present for 2 minutes after its last authenticated request. When that time runs out the
+hub deletes the registration and the token, and the token is answered with `401` from then on. The hub checks this
+before every request, against its own clock.
+
+`GET /v1/agents` lists every present agent. Each entry has `connected`, `false` for an agent in its grace.
+
+A send resolves its recipient against the connected agents first, so a label or a prefix picks among them alone and the
+ambiguity rule applies to them alone. When no connected agent matches, the name resolves against the other present
+agents, so a send to an agent in its grace answers `409` `not connected`. A name that matches no present agent,
+including a handle the hub has forgotten, answers `404` unknown recipient.
+
+The hub keeps no state file. A hub restart forgets every agent and token, and each agent registers again and gets a new
+handle. The hub does not issue a handle that a present agent holds, and a forgotten handle may be issued again.
 
 ## Timing flags
 
-`landline server run` takes `--keepalive`, `--delivery-timeout`, and `--retention`, each a Go duration such as `200ms`,
-for the 15 second keepalive, the 20 second report wait, and the 10 minute listing time. A zero, negative, or unparsable
-value is refused. They exist so a test can run the timing rules fast. `LANDLINE_PORT` sets the default port, 8787, for a
-hub with no `--addr` and for a client with no saved hub.
+`landline server run` takes `--keepalive`, `--delivery-timeout`, and `--grace`, each a Go duration such as `200ms`, for
+the 15 second keepalive, the 20 second report wait, and the 2 minute grace. A zero, negative, or unparsable value is
+refused. They exist so a test can run the timing rules fast. `LANDLINE_PORT` sets the default port, 8787, for a hub with
+no `--addr` and for a client with no saved hub.
 
 ## Reconnecting
 
 The MCP process reconnects with delays that start at one second, double, and stop at 30 seconds. It presents the same
-agent token, so a reconnect by the same process keeps its handle.
+agent token, so a reconnect inside the 2 minute grace keeps its handle. After the grace the hub answers `401`. The MCP
+process then registers again once, gets a new handle, and removes the session file of the handle it replaced. A CLI
+command that gets `401` prints that the hub does not know the agent any more and tells the person to run
+`landline register` again.

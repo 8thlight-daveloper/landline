@@ -243,3 +243,21 @@ func TestLogPrintsTheDeliveryResultAfterTheKindAndNothingWhenThereIsNone(t *test
 		t.Fatalf("%d %q", r.code, lines)
 	}
 }
+
+func TestACommandWhoseTokenTheHubForgotSaysToRegisterAgain(t *testing.T) {
+	t.Parallel()
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		json.NewEncoder(w).Encode(model.ErrorResponse{Error: "missing or unknown agent token"})
+	}))
+	t.Cleanup(hub.Close)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"gone"}`), 0o600)
+	want := "the hub does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
+	for _, args := range [][]string{{"send", "--as", "alpha", "--to", "bravo", "hi"}, {"agents", "--as", "alpha"}} {
+		r := do(t, dir, hub.URL, "", args...)
+		if r.code == 0 || !strings.Contains(r.err.String(), want) || strings.Contains(r.err.String(), "(401)") {
+			t.Errorf("%v: %d %q", args, r.code, r.err.String())
+		}
+	}
+}

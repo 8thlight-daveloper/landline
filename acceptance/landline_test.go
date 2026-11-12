@@ -116,7 +116,7 @@ func startHub(t *testing.T, bin, config, addr string, extra ...string) *world {
 		"LANDLINE_SECRET="+secret,
 		"LANDLINE_FAKE_CODEX_LOG="+filepath.Join(w.config, "codex.log"),
 	)
-	hub := exec.Command(w.bin, "hub", "--addr", addr, "--log", filepath.Join(w.config, "log.jsonl"), "--state", filepath.Join(w.config, "state.json"), "--host", "mac")
+	hub := exec.Command(w.bin, "hub", "--addr", addr, "--log", filepath.Join(w.config, "log.jsonl"), "--host", "mac")
 	hub.Args = append(hub.Args, extra...)
 	hub.Env = w.env
 	stderr := &syncBuffer{}
@@ -808,34 +808,107 @@ func TestAnAgentCannotProveAThreadItWasNotToldTheCodeFor(t *testing.T) {
 	}
 }
 
-func TestWhenTheHubRestartsARunningMCPProcessReconnectsWithTheSameHandleAndSendsSucceed(t *testing.T) {
+const forgotten = "the hub does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
+
+func (w *world) sessionFile(name string) string {
+	return filepath.Join(w.config, ".config", "landline", "session-"+name+".json")
+}
+
+func (w *world) handleWithLabel(label string) string {
+	w.t.Helper()
+	for _, entry := range w.agentsJSON() {
+		if entry["label"] == label {
+			return entry["name"].(string)
+		}
+	}
+	w.t.Fatalf("no agent has the label %s", label)
+	return ""
+}
+
+func (w *world) watch() {
+	w.t.Helper()
+	w.register("watcher")
+	w.openStream("watcher", true)
+}
+
+func TestWhenTheHubRestartsARunningMCPProcessRegistersAgainByItselfAndItsLabelReachesItWhileTheOldHandleAnswers404(t *testing.T) {
 	bin, config := build(t), t.TempDir()
 	first := startHub(t, bin, config, "")
 	first.register("alpha")
-	bravo := first.channelAgent("bravo")
+	dir := filepath.Join(t.TempDir(), "demo-folder")
+	os.MkdirAll(dir, 0o755)
+	bravo := first.startMCP(dir, "--channel", "--label", "tutor")
+	bravo.handshake("claude-code", "2.1.296")
+	bravo.tool("landline_agents", `{}`)
+	oldHandle := first.handleWithLabel("tutor")
+	first.waitState(oldHandle, "connected")
 	first.stop()
 	second := startHub(t, bin, config, first.addr)
-	second.waitState("bravo", "connected")
-	second.must("after the restart", "send", "--as", "alpha", "--to", "bravo", "-")
+	second.register("alpha", "watcher")
+	if out := bravo.tool("landline_agents", `{}`); !strings.Contains(out, "label: tutor") {
+		t.Fatalf("the process did not carry on after the restart: %s", out)
+	}
+	newHandle := second.handleWithLabel("tutor")
+	if newHandle == oldHandle {
+		t.Fatalf("the handle %s survived a hub restart", oldHandle)
+	}
+	second.waitState(newHandle, "connected")
+	if _, err := os.Stat(second.sessionFile(oldHandle)); err == nil {
+		t.Fatalf("the session file of the replaced handle %s is still there", oldHandle)
+	}
+	if _, err := os.Stat(second.sessionFile(newHandle)); err != nil {
+		t.Fatalf("no session file for the new handle: %v", err)
+	}
+	if status, body := second.sendHTTP("alpha", oldHandle, "to the old handle"); status != 404 {
+		t.Fatalf("the old handle: %d %s", status, body)
+	}
+	second.must("after the restart", "send", "--as", "alpha", "--to", "tutor", "-")
 	if note := bravo.notification(); !strings.Contains(note.Params.Content, "after the restart") {
 		t.Fatalf("notification: %+v", note)
 	}
 }
 
-func TestSessionsAndHandlesSurviveAHubRestartButAgentsShowDisconnectedUntilTheyReconnect(t *testing.T) {
+func TestAHubRestartForgetsEveryAgentAndATokenFromBeforeItIsToldToRegisterAgain(t *testing.T) {
 	bin, config := build(t), t.TempDir()
 	first := startHub(t, bin, config, "")
 	first.register("alpha", "bravo")
 	first.stop()
 	second := startHub(t, bin, config, first.addr)
+	for _, args := range [][]string{{"agents", "--as", "alpha"}, {"send", "--as", "alpha", "--to", "bravo", "-"}} {
+		out, err := second.run("before the restart", args...)
+		if err == nil || !strings.Contains(out, forgotten) {
+			t.Fatalf("%v: %q, %v", args, out, err)
+		}
+	}
+	if status := second.get("/v1/agents", second.token("alpha")); status != 401 {
+		t.Fatalf("the old token: %d", status)
+	}
+	second.register("alpha")
 	listed := second.must("", "agents", "--as", "alpha")
-	if !strings.Contains(listed, "alpha\tclaude-code\tmac\tdisconnected") || !strings.Contains(listed, "bravo\tclaude-code\tmac\tdisconnected") {
-		t.Fatalf("after the restart: %q", listed)
+	if !strings.Contains(listed, "alpha\tclaude-code\tmac\tdisconnected") || strings.Contains(listed, "bravo") {
+		t.Fatalf("after registering again: %q", listed)
 	}
-	out, err := second.run("before the restart", "send", "--as", "alpha", "--to", "bravo", "-")
-	if err == nil || !strings.Contains(out, notConnected) {
-		t.Fatalf("got %q, %v", out, err)
+}
+
+func TestTheLogKeepsItsMessagesAcrossAHubRestartAndNoStateFileIsEverWritten(t *testing.T) {
+	bin, config := build(t), t.TempDir()
+	first := startHub(t, bin, config, "")
+	first.register("alpha", "bravo")
+	if status, _ := first.sendHTTP("alpha", "bravo", "written before the restart"); status != 409 {
+		t.Fatalf("the send: %d", status)
 	}
+	first.stop()
+	second := startHub(t, bin, config, first.addr)
+	second.register("alpha")
+	if got := second.logText(); logEntries(got) != 1 || !strings.Contains(got, "    written before the restart\n") {
+		t.Fatalf("the log after the restart: %q", got)
+	}
+	filepath.WalkDir(config, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() && strings.Contains(entry.Name(), "state") {
+			t.Errorf("a state file exists: %s", path)
+		}
+		return nil
+	})
 }
 
 func TestTheSenderComesFromTheTokenAndARequestCannotNameAnother(t *testing.T) {
@@ -1028,7 +1101,7 @@ func nonLoopbackAddress() string {
 func TestTheHubListensOnTheLoopbackAddressOfLandlinePortAndNotOnOtherAddresses(t *testing.T) {
 	bin, config := build(t), t.TempDir()
 	_, port, _ := net.SplitHostPort(freeAddr(t))
-	hub := exec.Command(bin, "server", "run", "--log", filepath.Join(config, "log.jsonl"), "--state", filepath.Join(config, "state.json"))
+	hub := exec.Command(bin, "server", "run", "--log", filepath.Join(config, "log.jsonl"))
 	hub.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret, "LANDLINE_PORT="+port)
 	stderr := &syncBuffer{}
 	hub.Stderr = stderr
@@ -1054,7 +1127,7 @@ func TestTheHubListensOnTheLoopbackAddressOfLandlinePortAndNotOnOtherAddresses(t
 func TestAnInvalidLandlinePortMakesTheHubExitWithStatusTwoAndAMessage(t *testing.T) {
 	bin, config := build(t), t.TempDir()
 	for _, bad := range []string{"99999", "abc", "0", "-1"} {
-		cmd := exec.Command(bin, "server", "run", "--log", filepath.Join(config, "log.jsonl"), "--state", filepath.Join(config, "state.json"))
+		cmd := exec.Command(bin, "server", "run", "--log", filepath.Join(config, "log.jsonl"))
 		cmd.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret, "LANDLINE_PORT="+bad)
 		var out bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &out
@@ -1172,31 +1245,68 @@ func TestASendWithNoDeliveryReportAnswers504AfterTheDeliveryTimeoutAndTheLogReco
 	eventually(t, "the log result", func() bool { return logResults(w.logText())["nobody reports this"] == "no delivery report" })
 }
 
-func TestAnAgentIsUnlistedAfterTheRetentionTimeButItsRegistrationStaysAndASendStillAnswersNotConnected(t *testing.T) {
-	w := startHub(t, build(t), t.TempDir(), "", "--retention", "1s")
+func TestAnAgentThatStoppedShowsDisconnectedAtOnceThenIsForgottenAfterTheGraceAndItsTokenAnswers401AndItsHandleAnswers404(t *testing.T) {
+	w := startHub(t, build(t), t.TempDir(), "", "--grace", "1s")
+	w.watch()
 	w.register("alpha")
+	w.openStream("alpha", true)
 	p, handle := w.selfRegistered("tutor", "claude-code")
+	token := w.token(handle)
 	p.stop()
 	w.waitState(handle, "disconnected")
 	stopped := time.Now()
-	if got := w.state(handle); got != "disconnected" {
-		t.Fatalf("at once: %q", got)
+	if status, body := w.sendHTTP("alpha", handle, "inside the grace"); status != 409 || !strings.Contains(body, notConnected) {
+		t.Fatalf("inside the grace: %d %s", status, body)
 	}
 	time.Sleep(time.Until(stopped.Add(1500 * time.Millisecond)))
 	eventually(t, handle+" to be unlisted", func() bool { return !strings.Contains(w.must("", "agents", "--as", "alpha"), handle) })
-	status, body := w.sendHTTP("alpha", handle, "after it was unlisted")
-	if status != 409 || !strings.Contains(body, notConnected) {
-		t.Fatalf("got %d %s", status, body)
+	if status := w.get("/v1/agents", token); status != 401 {
+		t.Fatalf("the forgotten token: %d", status)
+	}
+	if status, body := w.sendHTTP("alpha", handle, "after the grace"); status != 404 {
+		t.Fatalf("the forgotten handle: %d %s", status, body)
 	}
 }
 
-func TestARestartedMCPProcessGetsANewHandleWhileAReconnectWithTheSameTokenKeepsIt(t *testing.T) {
+func TestAReconnectInsideTheGraceWithTheSameTokenKeepsTheHandle(t *testing.T) {
+	w := startHub(t, build(t), t.TempDir(), "", "--grace", "2s")
+	w.watch()
+	p, handle := w.selfRegistered("tutor", "claude-code")
+	token := w.token(handle)
+	p.stop()
+	w.waitState(handle, "disconnected")
+	if err := os.WriteFile(w.sessionFile(handle), []byte(`{"token":"`+token+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.openStream(handle, true)
+	w.waitState(handle, "connected")
+	time.Sleep(2500 * time.Millisecond)
+	if got := w.state(handle); got != "connected" {
+		t.Fatalf("after the grace time passed with a stream open: %q", got)
+	}
+}
+
+func TestAHandRegisteredNameIsForgottenOneGraceAfterItsLastRequest(t *testing.T) {
+	w := startHub(t, build(t), t.TempDir(), "", "--grace", "1s")
+	w.watch()
+	w.register("alpha")
+	for i := 0; i < 3; i++ {
+		time.Sleep(600 * time.Millisecond)
+		w.must("", "agents", "--as", "alpha")
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if status := w.get("/v1/agents", w.token("alpha")); status != 401 {
+		t.Fatalf("after the grace with no request: %d", status)
+	}
+}
+
+func TestARestartedSessionWithTheSameLabelLeavesOneConnectedAgentAndALabelSendReachesIt(t *testing.T) {
 	w := start(t)
-	w.register("alpha", "bravo")
-	first, firstHandle := w.selfRegistered("tutor", "claude-code")
+	w.register("alpha")
+	first, firstHandle := w.selfRegistered("tutor", "claude-code", "--channel")
 	first.stop()
 	w.waitState(firstHandle, "disconnected")
-	_, secondHandle := w.selfRegistered("tutor", "claude-code")
+	second, secondHandle := w.selfRegistered("tutor", "claude-code", "--channel")
 	if secondHandle == firstHandle {
 		t.Fatalf("the restarted process kept the handle %s", firstHandle)
 	}
@@ -1206,6 +1316,18 @@ func TestARestartedMCPProcessGetsANewHandleWhileAReconnectWithTheSameTokenKeepsI
 	if status, body := w.sendHTTP("alpha", firstHandle, "to the old handle"); status != 409 || !strings.Contains(body, notConnected) {
 		t.Fatalf("got %d %s", status, body)
 	}
+	if status, body := w.sendHTTP("alpha", "tutor", "to the label"); status != 200 {
+		t.Fatalf("the label was refused: %d %s", status, body)
+	}
+	if note := second.notification(); !strings.Contains(note.Params.Content, "to the label") {
+		t.Fatalf("notification: %+v", note)
+	}
+	first.expectNoNotification()
+}
+
+func TestAStreamOpenedAgainWithTheSameTokenReplacesTheOldOneAndTheAgentStaysConnected(t *testing.T) {
+	w := start(t)
+	w.register("alpha", "bravo")
 	w.openStream("bravo", true)
 	w.waitState("bravo", "connected")
 	w.openStream("bravo", true)
@@ -1306,7 +1428,7 @@ func TestTheLogRecordsEachSendsResultAndALogWithoutResultLinesStillLoads(t *test
 
 func TestTheHubWarnsWhenItIsAskedToListenBeyondLocalhost(t *testing.T) {
 	bin, config := build(t), t.TempDir()
-	hub := exec.Command(bin, "hub", "--addr", "0.0.0.0:0", "--log", filepath.Join(config, "log.jsonl"), "--state", filepath.Join(config, "state.json"))
+	hub := exec.Command(bin, "hub", "--addr", "0.0.0.0:0", "--log", filepath.Join(config, "log.jsonl"))
 	hub.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret)
 	stderr := &syncBuffer{}
 	hub.Stderr = stderr
@@ -1348,6 +1470,11 @@ func TestTheRemovedCommandsAndFlagsAreRefused(t *testing.T) {
 	}
 	if out, err := w.run("", "register", "--name", "bravo", "--harness", "codex", "--wake", "codex"); err == nil {
 		t.Errorf("--wake: %q", out)
+	}
+	for _, flag := range []string{"--state", "--retention"} {
+		if out, err := w.run("", "hub", flag, "1s"); err == nil || !strings.Contains(out, "unknown or incomplete flag "+flag) {
+			t.Errorf("%s: %q, %v", flag, out, err)
+		}
 	}
 }
 
@@ -1432,11 +1559,11 @@ func TestFilesTheHubWritesArePrivateAndAFolderItCreatesToo(t *testing.T) {
 	w.register("alpha", "bravo")
 	w.openStream("bravo", true)
 	w.must("hello", "send", "--as", "alpha", "--to", "bravo", "-")
-	for _, name := range []string{"log.jsonl", "state.json"} {
-		info, err := os.Stat(filepath.Join(config, "data", name))
-		if err != nil || info.Mode().Perm() != 0o600 {
-			t.Errorf("%s: %v %v", name, info, err)
-		}
+	if info, err := os.Stat(filepath.Join(config, "data", "log.jsonl")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("log.jsonl: %v %v", info, err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(config, "data")); len(entries) != 1 {
+		t.Errorf("the data folder holds more than the log: %v", entries)
 	}
 	if info, err := os.Stat(filepath.Join(config, "data")); err != nil || info.Mode().Perm() != 0o700 {
 		t.Errorf("data folder: %v %v", info, err)
@@ -1447,7 +1574,7 @@ func TestFilesTheHubWritesArePrivateAndAFolderItCreatesToo(t *testing.T) {
 }
 
 func startHubIn(t *testing.T, bin, config, dir string) *world {
-	return startHub(t, bin, config, "", "--log", filepath.Join(dir, "log.jsonl"), "--state", filepath.Join(dir, "state.json"))
+	return startHub(t, bin, config, "", "--log", filepath.Join(dir, "log.jsonl"))
 }
 
 func TestAMessageThatEncodesToAHugeLogLineDoesNotStopTheHubRestarting(t *testing.T) {
@@ -1606,6 +1733,15 @@ func TestAnMCPProcessRegistersItselfAndAnotherReachesItByLabelAndAnAmbiguousLabe
 	three := w.startMCP(dirThree, "--channel", "--label", "lead")
 	three.handshake("claude-code", "2.1.296")
 	three.tool("landline_agents", `{}`)
+	eventually(t, "both lead agents to be connected", func() bool {
+		connected := 0
+		for _, entry := range w.agentsJSON() {
+			if entry["label"] == "lead" && entry["connected"] == true {
+				connected++
+			}
+		}
+		return connected == 2
+	})
 	refused := two.tool("landline_send", `{"to":"lead","body":"ambiguous"}`)
 	if !strings.Contains(refused, "more than one agent matches lead") || !strings.Contains(refused, "Use a handle") {
 		t.Fatalf("ambiguous: %q", refused)
@@ -1889,7 +2025,7 @@ func (h *backgroundHub) openStream(name string) (*http.Response, error) {
 	return http.DefaultClient.Do(req)
 }
 
-func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndKeepsSessions(t *testing.T) {
+func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndForgetsEverySession(t *testing.T) {
 	h := newBackgroundHub(t)
 	if out, err := h.run("server", "up", "--addr", h.addr); err != nil {
 		t.Fatalf("up: %v %s", err, out)
@@ -1910,9 +2046,15 @@ func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndKeepsSessions(t *t
 	if status, _ := h.run("server", "status"); !strings.Contains(status, "http://"+h.addr) {
 		t.Fatalf("status: %s", status)
 	}
+	if out, err := h.run("agents", "--as", "alpha"); err == nil || !strings.Contains(out, forgotten) {
+		t.Fatalf("agents after restart: %v %q", err, out)
+	}
+	if out, err := h.run("register", "--name", "alpha", "--harness", "claude-code", "--host", "mac"); err != nil {
+		t.Fatalf("register again: %v %s", err, out)
+	}
 	listed, err := h.run("agents", "--as", "alpha")
 	if err != nil || !strings.Contains(listed, "alpha\tclaude-code\tmac\tdisconnected") {
-		t.Fatalf("agents after restart: %v %q", err, listed)
+		t.Fatalf("agents after registering again: %v %q", err, listed)
 	}
 }
 
@@ -1973,6 +2115,12 @@ func TestServerRestartEndsAnOpenStreamAndANewStreamOpensAfterIt(t *testing.T) {
 	case <-ended:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the open stream did not end when the hub restarted")
+	}
+	if stale, err := h.openStream("alpha"); err != nil || stale.StatusCode != 401 {
+		t.Fatalf("the old token after restart: %v %v", err, stale)
+	}
+	if out, err := h.run("register", "--name", "alpha", "--harness", "claude-code", "--host", "mac"); err != nil {
+		t.Fatalf("register again: %v %s", err, out)
 	}
 	again, err := h.openStream("alpha")
 	if err != nil || again.StatusCode != 200 {

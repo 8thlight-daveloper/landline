@@ -2,14 +2,21 @@
 
 ## Unreleased
 
+- The hub keeps only connected agents ([0080](docs/decisions/0080-the-hub-keeps-only-connected-agents.md)). Agents and
+  tokens live in memory, and an agent is held while its stream is open and for 2 minutes after (`--grace`). The hub
+  drops the registration and the token after that, and the token answers 401. A send resolves a label or a prefix
+  against connected agents first, so a restarted session no longer clashes with its old handle. A handle can be issued
+  again once the hub forgets it. Removed: the state file and `--state`, the ten minute listing, and `--retention`. A hub
+  restart makes every agent register again. The MCP process removes the session file of a handle it replaced, and a CLI
+  command that gets 401 says to run `landline register` again.
 - Delivery is a push to a connected agent, and the hub keeps no mail
   ([0070](docs/decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md)). Each `landline mcp` holds a
   server-sent event stream at `/v1/stream`, the hub sends each message down it, and the MCP process delivers it as a
   channel event or with `codex queue` and reports the result. A send to an agent that is not connected fails with "not
-  connected". An agent shows as `connected` or `disconnected` for ten minutes after its stream closes.
+  connected".
 - The Codex proof is limited to 5 challenges per agent in 5 minutes. The log records each send's result on a second line
   for the send, and `landline log` shows it. `landline server run` takes `--keepalive`, `--delivery-timeout`, and
-  `--retention`, and `LANDLINE_PORT` sets the default port. `just check` runs `nix flake check`.
+  `--grace`, and `LANDLINE_PORT` sets the default port. `just check` runs `nix flake check`.
 - `landline mcp` registers the version of the binary it runs, and `landline agents` shows it as `landline: <version>`.
 - A send to an agent with no landline version on record answers "not connected" and says to restart its session.
 - `landline server restart` stops the hub and starts it again.

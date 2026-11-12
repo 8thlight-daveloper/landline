@@ -31,20 +31,19 @@ type Store interface {
 }
 
 type Config struct {
-	Secret                string
-	Host                  string
-	KeepaliveInterval     time.Duration
-	DeliveryTimeout       time.Duration
-	DisconnectedRetention time.Duration
-	ChallengeLimit        int
-	ChallengeWindow       time.Duration
-	Now                   func() time.Time
-	NewID                 func() string
-	NewToken              func() string
-	NewSuffix             func() string
-	NewCode               func() string
-	Notify                func(string)
-	StatePath             string
+	Secret            string
+	Host              string
+	KeepaliveInterval time.Duration
+	DeliveryTimeout   time.Duration
+	Grace             time.Duration
+	ChallengeLimit    int
+	ChallengeWindow   time.Duration
+	Now               func() time.Time
+	NewID             func() string
+	NewToken          func() string
+	NewSuffix         func() string
+	NewCode           func() string
+	Notify            func(string)
 }
 
 type Server struct {
@@ -88,8 +87,8 @@ func New(cfg Config, store Store) (*Server, error) {
 	if cfg.DeliveryTimeout == 0 {
 		cfg.DeliveryTimeout = 20 * time.Second
 	}
-	if cfg.DisconnectedRetention == 0 {
-		cfg.DisconnectedRetention = 10 * time.Minute
+	if cfg.Grace == 0 {
+		cfg.Grace = 2 * time.Minute
 	}
 	if cfg.ChallengeLimit == 0 {
 		cfg.ChallengeLimit = 5
@@ -122,7 +121,6 @@ func New(cfg Config, store Store) (*Server, error) {
 		sent: map[string][]time.Time{},
 		seq:  store.LastSeq(),
 	}
-	s.loadState()
 	return s, nil
 }
 
@@ -143,7 +141,43 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/attach", s.attachClaims)
 	mux.HandleFunc("GET /v1/agents", s.list)
 	mux.HandleFunc("GET /v1/log", s.logRead)
-	return mux
+	return s.expiring(mux)
+}
+
+func (s *Server) expiring(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.expireLocked()
+		s.mu.Unlock()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) expireLocked() {
+	now := s.cfg.Now()
+	kept := make([]model.Agent, 0, len(s.agents))
+	for _, agent := range s.agents {
+		if s.streams[agent.Name] != nil || now.Sub(agent.LastSeen) <= s.cfg.Grace {
+			kept = append(kept, agent)
+			continue
+		}
+		s.forgetLocked(agent.Name)
+	}
+	s.agents = kept
+}
+
+func (s *Server) forgetLocked(name string) {
+	for token, owner := range s.tokens {
+		if owner == name {
+			delete(s.tokens, token)
+		}
+	}
+	for id, waiting := range s.pending {
+		if waiting.agent == name {
+			delete(s.pending, id)
+		}
+	}
+	delete(s.attach, name)
 }
 
 func bearer(r *http.Request) string {
@@ -165,6 +199,7 @@ func (s *Server) agentFor(r *http.Request) (string, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.expireLocked()
 	name, ok := s.tokens[token]
 	if !ok {
 		return "", false
@@ -216,6 +251,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.expireLocked()
 	name := body.Name
 	if body.Seed != "" {
 		name = s.newHandle(body.Seed)
@@ -238,7 +274,6 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	token := s.cfg.NewToken()
 	s.tokens[token] = name
-	s.saveLocked()
 	write(w, http.StatusOK, model.RegisterResponse{Name: name, Token: token})
 }
 
@@ -260,14 +295,22 @@ func (s *Server) newHandle(seed string) string {
 	}
 }
 
-func (s *Server) listed(now time.Time) []model.Agent {
+func (s *Server) connectedLocked() []model.Agent {
 	out := []model.Agent{}
 	for _, a := range s.agents {
-		if s.streams[a.Name] != nil || now.Sub(a.LastSeen) <= s.cfg.DisconnectedRetention {
+		if s.streams[a.Name] != nil {
 			out = append(out, a)
 		}
 	}
 	return out
+}
+
+func (s *Server) resolveLocked(query string) (model.Agent, []model.Agent) {
+	match, candidates := s.reg.Resolve(s.agents, s.connectedLocked(), query)
+	if match.Name == "" && len(candidates) == 0 {
+		return s.reg.Resolve(s.agents, s.agents, query)
+	}
+	return match, candidates
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
@@ -281,8 +324,9 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
+	s.expireLocked()
 	if body.To != model.Broadcast {
-		match, candidates := s.reg.Resolve(s.agents, s.listed(s.cfg.Now()), body.To)
+		match, candidates := s.resolveLocked(body.To)
 		if len(candidates) > 1 {
 			names := make([]string, len(candidates))
 			for i, each := range candidates {
@@ -543,7 +587,8 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	listed := s.listed(s.cfg.Now())
+	s.expireLocked()
+	listed := append([]model.Agent{}, s.agents...)
 	connected := map[string]bool{}
 	for name := range s.streams {
 		connected[name] = true

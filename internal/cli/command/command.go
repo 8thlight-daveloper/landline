@@ -167,6 +167,16 @@ func connect(as string, env Env) (*client.Client, error) {
 	return client.New(s.URL, s.Token), nil
 }
 
+const forgottenAgent = "the hub does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
+
+func forgotten(err error) error {
+	var status *client.StatusError
+	if errors.As(err, &status) && status.Status == 401 {
+		return errors.New(forgottenAgent)
+	}
+	return err
+}
+
 func agents(args []string, env Env) error {
 	set := flags("agents", env)
 	as := set.String("as", env.Getenv("LANDLINE_AS"), "your agent name")
@@ -179,7 +189,7 @@ func agents(args []string, env Env) error {
 	}
 	list, err := c.Agents()
 	if err != nil {
-		return err
+		return forgotten(err)
 	}
 	for _, a := range list {
 		state := "disconnected"
@@ -219,7 +229,7 @@ func send(args []string, env Env) error {
 	}
 	out, err := c.Send(model.SendBody{To: *to, Thread: *thread, Kind: model.Kind(*kind), Body: body, InReplyTo: *reply})
 	if err != nil {
-		return err
+		return forgotten(err)
 	}
 	fmt.Fprintf(env.Stdout, "sent %s (seq %d) to %s", printable(out.ID), out.Seq, printable(strings.Join(out.Recipients, ", ")))
 	fmt.Fprintln(env.Stdout)

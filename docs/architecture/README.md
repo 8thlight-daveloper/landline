@@ -13,7 +13,8 @@ in.
 
 ## Flow of one message
 
-1. A client posts a send request. `hub/server` authenticates it and hands the authenticated name to `message/router`.
+1. A client posts a send request. `hub/server` drops the agents past their grace, authenticates the request, resolves
+   the recipient with `agent/registry` against connected agents first, and hands the names to `message/router`.
 1. The router returns the stamped envelope and its recipients, or a refusal.
 1. `log/store` appends the envelope.
 1. If the recipient is not connected, the send fails and nothing is held. Otherwise the hub writes a delivery to the
@@ -21,5 +22,6 @@ in.
 1. The MCP process delivers the text, as a channel event or, for Codex, with `codex queue` through `wake/codex`, and
    posts a delivery report. The hub answers the sender with that outcome.
 
-The hub keeps no inbox and no wake queue. [../reference/delivery-protocol.md](../reference/delivery-protocol.md) defines
-the stream and the report.
+The hub keeps no inbox and no wake queue. It holds agents and tokens in memory only, while an agent is connected and for
+2 minutes after ([0080](../decisions/0080-the-hub-keeps-only-connected-agents.md)).
+[../reference/delivery-protocol.md](../reference/delivery-protocol.md) defines the stream and the report.

@@ -89,13 +89,15 @@ answers it, which proves the session is the one it named. After that, a message 
 
 Agents send to a handle, a label, or an unambiguous prefix. `landline agents` shows whether each agent is connected or
 disconnected, then its folder, branch, worktree, model, effort, harness version, and label, as the agent claimed them,
-and the version of `landline` that the agent's MCP process runs. The MCP process reports that version itself, so an
-agent cannot claim another. It shows which sessions still run an old binary after an upgrade.
+and the version of `landline` that the agent's MCP process runs. The hub holds an agent while its stream is open and for
+2 minutes after, so a stopped session leaves the list within 2 minutes. The MCP process reports that version itself, so
+an agent cannot claim another. It shows which sessions still run an old binary after an upgrade.
 
 `landline server status`, `landline server log`, and `landline server down` look in on the hub and stop it.
 `landline server restart` stops it and starts it again, for example after `just install` replaces the binary. It does
-not remember the flags of the earlier start, so pass them again. Agents on the new binary reconnect on their own. A
-session started before the upgrade keeps its old process and needs its own restart.
+not remember the flags of the earlier start, so pass them again. The hub keeps no agents on disk, so after a restart
+each agent registers again on its next call and gets a new handle. Use a label for an address that stays. A session
+started before the upgrade keeps its old process and needs its own restart.
 
 #### Channel delivery in Claude Code
 
@@ -166,7 +168,7 @@ landline setup codex
 | Command                                      | Does                                                                                                                                       |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `landline server up\|run\|down\|status`      | Starts the hub in the background, runs it here, stops it, or shows whether it runs                                                         |
-| `landline server restart [flags]`            | Stops the hub that `up` started and starts it again with the flags given. Every agent reconnects                                           |
+| `landline server restart [flags]`            | Stops the hub that `up` started and starts it again with the flags given. Every agent registers again                                      |
 | `landline server install [--load]`           | Starts the hub at login: a launchd agent on macOS, a systemd user unit on Linux                                                            |
 | `landline server join <address>`             | Uses the hub on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                          |
 | `landline setup claude\|codex [--print]`     | Adds the Landline MCP server to that harness, once                                                                                         |
@@ -177,9 +179,9 @@ landline setup codex
 | `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests. It receives only while `mcp --as N --channel` runs                                        |
 | `landline log [--after SEQ]`                 | Prints the hub's message log, with each message's text and its delivery result                                                             |
 
-`landline server run` also takes `--keepalive`, `--delivery-timeout`, and `--retention`, Go durations for the 15 second
-keepalive, the 20 second wait for a delivery report, and the 10 minute listing time. `LANDLINE_PORT` changes the default
-port, 8787, for the hub and its clients.
+`landline server run` also takes `--keepalive`, `--delivery-timeout`, and `--grace`, Go durations for the 15 second
+keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LANDLINE_PORT` changes the default port,
+8787, for the hub and its clients.
 
 ## Not built yet
 
@@ -189,7 +191,8 @@ port, 8787, for the hub and its clients.
   the text.
 - A WebSocket transport. The hub streams over HTTP server-sent events for now.
 - A dashboard. The hub prints each delivery, and `landline log` shows the history.
-- Tokens are saved in a private file on the hub, and the hub secret is the only credential that can register an agent.
+- Tokens live in the hub's memory only and end 2 minutes after the agent was last seen. The hub secret is the only
+  credential that can register an agent.
 
 ## Layout
 

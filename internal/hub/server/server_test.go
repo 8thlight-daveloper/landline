@@ -338,7 +338,7 @@ func TestTheSecretMinimumIsSixteenCharactersExactly(t *testing.T) {
 func TestTheDefaultTimingsAreTheDocumentedOnes(t *testing.T) {
 	t.Parallel()
 	h := start(t)
-	if h.hub.cfg.KeepaliveInterval != 15*time.Second || h.hub.cfg.DeliveryTimeout != 20*time.Second || h.hub.cfg.DisconnectedRetention != 10*time.Minute {
+	if h.hub.cfg.KeepaliveInterval != 15*time.Second || h.hub.cfg.DeliveryTimeout != 20*time.Second || h.hub.cfg.Grace != 2*time.Minute {
 		t.Fatalf("%+v", h.hub.cfg)
 	}
 }
@@ -528,12 +528,13 @@ func TestTheLogRecordsTheEnvelopeEvenWhenDeliveryFails(t *testing.T) {
 	}
 }
 
-func TestClosingTheStreamMarksDisconnectedAndKeepsTheAgentListedUntilTheRetentionPasses(t *testing.T) {
+func TestClosingTheStreamMarksDisconnectedAndKeepsTheAgentListedUntilTheGracePasses(t *testing.T) {
 	t.Parallel()
 	h := start(t)
 	alpha := h.register("alpha")
 	bravo := h.register("bravo")
 	stream := h.openStream(bravo)
+	h.openStream(alpha)
 	h.advance(3 * time.Minute)
 	h.mu.Lock()
 	closedAt := h.now
@@ -547,16 +548,18 @@ func TestClosingTheStreamMarksDisconnectedAndKeepsTheAgentListedUntilTheRetentio
 	if !listed || found.Connected || !found.LastSeen.Equal(closedAt) {
 		t.Fatalf("%+v listed %v, want last seen %v", found, listed, closedAt)
 	}
-	h.advance(9 * time.Minute)
-	if _, listed := h.agent(alpha, "bravo"); !listed {
-		t.Fatal("dropped before the retention passed")
-	}
 	h.advance(2 * time.Minute)
+	if _, listed := h.agent(alpha, "bravo"); !listed {
+		t.Fatal("dropped at exactly the grace")
+	}
+	h.advance(time.Nanosecond)
 	if _, listed := h.agent(alpha, "bravo"); listed {
-		t.Fatal("still listed after the retention passed")
+		t.Fatal("still listed after the grace passed")
+	}
+	if status, _ := h.call("GET", "/v1/stream", bravo, nil); status != 401 {
+		t.Fatalf("the token of a dropped agent answered %d", status)
 	}
 }
-
 func TestAnAgentThatClosedItsStreamIsStillAddressableAndAnswers409(t *testing.T) {
 	t.Parallel()
 	h := start(t)
@@ -803,105 +806,6 @@ func TestTheRemovedRoutesAreGone(t *testing.T) {
 	}
 }
 
-func TestAStateWithTokensSurvivesAHubRestart(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	open := func() (*httptest.Server, func()) {
-		log, err := store.Open(filepath.Join(dir, "log.jsonl"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		hub, err := New(Config{Secret: secret, StatePath: filepath.Join(dir, "state.json")}, log)
-		if err != nil {
-			t.Fatal(err)
-		}
-		srv := httptest.NewServer(hub.Handler())
-		return srv, func() { srv.Close(); log.Close() }
-	}
-	call := func(srv *httptest.Server, method, path, token string, body any) (int, []byte) {
-		raw, _ := json.Marshal(body)
-		req, _ := http.NewRequest(method, srv.URL+path, bytes.NewReader(raw))
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		var buf bytes.Buffer
-		buf.ReadFrom(resp.Body)
-		return resp.StatusCode, buf.Bytes()
-	}
-	first, stop := open()
-	var alpha model.RegisterResponse
-	_, raw := call(first, "POST", "/v1/register", secret, model.RegisterRequest{Name: "alpha", Harness: "x"})
-	json.Unmarshal(raw, &alpha)
-	call(first, "POST", "/v1/register", secret, model.RegisterRequest{Name: "bravo", Harness: "x"})
-	stop()
-
-	second, stop := open()
-	defer stop()
-	status, raw := call(second, "GET", "/v1/agents", alpha.Token, nil)
-	var listed []model.AgentInfo
-	json.Unmarshal(raw, &listed)
-	if status != 200 || len(listed) != 2 || listed[0].Connected || listed[1].Connected {
-		t.Fatalf("after restart: %d %s", status, raw)
-	}
-	if status, _ := call(second, "POST", "/v1/send", alpha.Token, model.SendBody{To: "bravo", Body: "three"}); status != 409 {
-		t.Fatalf("the old token stopped working or the agent looked connected: %d", status)
-	}
-}
-
-func TestAStateFileThatIsNotReadableIsReportedAndIgnored(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-	os.WriteFile(path, []byte("not json"), 0o600)
-	log, _ := store.Open(filepath.Join(dir, "log.jsonl"))
-	defer log.Close()
-	var notes []string
-	if _, err := New(Config{Secret: secret, StatePath: path, Notify: func(s string) { notes = append(notes, s) }}, log); err != nil {
-		t.Fatal(err)
-	}
-	if len(notes) != 1 || !strings.Contains(notes[0], "register again") {
-		t.Fatalf("notes %v", notes)
-	}
-}
-
-func TestAStateFileThatCannotBeReadIsReported(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root can read any file")
-	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-	os.WriteFile(path, []byte("{}"), 0o000)
-	log, _ := store.Open(filepath.Join(dir, "log.jsonl"))
-	defer log.Close()
-	var notes []string
-	if _, err := New(Config{Secret: secret, StatePath: path, Notify: func(s string) { notes = append(notes, s) }}, log); err != nil {
-		t.Fatal(err)
-	}
-	if len(notes) != 1 || !strings.Contains(notes[0], "register again") {
-		t.Fatalf("notes %v", notes)
-	}
-}
-
-func TestTheStateFileKeysAreSnakeCaseAndHoldNothingAboutWakes(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	statePath := filepath.Join(dir, "state.json")
-	h := startWith(t, func(c *Config) { c.StatePath = statePath })
-	h.register("alpha")
-	raw, _ := os.ReadFile(statePath)
-	for _, key := range []string{`"agents"`, `"tokens"`, `"name":"alpha"`, `"last_seen"`} {
-		if !strings.Contains(string(raw), key) {
-			t.Errorf("the state lacks %s: %s", key, raw)
-		}
-	}
-	if strings.Contains(string(raw), "cursors") {
-		t.Errorf("the state keeps read positions: %s", raw)
-	}
-}
-
 func TestASeedGetsAFreshHandleEveryTimeAndNeverAnOldOne(t *testing.T) {
 	t.Parallel()
 	h := start(t)
@@ -977,7 +881,8 @@ func TestSendResolvesALabelAPrefixAndAnExactHandleAndRefusesAnAmbiguousName(t *t
 	if _, result = h.deliveredSend(sender, tutorStream, tutorToken, model.SendBody{To: tutorOne, Body: "exact"}); result.status != 200 {
 		t.Fatalf("exact: %d", result.status)
 	}
-	h.registerSeed("repo-tutor-two", map[string]string{"label": "tutor"})
+	_, secondToken := h.registerSeed("repo-tutor-two", map[string]string{"label": "tutor"})
+	h.openStream(secondToken)
 	status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: "tutor", Body: "ambiguous"})
 	if status != 409 || !strings.Contains(string(raw), tutorOne) || !strings.Contains(string(raw), "Use a handle") {
 		t.Fatalf("ambiguous: %d %s", status, raw)
@@ -1083,8 +988,7 @@ func TestACodexChallengeGoesDownTheCallersOwnStreamAndFinishesOnlyWithThatCode(t
 
 func TestAProvedAttachRecordsNothingAboutTheThread(t *testing.T) {
 	t.Parallel()
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	h := startWith(t, func(c *Config) { c.StatePath = statePath })
+	h := start(t)
 	handle, token := h.registerSeed("tutor", nil)
 	stream := h.openStream(token)
 	h.startChallenge(token, stream)
@@ -1097,9 +1001,8 @@ func TestAProvedAttachRecordsNothingAboutTheThread(t *testing.T) {
 	if !found {
 		t.Fatalf("%+v", agent)
 	}
-	raw, _ := os.ReadFile(statePath)
-	if strings.Contains(string(raw), threadID) {
-		t.Fatalf("the thread was saved: %s", raw)
+	if raw, _ := json.Marshal(agent); strings.Contains(string(raw), threadID) {
+		t.Fatalf("the thread was recorded: %s", raw)
 	}
 }
 
@@ -1568,5 +1471,182 @@ func TestAFailureToRecordTheResultIsReportedAndTheSendAnswerStandsUnchanged(t *t
 	}
 	if notes := h.notesCopy(); len(notes) != 1 || !strings.Contains(notes[0], "disk full") {
 		t.Fatalf("%q", notes)
+	}
+}
+
+func (h *harness) waitDisconnected(viewer, name string) {
+	h.t.Helper()
+	h.waitUntil(name+" to be disconnected", func() bool {
+		found, listed := h.agent(viewer, name)
+		return listed && !found.Connected
+	})
+}
+
+func TestAnAgentWithAnOpenStreamIsKeptHoweverLongItStaysQuiet(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	bravo := h.register("bravo")
+	h.openStream(alpha)
+	h.openStream(bravo)
+	h.advance(time.Hour)
+	found, listed := h.agent(alpha, "bravo")
+	if !listed || !found.Connected {
+		t.Fatalf("%+v %v", found, listed)
+	}
+}
+
+func TestAnAgentThatReconnectsWithinTheGraceKeepsItsHandleAndToken(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	handle, token := h.registerSeed("tutor", nil)
+	h.openStream(alpha)
+	h.openStream(token).cancel()
+	h.waitDisconnected(alpha, handle)
+	h.advance(2 * time.Minute)
+	again := h.openStream(token)
+	if again.status != 200 {
+		t.Fatalf("the stream answered %d", again.status)
+	}
+	h.waitUntil(handle+" to be connected", func() bool {
+		found, listed := h.agent(alpha, handle)
+		return listed && found.Connected
+	})
+}
+
+func TestAnAgentPastTheGraceIsDroppedItsTokenAnswers401AndItsHandleMayBeIssuedAgain(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	h.openStream(alpha)
+	bravo := h.register("bravo")
+	h.openStream(bravo).cancel()
+	h.waitDisconnected(alpha, "bravo")
+	h.advance(2*time.Minute + time.Nanosecond)
+	if _, listed := h.agent(alpha, "bravo"); listed {
+		t.Fatal("bravo is still listed")
+	}
+	if status, _ := h.call("GET", "/v1/stream", bravo, nil); status != 401 {
+		t.Fatalf("the token answered %d", status)
+	}
+	if status, _ := h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "x"}); status != 404 {
+		t.Fatalf("a send to a dropped agent answered %d", status)
+	}
+	if status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: "bravo", Harness: "codex"}); status != 200 {
+		t.Fatalf("the handle was not free: %d %s", status, raw)
+	}
+}
+
+func TestADroppedAgentIsDroppedAtTheFirstRequestOfAnyKind(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	alpha := h.register("alpha")
+	h.openStream(alpha)
+	h.register("bravo")
+	h.advance(2*time.Minute + time.Nanosecond)
+	h.call("GET", "/v1/log", secret, nil)
+	h.hub.mu.Lock()
+	_, kept := h.hub.reg.Find(h.hub.agents, "bravo")
+	tokens := len(h.hub.tokens)
+	h.hub.mu.Unlock()
+	if kept || tokens != 1 {
+		t.Fatalf("bravo kept %v, tokens %d", kept, tokens)
+	}
+}
+
+func TestAHandRegisteredAgentIsKeptByItsRequestsAndDroppedAfterTheGraceWithNone(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	viewer := h.register("viewer")
+	h.openStream(viewer)
+	script := h.register("script")
+	for i := 0; i < 4; i++ {
+		h.advance(time.Minute + 30*time.Second)
+		if status, _ := h.call("GET", "/v1/agents", script, nil); status != 200 {
+			t.Fatalf("request %d answered %d", i, status)
+		}
+	}
+	if _, listed := h.agent(viewer, "script"); !listed {
+		t.Fatal("dropped while it kept making requests")
+	}
+	h.advance(2*time.Minute + time.Nanosecond)
+	if _, listed := h.agent(viewer, "script"); listed {
+		t.Fatal("still listed after the grace with no request")
+	}
+	if status, _ := h.call("GET", "/v1/agents", script, nil); status != 401 {
+		t.Fatalf("the token answered %d", status)
+	}
+}
+
+func TestALabelResolvesToTheConnectedAgentWhenAnOlderDisconnectedAgentInItsGraceSharesIt(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	sender := h.register("sender")
+	h.openStream(sender)
+	oldHandle, oldToken := h.registerSeed("old", map[string]string{"label": "tutor"})
+	h.openStream(oldToken).cancel()
+	h.waitDisconnected(sender, oldHandle)
+	newHandle, newToken := h.registerSeed("new", map[string]string{"label": "tutor"})
+	stream := h.openStream(newToken)
+	delivery, result := h.deliveredSend(sender, stream, newToken, model.SendBody{To: "tutor", Body: "hello"})
+	if result.status != 200 || delivery.Message.To != newHandle {
+		t.Fatalf("%d %s %+v", result.status, result.raw, delivery.Message)
+	}
+	if _, listed := h.agent(sender, oldHandle); !listed {
+		t.Fatal("the old agent should still be listed in its grace")
+	}
+}
+
+func TestALabelOrPrefixThatOnlyADisconnectedAgentMatchesAnswers409NotConnected(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	sender := h.register("sender")
+	h.openStream(sender)
+	oldHandle, oldToken := h.registerSeed("old", map[string]string{"label": "tutor"})
+	h.openStream(oldToken).cancel()
+	h.waitDisconnected(sender, oldHandle)
+	for _, to := range []string{"tutor", "tut", oldHandle} {
+		if status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: to, Body: "x"}); status != 409 || !strings.Contains(string(raw), "not connected") {
+			t.Fatalf("%s: %d %s", to, status, raw)
+		}
+	}
+	if status, _ := h.call("POST", "/v1/send", sender, model.SendBody{To: "nobody", Body: "x"}); status != 404 {
+		t.Fatalf("unknown: %d", status)
+	}
+}
+
+func TestAHandleIsNotIssuedWhileAPresentAgentHoldsItAndIsIssuedOnceItIsGone(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	suffixes := []string{"aaa", "aaa", "bbb", "aaa"}
+	h := startWith(t, func(c *Config) {
+		c.NewSuffix = func() string {
+			mu.Lock()
+			defer mu.Unlock()
+			next := suffixes[0]
+			suffixes = suffixes[1:]
+			return next
+		}
+	})
+	first, firstToken := h.registerSeed("tutor", nil)
+	if first != "tutor-aaa" {
+		t.Fatal(first)
+	}
+	h.openStream(firstToken).cancel()
+	h.waitUntil("the stream to close", func() bool {
+		h.hub.mu.Lock()
+		defer h.hub.mu.Unlock()
+		return h.hub.streams[first] == nil
+	})
+	second, secondToken := h.registerSeed("tutor", nil)
+	if second != "tutor-bbb" {
+		t.Fatalf("a handle held by an agent in its grace was issued again: %s", second)
+	}
+	h.advance(2*time.Minute + time.Nanosecond)
+	h.call("GET", "/v1/agents", secondToken, nil)
+	third, _ := h.registerSeed("tutor", nil)
+	if third != "tutor-aaa" {
+		t.Fatalf("a forgotten handle was not free: %s", third)
 	}
 }

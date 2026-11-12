@@ -96,7 +96,7 @@ func notifyToStderr(line string) {
 }
 
 func runHub(args []string, env command.Env, home, host string) int {
-	values, err := flagValues(args, "--addr", "--log", "--host", "--state", "--keepalive", "--delivery-timeout", "--retention")
+	values, err := flagValues(args, "--addr", "--log", "--host", "--keepalive", "--delivery-timeout", "--grace")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline hub:", err)
 		return 2
@@ -113,7 +113,6 @@ func runHub(args []string, env command.Env, home, host string) int {
 		return 2
 	}
 	logPath := or(values["--log"], filepath.Join(home, ".local", "share", "landline", "log.jsonl"))
-	statePath := or(values["--state"], filepath.Join(filepath.Dir(logPath), "state.json"))
 	host = or(values["--host"], host)
 	warnIfExposed(addr)
 	log, err := store.Open(logPath)
@@ -131,8 +130,8 @@ func runHub(args []string, env command.Env, home, host string) int {
 		return 1
 	}
 	hub, err := server.New(server.Config{
-		Secret: secret, Host: host, StatePath: statePath,
-		KeepaliveInterval: timing.keepalive, DeliveryTimeout: timing.deliveryTimeout, DisconnectedRetention: timing.retention,
+		Secret: secret, Host: host,
+		KeepaliveInterval: timing.keepalive, DeliveryTimeout: timing.deliveryTimeout, Grace: timing.grace,
 		Notify: notifyToStderr,
 	}, log)
 	if err != nil {
@@ -155,12 +154,12 @@ func runHub(args []string, env command.Env, home, host string) int {
 }
 
 type hubTiming struct {
-	keepalive, deliveryTimeout, retention time.Duration
+	keepalive, deliveryTimeout, grace time.Duration
 }
 
 func timingFrom(values map[string]string) (hubTiming, error) {
 	var out hubTiming
-	for flag, target := range map[string]*time.Duration{"--keepalive": &out.keepalive, "--delivery-timeout": &out.deliveryTimeout, "--retention": &out.retention} {
+	for flag, target := range map[string]*time.Duration{"--keepalive": &out.keepalive, "--delivery-timeout": &out.deliveryTimeout, "--grace": &out.grace} {
 		raw, given := values[flag]
 		if !given {
 			continue
