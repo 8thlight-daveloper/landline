@@ -1,13 +1,16 @@
 package http
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	nethttp "net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/model"
@@ -25,14 +28,17 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("%s (%d)", e.Message, e.Status)
 }
 
+const maxStreamLine = 2 << 20
+
 type Client struct {
-	URL   string
-	Token string
-	http  *nethttp.Client
+	URL       string
+	Token     string
+	http      *nethttp.Client
+	streaming *nethttp.Client
 }
 
 func New(url, token string) *Client {
-	return &Client{URL: url, Token: token, http: &nethttp.Client{Timeout: 90 * time.Second}}
+	return &Client{URL: url, Token: token, http: &nethttp.Client{Timeout: 90 * time.Second}, streaming: &nethttp.Client{}}
 }
 
 func (c *Client) do(method, path string, in, out any) error {
@@ -86,35 +92,6 @@ func (c *Client) Send(body model.SendBody) (model.SendResponse, error) {
 	return out, c.do("POST", "/v1/send", body, &out)
 }
 
-func (c *Client) Inbox(waitSeconds int, threads string, after int64) (model.InboxResponse, error) {
-	q := url.Values{}
-	if waitSeconds > 0 {
-		q.Set("wait", strconv.Itoa(waitSeconds))
-	}
-	if threads != "" {
-		q.Set("thread", threads)
-		q.Set("after", strconv.FormatInt(after, 10))
-	}
-	var out model.InboxResponse
-	return out, c.do("GET", "/v1/inbox?"+q.Encode(), nil, &out)
-}
-
-func (c *Client) Head() (int64, error) {
-	var out model.InboxResponse
-	if err := c.do("GET", "/v1/inbox?peek=1", nil, &out); err != nil {
-		return 0, err
-	}
-	return out.Head, nil
-}
-
-func (c *Client) Unread() (int, error) {
-	var out model.InboxResponse
-	if err := c.do("GET", "/v1/inbox?peek=1", nil, &out); err != nil {
-		return 0, err
-	}
-	return out.Remaining, nil
-}
-
 func (c *Client) Agents() ([]model.AgentInfo, error) {
 	var out []model.AgentInfo
 	return out, c.do("GET", "/v1/agents", nil, &out)
@@ -125,16 +102,59 @@ func (c *Client) Log(after int64) ([]model.Envelope, error) {
 	return out, c.do("GET", "/v1/log?after="+strconv.FormatInt(after, 10), nil, &out)
 }
 
-func (c *Client) Wakes(host string, waitSeconds int) ([]model.WakeJob, error) {
-	q := url.Values{}
-	q.Set("host", host)
-	if waitSeconds > 0 {
-		q.Set("wait", strconv.Itoa(waitSeconds))
-	}
-	var out []model.WakeJob
-	return out, c.do("GET", "/v1/wakes?"+q.Encode(), nil, &out)
+func (c *Client) Report(id string, report model.DeliveryReport) error {
+	return c.do("POST", "/v1/deliveries/"+url.PathEscape(id)+"/report", report, nil)
 }
 
-func (c *Client) AckWake(id string, ack model.WakeAck) error {
-	return c.do("POST", "/v1/wakes/"+url.PathEscape(id)+"/ack", ack, nil)
+func (c *Client) Stream(ctx context.Context, handle func(model.Delivery)) error {
+	req, err := nethttp.NewRequestWithContext(ctx, "GET", c.URL+"/v1/stream", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := c.streaming.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		var e model.ErrorResponse
+		if json.Unmarshal(data, &e) == nil && e.Error != "" {
+			return &StatusError{Status: resp.StatusCode, Message: e.Error}
+		}
+		return &StatusError{Status: resp.StatusCode}
+	}
+	stop := context.AfterFunc(ctx, func() { resp.Body.Close() })
+	defer stop()
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64<<10), maxStreamLine)
+	var event, data string
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case line == "":
+			if event == "delivery" && data != "" {
+				var delivery model.Delivery
+				if err := json.Unmarshal([]byte(data), &delivery); err != nil {
+					return fmt.Errorf("the hub sent a delivery that is not valid JSON: %w", err)
+				}
+				handle(delivery)
+			}
+			event, data = "", ""
+		case strings.HasPrefix(line, ":"):
+		case strings.HasPrefix(line, "event:"):
+			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			data = strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
+		}
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return scanner.Err()
 }

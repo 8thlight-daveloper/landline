@@ -1,7 +1,10 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	nethttp "net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,24 +51,6 @@ func TestAHubErrorSurfacesItsMessageAndStatus(t *testing.T) {
 	}
 }
 
-func TestInboxSendsWaitAndThreadParameters(t *testing.T) {
-	t.Parallel()
-	var query string
-	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		query = r.URL.RawQuery
-		json.NewEncoder(w).Encode(model.InboxResponse{Messages: []model.WireEnvelope{{ID: "m-1"}}})
-	})
-	out, err := c.Inbox(25, "deploy,main", 3)
-	if err != nil || len(out.Messages) != 1 {
-		t.Fatalf("%+v %v", out, err)
-	}
-	for _, want := range []string{"wait=25", "thread=deploy%2Cmain", "after=3"} {
-		if !strings.Contains(query, want) {
-			t.Errorf("query %q lacks %q", query, want)
-		}
-	}
-}
-
 func TestAnUnreachableHubIsAnError(t *testing.T) {
 	t.Parallel()
 	c := New("http://127.0.0.1:1", "tok")
@@ -74,69 +59,197 @@ func TestAnUnreachableHubIsAnError(t *testing.T) {
 	}
 }
 
-func TestWakesAsksForTheHostAndWait(t *testing.T) {
+func writeEvent(w nethttp.ResponseWriter, delivery model.Delivery) {
+	raw, _ := json.Marshal(delivery)
+	fmt.Fprintf(w, "event: delivery\ndata: %s\n\n", raw)
+	w.(nethttp.Flusher).Flush()
+}
+
+func collect(t *testing.T, c *Client) ([]model.Delivery, error) {
+	t.Helper()
+	var got []model.Delivery
+	err := c.Stream(context.Background(), func(d model.Delivery) { got = append(got, d) })
+	return got, err
+}
+
+func TestAStreamDeliversEventsInOrderWithTheirExactFieldsAndEndsCleanly(t *testing.T) {
 	t.Parallel()
-	var query, path string
+	first := model.Delivery{ID: "d-1", Kind: model.DeliveryMessage, Text: "[landline] hi", Message: &model.WireEnvelope{ID: "m-1", Body: "hi", Text: "[landline] hi"}}
+	second := model.Delivery{ID: "d-2", Kind: model.DeliveryChallenge, Text: "code 42", Target: "thread-alpha"}
 	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		query, path = r.URL.RawQuery, r.URL.Path
-		json.NewEncoder(w).Encode([]model.WakeJob{{ID: "j1", Agent: "bravo", Kind: "codex", Target: "t", Text: "[landline] x"}})
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, ": keepalive\n\n")
+		writeEvent(w, first)
+		fmt.Fprint(w, "\n\n: keepalive\n\n")
+		writeEvent(w, second)
+		fmt.Fprint(w, ": keepalive\n\n")
 	})
-	out, err := c.Wakes("linux", 30)
-	if err != nil || len(out) != 1 || out[0].ID != "j1" || out[0].Target != "t" {
-		t.Fatalf("%+v %v", out, err)
+	got, err := collect(t, c)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
 	}
-	if path != "/v1/wakes" || !strings.Contains(query, "host=linux") || !strings.Contains(query, "wait=30") {
-		t.Fatalf("path %q query %q", path, query)
+	if got[0].ID != "d-1" || got[0].Kind != model.DeliveryMessage || got[0].Text != "[landline] hi" || got[0].Message == nil || got[0].Message.ID != "m-1" || got[0].Message.Body != "hi" {
+		t.Fatalf("first %+v", got[0])
+	}
+	if got[1].ID != "d-2" || got[1].Kind != model.DeliveryChallenge || got[1].Target != "thread-alpha" || got[1].Message != nil {
+		t.Fatalf("second %+v", got[1])
 	}
 }
 
-func TestAckWakePostsTheAckToTheJobPath(t *testing.T) {
+func TestAStreamRequestIsAGetToTheStreamPathWithTheBearerToken(t *testing.T) {
 	t.Parallel()
-	var got model.WakeAck
 	var method, path, auth string
 	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
 		method, path, auth = r.Method, r.URL.Path, r.Header.Get("Authorization")
-		json.NewDecoder(r.Body).Decode(&got)
-		w.Write([]byte("{}"))
 	})
-	if err := c.AckWake("m-a-bravo", model.WakeAck{OK: false, Error: "no thread"}); err != nil {
+	if _, err := collect(t, c); err != nil {
 		t.Fatal(err)
 	}
-	if method != "POST" || path != "/v1/wakes/m-a-bravo/ack" || auth != "Bearer tok" || got.OK || got.Error != "no thread" {
-		t.Fatalf("%s %s %q %+v", method, path, auth, got)
+	if method != "GET" || path != "/v1/stream" || auth != "Bearer tok" {
+		t.Fatalf("%s %s %q", method, path, auth)
 	}
 }
 
-func TestAckWakeSurfacesAnUnknownJob(t *testing.T) {
+func TestAStreamRefusalBecomesAStatusErrorWithItsMessage(t *testing.T) {
 	t.Parallel()
-	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		w.WriteHeader(404)
-		json.NewEncoder(w).Encode(model.ErrorResponse{Error: "no such wake"})
-	})
-	if err := c.AckWake("ghost", model.WakeAck{OK: true}); err == nil || !strings.Contains(err.Error(), "404") {
+	for status, message := range map[int]string{401: "bad token", 409: "not connected"} {
+		c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+			w.WriteHeader(status)
+			json.NewEncoder(w).Encode(model.ErrorResponse{Error: message})
+		})
+		_, err := collect(t, c)
+		var statusErr *StatusError
+		if !errors.As(err, &statusErr) || statusErr.Status != status || statusErr.Message != message {
+			t.Fatalf("status %d got %v", status, err)
+		}
+	}
+}
+
+func TestAStreamRefusalWithoutAJSONBodyStillCarriesTheStatus(t *testing.T) {
+	t.Parallel()
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) { w.WriteHeader(500) })
+	_, err := collect(t, c)
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) || statusErr.Status != 500 {
 		t.Fatalf("got %v", err)
 	}
 }
 
-func TestAnInboxPageOfSeveralMegabytesIsReadInFull(t *testing.T) {
+func TestCancellingTheContextReturnsPromptlyWithCanceledAndClosesTheConnection(t *testing.T) {
 	t.Parallel()
-	body := strings.Repeat("a", 60000)
-	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		page := model.InboxResponse{}
-		for i := 0; i < 40; i++ {
-			page.Messages = append(page.Messages, model.WireEnvelope{Body: body, Text: body})
+	opened := make(chan struct{})
+	closed := make(chan struct{})
+	s := httptest.NewServer(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, ": keepalive\n\n")
+		w.(nethttp.Flusher).Flush()
+		close(opened)
+		<-r.Context().Done()
+		close(closed)
+	}))
+	t.Cleanup(s.Close)
+	c := New(s.URL, "tok")
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- c.Stream(ctx, func(model.Delivery) {}) }()
+	<-opened
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v", err)
 		}
-		json.NewEncoder(w).Encode(page)
-	})
-	out, err := c.Inbox(0, "", 0)
-	if err != nil || len(out.Messages) != 40 {
-		t.Fatalf("%d messages, %v", len(out.Messages), err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream did not return after cancel")
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the server never saw the connection close")
 	}
 }
 
-func TestTheClientWaitsLongerThanAFullLongPoll(t *testing.T) {
+func TestACancelledContextBeforeConnectingReturnsCanceled(t *testing.T) {
 	t.Parallel()
-	if New("http://x", "t").http.Timeout <= 60*time.Second {
-		t.Fatalf("timeout %v is not longer than the 60 second poll limit", New("http://x", "t").http.Timeout)
+	c := New("http://127.0.0.1:1", "tok")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.Stream(ctx, func(model.Delivery) {}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBadDeliveryJSONIsAnErrorAndStopsTheStream(t *testing.T) {
+	t.Parallel()
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		fmt.Fprint(w, "event: delivery\ndata: {not json\n\n")
+	})
+	got, err := collect(t, c)
+	if err == nil || len(got) != 0 {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestAnEventThatIsNotADeliveryIsIgnored(t *testing.T) {
+	t.Parallel()
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		fmt.Fprint(w, "event: other\ndata: {\"id\":\"x\"}\n\n")
+	})
+	got, err := collect(t, c)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestAStreamLineOfOneMebibyteIsRead(t *testing.T) {
+	t.Parallel()
+	text := strings.Repeat("a", 1<<20)
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		writeEvent(w, model.Delivery{ID: "d-1", Kind: model.DeliveryMessage, Text: text})
+	})
+	got, err := collect(t, c)
+	if err != nil || len(got) != 1 || got[0].Text != text {
+		t.Fatalf("%d deliveries, %v", len(got), err)
+	}
+}
+
+func TestTheStreamClientHasNoOverallTimeoutWhileOtherCallsKeepNinetySeconds(t *testing.T) {
+	t.Parallel()
+	c := New("http://x", "t")
+	if c.streaming.Timeout != 0 {
+		t.Fatalf("stream timeout %v", c.streaming.Timeout)
+	}
+	if c.http.Timeout != 90*time.Second {
+		t.Fatalf("call timeout %v", c.http.Timeout)
+	}
+}
+
+func TestReportPostsTheReportToTheDeliveryPath(t *testing.T) {
+	t.Parallel()
+	var got model.DeliveryReport
+	var method, path, auth string
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		method, path, auth = r.Method, r.URL.EscapedPath(), r.Header.Get("Authorization")
+		json.NewDecoder(r.Body).Decode(&got)
+		w.Write([]byte("{}"))
+	})
+	if err := c.Report("d/1 x", model.DeliveryReport{OK: false, Error: "no thread"}); err != nil {
+		t.Fatal(err)
+	}
+	if method != "POST" || path != "/v1/deliveries/d%2F1%20x/report" || auth != "Bearer tok" || got.OK || got.Error != "no thread" {
+		t.Fatalf("%s %s %q %+v", method, path, auth, got)
+	}
+}
+
+func TestReportSurfacesAnUnknownDelivery(t *testing.T) {
+	t.Parallel()
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		w.WriteHeader(404)
+		json.NewEncoder(w).Encode(model.ErrorResponse{Error: "no such delivery"})
+	})
+	err := c.Report("ghost", model.DeliveryReport{OK: true})
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) || statusErr.Status != 404 || statusErr.Message != "no such delivery" {
+		t.Fatalf("got %v", err)
 	}
 }
