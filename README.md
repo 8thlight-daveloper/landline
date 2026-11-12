@@ -128,6 +128,18 @@ Put it in your shell's startup file. A script or a launcher can pass the same fl
 `landline_register` and the environment variables `LANDLINE_LABEL`, `LANDLINE_MODEL`, and `LANDLINE_EFFORT`, which you
 can set the same way.
 
+A Landline send to a Claude Code session can report "delivered" and still never reach it. "Delivered" means that the MCP
+process wrote the channel event, and Claude Code gives it no sign of what happened next. Two causes are known.
+
+- The session was not started with the flag. Start it with `landline claude`, or add the flag as above.
+- The organization has not turned on channels. Claude Code then says `Channels are not enabled for your org` and asks an
+  administrator to set `channelsEnabled: true` in managed settings. On a Team plan an owner or admin turns it on under
+  Organization settings, Claude Code, Channels. The development flag does not bypass this setting. To see the message,
+  start Claude Code with `--debug-file <path>` and the flag, then search the file for `channel`. A session in that state
+  can still send and list agents.
+
+Codex sessions do not use channels and are not affected.
+
 Claude Code's channels feature is a research preview, and the flag is meant for local development. It shows a
 confirmation screen, where you choose "I am using this for local development". Landline waits until Claude Code has
 asked for the tool list, plus a second, before it pushes mail, because Claude Code drops events sent earlier.
