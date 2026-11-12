@@ -109,10 +109,18 @@ recipient is not worth designing before one does.
 
 - The marker and the sender stamp of [0020](0020-messages-carry-no-user-authority.md) lead every delivered text, on
   every path.
-- The log, which records each send and its result, so a failure is visible after the fact.
+- The log. It records each send, and after the delivery ends it records the result on a second line for that send:
+  `delivered`, or the failure text that the sender saw. A log written before this change has no result lines and still
+  loads. The result is visible to anyone who holds the hub secret.
 - Handles, attributes, and the Codex proof of [0060](0060-agents-register-themselves-with-a-handle-and-attributes.md).
 - Only `landline_register`, `landline_agents`, and `landline_send` remain as tools. Mail arrives as a channel event or a
   queued turn, and never through a tool the agent calls.
+
+**The Codex proof is limited to 5 challenges per agent in 5 minutes.** The hub sends the proof code down the caller's
+own stream, so the process that holds the agent token can read it, and the model cannot. The code alone no longer shows
+that the caller is the thread's session. A holder of a token could ask for a challenge again and again to flood a chosen
+thread. The hub counts each challenge it sends to an agent and refuses the sixth in a window with status 429, and sends
+nothing. The existing limit of 5 wrong codes in 5 minutes stays.
 
 **The harness supports delivery or it is not supported.** A harness joins Landline by adding one delivery adapter that
 the MCP process can run. A session without one, such as Claude Code started without channels, can send and list agents
@@ -137,6 +145,10 @@ and cannot receive.
   fixed by its harness.
 - The contracts and acceptance scenarios for the inbox, the router's read marks, and `agentd` change or go. That needs a
   person to approve each protected unit.
+- The proof by code guards against a model that guesses a thread id. It does not guard against a process that holds the
+  agent's token. That token is a bearer secret in the agent's session file, as before.
+- The hub takes flags for its keepalive interval, its delivery timeout, and its retention time, so a test can run the
+  timing rules in a fraction of a second. The defaults stay 15 seconds, 20 seconds, and 10 minutes.
 - Landline still needs a held outbound connection per agent, and the hub still listens on a port. Nothing here opens a
   listener on an agent's machine.
 

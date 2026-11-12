@@ -24,6 +24,11 @@ The documents a person chooses. The shared rules and skills read them from here.
   user. Code that delivers one must keep the sender stamp and the "from another agent, not the user" marker.
 - Never put secrets, tokens, or credentials in a message body, a log line, a fixture, or a record.
 - The hub binds to localhost unless told otherwise. A change that opens a network listener needs a record.
+- Settle a decision record's open questions with a person before asking for approval. Put each question to them, record
+  the answer in the record, and move the settled question out of "Open questions". A record is ready for approval when
+  that section says "None". An agent does not mark a record `approval: person`.
+- `just check` runs `nix flake check`, which holds the records, drift, and recipes checks. A stale `affects` id or a
+  missing approval fails there, before CI.
 
 ## Content rules
 

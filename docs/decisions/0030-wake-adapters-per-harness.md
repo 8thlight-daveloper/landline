@@ -5,7 +5,7 @@ approval: agent
 approver: {kind: agent, harness: claude-code, session: adbd644e52614aee7}
 author: {kind: agent, harness: claude-code, session: ff162464-db6e-40df-b588-14f688bad84b}
 note: Approved by an independent agent review of commit 237c15e. The author then made the sentence changes that review listed, and the approver has not re-read them.
-affects: [wake/codex, hub/server, daemon/agentd]
+affects: [wake/codex, hub/server]
 partly-superseded-by: ['0070']
 ---
 

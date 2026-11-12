@@ -19,7 +19,7 @@ install prefix="~/.local":
     @echo "installed {{ prefix }}/bin/landline"
 
 # Everything CI runs.
-check: fmt-check lint-go lint-deps lint-acceptance test
+check: fmt-check lint-go lint-deps lint-acceptance lint-records test
 
 fmt:
     mdformat --wrap 120 {{ md_paths }}
@@ -36,6 +36,10 @@ lint-deps:
 
 lint-acceptance:
     python3 tools/acceptance-imports/check.py
+
+# Decision records, contracts, approvals, and the architecture file, through the Threnos flake checks.
+lint-records:
+    nix flake check
 
 test:
     go test -race -count=1 ./...

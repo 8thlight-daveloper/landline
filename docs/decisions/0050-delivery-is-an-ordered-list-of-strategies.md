@@ -2,7 +2,7 @@
 category: architecture
 status: proposed
 approval: unrecorded
-affects: [mcp/server, hub/server, wake/codex, daemon/agentd, cli/command]
+affects: [mcp/server, hub/server, wake/codex, cli/command]
 builds-on: ['0020', '0030', '0040']
 note: Drafted on 2026-11-11 after reading Claude Code's cross-session messaging and channels documentation. Not yet approved.
 partly-superseded-by: ['0070']

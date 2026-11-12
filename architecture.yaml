@@ -59,7 +59,7 @@ components:
     depends_on: [client/http]
   - name: mcp/server
     position: 3
-    depends_on: [wake/codex]
+    depends_on: []
 
 contracts:
   may_import: [model]
