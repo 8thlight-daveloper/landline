@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1838,4 +1839,144 @@ func TestAHandRegisteredNameShowsNoLandlineAttribute(t *testing.T) {
 	if _, present := w.agentJSON("alpha")["landline_version"]; present {
 		t.Fatal("a hand-registered name carries landline_version in /v1/agents")
 	}
+}
+
+type backgroundHub struct {
+	t    *testing.T
+	bin  string
+	home string
+	env  []string
+	addr string
+}
+
+func newBackgroundHub(t *testing.T) *backgroundHub {
+	t.Helper()
+	h := &backgroundHub{t: t, bin: build(t), home: t.TempDir(), addr: freeAddr(t)}
+	h.env = isolatedEnv(h.home)
+	t.Cleanup(func() { runIn(t, h.bin, h.env, h.home, "server", "down") })
+	return h
+}
+
+func (h *backgroundHub) run(args ...string) (string, error) {
+	h.t.Helper()
+	return runIn(h.t, h.bin, h.env, h.home, args...)
+}
+
+func (h *backgroundHub) pid() string {
+	h.t.Helper()
+	status, _ := h.run("server", "status")
+	match := regexp.MustCompile(`running \(pid (\d+)\) at (\S+)`).FindStringSubmatch(status)
+	if match == nil {
+		h.t.Fatalf("status: %s", status)
+	}
+	return match[1]
+}
+
+func (h *backgroundHub) token(name string) string {
+	h.t.Helper()
+	raw, err := os.ReadFile(filepath.Join(h.home, ".config", "landline", "session-"+name+".json"))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var session struct{ Token string }
+	json.Unmarshal(raw, &session)
+	return session.Token
+}
+
+func (h *backgroundHub) openStream(name string) (*http.Response, error) {
+	req, _ := http.NewRequest("GET", "http://"+h.addr+"/v1/stream", nil)
+	req.Header.Set("Authorization", "Bearer "+h.token(name))
+	return http.DefaultClient.Do(req)
+}
+
+func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndKeepsSessions(t *testing.T) {
+	h := newBackgroundHub(t)
+	if out, err := h.run("server", "up", "--addr", h.addr); err != nil {
+		t.Fatalf("up: %v %s", err, out)
+	}
+	before := h.pid()
+	if out, err := h.run("register", "--name", "alpha", "--harness", "claude-code", "--host", "mac"); err != nil {
+		t.Fatalf("register: %v %s", err, out)
+	}
+	out, err := h.run("server", "restart", "--addr", h.addr)
+	last := out[strings.LastIndex(strings.TrimSpace(out), "\n")+1:]
+	if err != nil || !regexp.MustCompile(`^the hub is running \(pid \d+\) at http://`+regexp.QuoteMeta(h.addr)+`(\.|$)`).MatchString(strings.TrimSpace(last)) {
+		t.Fatalf("restart: %v %q", err, out)
+	}
+	after := h.pid()
+	if after == before || !strings.Contains(last, "pid "+after) {
+		t.Fatalf("pid before %s after %s, output %q", before, after, out)
+	}
+	if status, _ := h.run("server", "status"); !strings.Contains(status, "http://"+h.addr) {
+		t.Fatalf("status: %s", status)
+	}
+	listed, err := h.run("agents", "--as", "alpha")
+	if err != nil || !strings.Contains(listed, "alpha\tclaude-code\tmac\tdisconnected") {
+		t.Fatalf("agents after restart: %v %q", err, listed)
+	}
+}
+
+func TestServerRestartWithNoHubRunningJustStartsOne(t *testing.T) {
+	h := newBackgroundHub(t)
+	out, err := h.run("server", "restart", "--addr", h.addr)
+	if err != nil || !strings.Contains(out, "the hub is running") {
+		t.Fatalf("restart: %v %s", err, out)
+	}
+	if status, _ := h.run("server", "status"); !strings.Contains(status, "is running") || !strings.Contains(status, "http://"+h.addr) {
+		t.Fatalf("status: %s", status)
+	}
+}
+
+func TestServerRestartWithABadFlagExitsTwoAndLeavesTheRunningHubAlone(t *testing.T) {
+	h := newBackgroundHub(t)
+	if out, err := h.run("server", "up", "--addr", h.addr); err != nil {
+		t.Fatalf("up: %v %s", err, out)
+	}
+	before := h.pid()
+	for _, args := range [][]string{
+		{"server", "restart", "--addr", h.addr, "--keepalive", "0s"},
+		{"server", "restart", "--addr", h.addr, "--no-such-flag", "x"},
+	} {
+		out, err := h.run(args...)
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 2 {
+			t.Fatalf("%v: %v %s", args, err, out)
+		}
+		if after := h.pid(); after != before {
+			t.Fatalf("%v: the hub pid changed from %s to %s", args, before, after)
+		}
+	}
+}
+
+func TestServerRestartEndsAnOpenStreamAndANewStreamOpensAfterIt(t *testing.T) {
+	h := newBackgroundHub(t)
+	if out, err := h.run("server", "up", "--addr", h.addr); err != nil {
+		t.Fatalf("up: %v %s", err, out)
+	}
+	if out, err := h.run("register", "--name", "alpha", "--harness", "claude-code", "--host", "mac"); err != nil {
+		t.Fatalf("register: %v %s", err, out)
+	}
+	resp, err := h.openStream("alpha")
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("stream: %v %v", err, resp)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	ended := make(chan struct{})
+	go func() {
+		io.Copy(io.Discard, resp.Body)
+		close(ended)
+	}()
+	if out, err := h.run("server", "restart", "--addr", h.addr); err != nil {
+		t.Fatalf("restart: %v %s", err, out)
+	}
+	select {
+	case <-ended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the open stream did not end when the hub restarted")
+	}
+	again, err := h.openStream("alpha")
+	if err != nil || again.StatusCode != 200 {
+		t.Fatalf("stream after restart: %v %v", err, again)
+	}
+	again.Body.Close()
 }

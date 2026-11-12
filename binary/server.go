@@ -25,6 +25,7 @@ const serverUsage = `landline server <command>
                     --delivery-timeout D and --retention D, which take durations such as 200ms or 15s.
                     Without --addr the hub listens on 127.0.0.1:8787, or on the port in LANDLINE_PORT
   down              stop the hub that "up" started
+  restart [flags]   stop that hub and start it again with the flags given, so every agent reconnects
   status            say whether the hub is running
   log               print the hub's message log
   join <address>    use a hub on another machine, with its secret from LANDLINE_SECRET or standard input
@@ -44,6 +45,8 @@ func runServer(args []string, env command.Env, home, host string) int {
 		return serverUp(args[1:], env, dataDir)
 	case "down":
 		return serverDown(dataDir)
+	case "restart":
+		return serverRestart(args[1:], env, dataDir)
 	case "status":
 		return serverStatus(env, dataDir)
 	case "install":
@@ -111,8 +114,10 @@ func hubPID(dataDir string) (int, bool) {
 	return pid, true
 }
 
+var hubFlags = []string{"--addr", "--log", "--state", "--host", "--keepalive", "--delivery-timeout", "--retention"}
+
 func serverUp(args []string, env command.Env, dataDir string) int {
-	values, err := flagValues(args, "--addr", "--log", "--state", "--host", "--keepalive", "--delivery-timeout", "--retention")
+	values, err := flagValues(args, hubFlags...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "landline server up:", err)
 		return 2
@@ -194,6 +199,21 @@ func serverDown(dataDir string) int {
 	}
 	fmt.Fprintf(os.Stderr, "the hub (pid %d) did not stop\n", pid)
 	return 1
+}
+
+func serverRestart(args []string, env command.Env, dataDir string) int {
+	values, err := flagValues(args, hubFlags...)
+	if err == nil {
+		_, err = timingFrom(values)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "landline server restart:", err)
+		return 2
+	}
+	if code := serverDown(dataDir); code != 0 {
+		return code
+	}
+	return serverUp(args, env, dataDir)
 }
 
 func serverStatus(env command.Env, dataDir string) int {

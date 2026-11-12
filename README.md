@@ -93,6 +93,9 @@ and the version of `landline` that the agent's MCP process runs. The MCP process
 agent cannot claim another. It shows which sessions still run an old binary after an upgrade.
 
 `landline server status`, `landline server log`, and `landline server down` look in on the hub and stop it.
+`landline server restart` stops it and starts it again, for example after `just install` replaces the binary. It does
+not remember the flags of the earlier start, so pass them again. Agents on the new binary reconnect on their own. A
+session started before the upgrade keeps its old process and needs its own restart.
 
 #### Channel delivery in Claude Code
 
@@ -163,6 +166,7 @@ landline setup codex
 | Command                                      | Does                                                                                                                                       |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `landline server up\|run\|down\|status`      | Starts the hub in the background, runs it here, stops it, or shows whether it runs                                                         |
+| `landline server restart [flags]`            | Stops the hub that `up` started and starts it again with the flags given. Every agent reconnects                                           |
 | `landline server install [--load]`           | Starts the hub at login: a launchd agent on macOS, a systemd user unit on Linux                                                            |
 | `landline server join <address>`             | Uses the hub on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                          |
 | `landline setup claude\|codex [--print]`     | Adds the Landline MCP server to that harness, once                                                                                         |

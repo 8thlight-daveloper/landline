@@ -12,6 +12,7 @@
   `--retention`, and `LANDLINE_PORT` sets the default port. `just check` runs `nix flake check`.
 - `landline mcp` registers the version of the binary it runs, and `landline agents` shows it as `landline: <version>`.
 - A send to an agent with no landline version on record answers "not connected" and says to restart its session.
+- `landline server restart` stops the hub and starts it again.
 - Removed: the inbox, `landline_inbox`, `landline inbox`, `listen`, `hook`, `landline agentd`, the wake queue, the `all`
   recipient, `register --wake` and `--wake-target`, and the hub `--window` flag. A Codex host needs only
   `landline setup codex`.
