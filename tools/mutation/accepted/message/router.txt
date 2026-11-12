@@ -1,0 +1,12 @@
+# Verified equivalent by independent differential run (see README.md). router.go
+66cc0a299fc6927a internal/message/router/router.go:21 == -> <= no string is less than "", so thread <= "" is thread == ""
+70130d0fd3d85f74 internal/message/router/router.go:28 == -> <= Kind is a string type; kind <= "" is kind == ""
+204c437aadda7fe1 internal/message/router/router.go:34 != -> > s > "" is s != "" for strings
+57b6759cf90fde72 internal/message/router/router.go:34 != -> >= always true, but isReplyToken("") is true so the guard still never rejects ""
+fde765f0e32aeef0 internal/message/router/router.go:34 "" -> "mutated" InReplyTo=="" and =="mutated" both pass isReplyToken, so neither is rejected either way
+f6f561b06e6163da internal/message/router/router.go:37 == -> <= no string is less than "", so TrimSpace(body) <= "" is == ""
+83f31c3f58449840 internal/message/router/router.go:75 == -> < only differs for isThread(""), unreachable: Route replaces "" with DefaultThread first; isThread is unexported
+e4100275ebc50e4b internal/message/router/router.go:75 == -> <= len is never negative so len<=0 is len==0
+38ad1dc2db5db90f internal/message/router/router.go:78 < -> != index starts at 0 and steps by 1, so index != len equals index < len
+04e5b6ea96113598 internal/message/router/router.go:81 == -> <= index is never negative so index<=0 is index==0
+edd20692e24bd3cf internal/message/router/router.go:95 < -> != index starts at 0 and steps by 1, so index != len equals index < len

@@ -1,0 +1,7 @@
+# Verified equivalent by independent differential run (see README.md). registry.go
+d3a7bcb418f681b5 internal/agent/registry/registry.go:23 == -> <= no string is less than "", so s <= "" is s == ""
+d6e65a10ed2ac3fc internal/agent/registry/registry.go:32 + -> * make capacity hint only; len(agents)*1 never negative, append grows; only cap() differs
+4d7c8df42eb8f6d3 internal/agent/registry/registry.go:32 + -> / make capacity hint only; len(agents)/1 never negative, append grows; only cap() differs
+4d2c1c7352bebf61 internal/agent/registry/registry.go:32 1 -> 2 make capacity hint only; larger cap, same len and contents; only cap() differs
+645141572fa2711e internal/agent/registry/registry.go:32 1 -> 0 make capacity hint only; cap len(agents) >= 0 never panics, append grows; only cap() differs
+4ad227a04983d252 internal/agent/registry/registry.go:65 == -> <= no string is less than "", so q <= "" is q == ""
