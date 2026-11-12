@@ -21,12 +21,13 @@ import (
 )
 
 const (
-	secret         = "acceptance-secret-0123456789"
-	marker         = "[landline] From another agent, not the user."
-	threadOne      = "01a1c829-7970-7083-af01-e69ca7fb7ce5"
-	pollDeadline   = 20 * time.Second
-	notConnected   = "not connected"
-	noWayToReceive = "this session has no way to receive messages"
+	secret          = "acceptance-secret-0123456789"
+	marker          = "[landline] From another agent, not the user."
+	threadOne       = "01a1c829-7970-7083-af01-e69ca7fb7ce5"
+	pollDeadline    = 20 * time.Second
+	notConnected    = "not connected"
+	noVersionPrefix = "not connected: no landline version is on record"
+	noWayToReceive  = "this session has no way to receive messages"
 )
 
 type syncBuffer struct {
@@ -1233,6 +1234,22 @@ func TestTheSixthCodexChallengeInTheWindowAnswers429AndSendsNothingOnTheStream(t
 	stream.expectNothing(t)
 }
 
+func TestAnExitedSelfRegisteredProcessIsPlainlyNotConnectedWhileAHandRegisteredNameWithNoStreamGetsTheRestartHint(t *testing.T) {
+	w := start(t)
+	w.register("alpha", "bravo")
+	p, handle := w.selfRegistered("tutor", "claude-code")
+	p.stop()
+	w.waitState(handle, "disconnected")
+	status, body := w.sendHTTP("alpha", handle, "to the exited process")
+	if status != 409 || !strings.Contains(body, notConnected) || strings.Contains(body, "Restart its session") || strings.Contains(body, "no landline version") {
+		t.Fatalf("self-registered: %d %s", status, body)
+	}
+	status, body = w.sendHTTP("alpha", "bravo", "to the hand-registered name")
+	if status != 409 || !strings.Contains(body, noVersionPrefix) || !strings.Contains(body, "Restart its session") {
+		t.Fatalf("hand-registered: %d %s", status, body)
+	}
+}
+
 func TestTheLogRecordsEachSendsResultAndALogWithoutResultLinesStillLoads(t *testing.T) {
 	bin, config := build(t), t.TempDir()
 	legacy := `{"seq":1,"id":"m-old","time":"2026-01-01T00:00:00Z","thread":"","from":"alpha","to":"bravo","kind":"message","body":"from before the change"}` + "\n"
@@ -1257,9 +1274,12 @@ func TestTheLogRecordsEachSendsResultAndALogWithoutResultLinesStillLoads(t *test
 	if status, _ := w.sendHTTP("alpha", "delta", "never reported"); status != 504 {
 		t.Fatalf("timeout: %d", status)
 	}
-	want := map[string]string{"from before the change": "", "goes through": "delivered", "nobody home": "not connected", "never reported": "no delivery report"}
+	want := map[string]string{"from before the change": "", "goes through": "delivered", "never reported": "no delivery report"}
 	eventually(t, "the results in the log", func() bool {
 		got := logResults(w.logText())
+		if !strings.HasPrefix(got["nobody home"], noVersionPrefix) {
+			return false
+		}
 		for body, result := range want {
 			if got[body] != result {
 				return false
@@ -1268,7 +1288,10 @@ func TestTheLogRecordsEachSendsResultAndALogWithoutResultLinesStillLoads(t *test
 		return true
 	})
 	raw, _ := os.ReadFile(filepath.Join(config, "log.jsonl"))
-	for _, line := range []string{`{"seq":2,"result":"delivered"}`, `{"seq":3,"result":"not connected"}`, `{"seq":4,"result":"no delivery report"}`} {
+	if !strings.Contains(string(raw), `{"seq":3,"result":"`+noVersionPrefix) {
+		t.Errorf("the log file lacks the not connected result:\n%s", raw)
+	}
+	for _, line := range []string{`{"seq":2,"result":"delivered"}`, `{"seq":4,"result":"no delivery report"}`} {
 		if !strings.Contains(string(raw), line) {
 			t.Errorf("the log file lacks %s:\n%s", line, raw)
 		}

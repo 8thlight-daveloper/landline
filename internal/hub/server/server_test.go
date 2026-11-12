@@ -115,7 +115,12 @@ func (h *harness) notesCopy() []string {
 
 func (h *harness) register(name string) string {
 	h.t.Helper()
-	status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: name, Harness: "codex", Host: "mac", Session: "s-" + name})
+	return h.registerVersioned(name, "0.2.0")
+}
+
+func (h *harness) registerVersioned(name, landlineVersion string) string {
+	h.t.Helper()
+	status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: name, Harness: "codex", Host: "mac", Session: "s-" + name, LandlineVersion: landlineVersion})
 	if status != 200 {
 		h.t.Fatalf("register %s: %d %s", name, status, raw)
 	}
@@ -931,6 +936,25 @@ func TestAttributesAreRegisteredShownInTheListAndChecked(t *testing.T) {
 	}
 	if status, _ := h.call("POST", "/v1/register", secret, map[string]string{"seed": "x", "harness": "h", "landline_version": "0.2\u202e.0"}); status != 400 {
 		t.Fatalf("a landline version with an override character registered: %d", status)
+	}
+}
+
+func TestASendToAnAgentWithNoLandlineVersionOnRecordSaysItMustBeRestarted(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	sender := h.register("alpha")
+	h.registerVersioned("old", "")
+	h.registerVersioned("current", "0.2.0")
+	status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: "old", Body: "x"})
+	if status != 409 || !strings.Contains(string(raw), "not connected: no landline version is on record") || !strings.Contains(string(raw), "Restart its session") {
+		t.Fatalf("an unversioned agent: %d %s", status, raw)
+	}
+	status, raw = h.call("POST", "/v1/send", sender, model.SendBody{To: "current", Body: "x"})
+	if status != 409 || !strings.Contains(string(raw), `"error":"not connected"`) {
+		t.Fatalf("a versioned agent must get the plain message: %d %s", status, raw)
+	}
+	if got := h.resultOf(1); !strings.HasPrefix(got, "not connected: no landline version") {
+		t.Fatalf("the log result: %q", got)
 	}
 }
 

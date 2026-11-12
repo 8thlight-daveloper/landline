@@ -365,12 +365,24 @@ func plainProblem(problem string) string {
 	return cleaned[:cut]
 }
 
+const notConnected = "not connected"
+
+const unversionedHint = ": no landline version is on record, so it is an older landline or a hand-registered name. Restart its session"
+
+func (s *Server) notConnectedLocked(name string) string {
+	if agent, found := s.reg.Find(s.agents, name); found && agent.LandlineVersion == "" {
+		return notConnected + unversionedHint
+	}
+	return notConnected
+}
+
 func (s *Server) deliver(ctx context.Context, name string, delivery model.Delivery) (int, string) {
 	s.mu.Lock()
 	open := s.streams[name]
 	if open == nil {
+		problem := s.notConnectedLocked(name)
 		s.mu.Unlock()
-		return http.StatusConflict, "not connected"
+		return http.StatusConflict, problem
 	}
 	delivery.ID = "d-" + randomHex(8)
 	waiting := &pendingDelivery{agent: name, stream: open, report: make(chan model.DeliveryReport, 1), lost: make(chan struct{})}
@@ -392,8 +404,9 @@ func (s *Server) deliver(ctx context.Context, name string, delivery model.Delive
 			s.mu.Lock()
 			current := s.streams[name]
 			if current == nil || current == open || retried {
+				problem := s.notConnectedLocked(name)
 				s.mu.Unlock()
-				return http.StatusConflict, "not connected"
+				return http.StatusConflict, problem
 			}
 			waiting.stream = current
 			s.mu.Unlock()
@@ -411,7 +424,10 @@ func (s *Server) deliver(ctx context.Context, name string, delivery model.Delive
 		}
 		return http.StatusBadGateway, plainProblem(report.Error)
 	case <-waiting.lost:
-		return http.StatusConflict, "not connected"
+		s.mu.Lock()
+		problem := s.notConnectedLocked(name)
+		s.mu.Unlock()
+		return http.StatusConflict, problem
 	case <-timer.C:
 		return http.StatusGatewayTimeout, "no delivery report"
 	case <-ctx.Done():
