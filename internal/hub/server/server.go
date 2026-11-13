@@ -349,6 +349,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	entry := model.Agent{
 		Name: name, Harness: body.Harness, Host: body.Host, Session: body.Session,
 		Folder: body.Folder, Branch: body.Branch, Worktree: body.Worktree, HarnessVersion: body.HarnessVersion, LandlineVersion: body.LandlineVersion,
+		LandlineCommit: body.LandlineCommit, LandlineDate: body.LandlineDate,
 		Model: body.Model, Effort: body.Effort, Label: body.Label,
 	}
 	updated, err := s.reg.Register(s.agents, entry, s.cfg.Now())
@@ -685,7 +686,8 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	for _, a := range listed {
 		out = append(out, model.AgentInfo{
 			Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, Connected: connected[a.Name], LastSeen: a.LastSeen,
-			Folder: a.Folder, Branch: a.Branch, Worktree: a.Worktree, HarnessVersion: a.HarnessVersion, LandlineVersion: a.LandlineVersion, Model: a.Model, Effort: a.Effort, Label: a.Label,
+			Folder: a.Folder, Branch: a.Branch, Worktree: a.Worktree, HarnessVersion: a.HarnessVersion, LandlineVersion: a.LandlineVersion,
+			LandlineCommit: a.LandlineCommit, LandlineDate: a.LandlineDate, Model: a.Model, Effort: a.Effort, Label: a.Label,
 		})
 	}
 	write(w, http.StatusOK, out)

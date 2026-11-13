@@ -4,11 +4,26 @@
   inputs.threnos.url = "github:8thlight-daveloper/threnos";
   inputs.nixpkgs.follows = "threnos/nixpkgs";
 
-  outputs = { self, threnos, ... }:
+  outputs = { self, threnos, nixpkgs, ... }:
     let
       releaseVersion = builtins.replaceStrings [ "\n" ] [ "" ] (builtins.readFile ./VERSION);
-    in
-    threnos.lib.projectOutputs {
+      commit = self.rev or self.dirtyRev or "";
+      clean = self ? rev;
+      stamp = self.lastModifiedDate or "";
+      date =
+        if clean && builtins.stringLength stamp == 14 then
+          "${builtins.substring 0 4 stamp}-${builtins.substring 4 2 stamp}-${builtins.substring 6 2 stamp}T${builtins.substring 8 2 stamp}:${builtins.substring 10 2 stamp}:${builtins.substring 12 2 stamp}Z"
+        else
+          "";
+      stampFlags =
+        [ "-X main.version=${releaseVersion}" ]
+        ++ (if builtins.stringLength commit == 40 || (!clean && builtins.stringLength commit == 46) then [ "-X main.commit=${commit}" ] else [ ])
+        ++ (if date != "" && clean && builtins.stringLength commit == 40 then [ "-X main.date=${date}" ] else [ ]);
+      expectedVersionLine =
+        if !(builtins.elem "-X main.commit=${commit}" stampFlags) then "landline ${releaseVersion}"
+        else if date == "" then "landline ${releaseVersion} (commit ${commit})"
+        else "landline ${releaseVersion} (commit ${commit}, built ${date})";
+      outputs = threnos.lib.projectOutputs {
       src = self;
       recipes = [ "check" "mutate" "mutate-plan" "mutate-summary" "mutate-report" ];
       devShell = pkgs: { packages = [ pkgs.go pkgs.gopls ]; env = { }; shellHook = "unset GOROOT"; };
@@ -22,7 +37,7 @@
           subPackages = [ "binary" ];
           env.CGO_ENABLED = 0;
           doCheck = false;
-          ldflags = [ "-X main.version=${releaseVersion}" ];
+          ldflags = stampFlags;
           postInstall = "mv $out/bin/binary $out/bin/landline";
           meta.mainProgram = "landline";
         };
@@ -37,5 +52,22 @@
           meta.mainProgram = "landline-tui";
         };
       };
+    };
+    in
+    outputs // {
+      checks = builtins.mapAttrs
+        (system: each: each // {
+          landline-version = nixpkgs.legacyPackages.${system}.runCommand "landline-version-check" { } ''
+            got="$(${outputs.packages.${system}.default}/bin/landline version | tail -n 1)"
+            want=${builtins.toJSON expectedVersionLine}
+            if [ "$got" != "$want" ]; then
+              echo "landline version printed: $got" >&2
+              echo "expected:                 $want" >&2
+              exit 1
+            fi
+            touch $out
+          '';
+        })
+        outputs.checks;
     };
 }

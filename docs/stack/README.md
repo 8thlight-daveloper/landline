@@ -4,6 +4,7 @@
 | -------------------------------- | ----------------------------------------- |
 | [code-layout.md](code-layout.md) | How the neutral terms map to Go folders   |
 | [testing.md](testing.md)         | The test runner, the checks, and mutation |
+| [build-stamp.md](build-stamp.md) | The version, commit, and date stamp       |
 | [osv-scanner.md](osv-scanner.md) | Dependency vulnerability scans            |
 | [repowise.md](repowise.md)       | Local repository context for agents       |
 

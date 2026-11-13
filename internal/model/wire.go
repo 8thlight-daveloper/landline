@@ -16,6 +16,8 @@ type RegisterRequest struct {
 	Worktree        string `json:"worktree,omitempty"`
 	HarnessVersion  string `json:"harness_version,omitempty"`
 	LandlineVersion string `json:"landline_version,omitempty"`
+	LandlineCommit  string `json:"landline_commit,omitempty"`
+	LandlineDate    string `json:"landline_date,omitempty"`
 	Model           string `json:"model,omitempty"`
 	Effort          string `json:"effort,omitempty"`
 	Label           string `json:"label,omitempty"`
@@ -81,6 +83,8 @@ type AgentInfo struct {
 	Worktree        string    `json:"worktree,omitempty"`
 	HarnessVersion  string    `json:"harness_version,omitempty"`
 	LandlineVersion string    `json:"landline_version,omitempty"`
+	LandlineCommit  string    `json:"landline_commit,omitempty"`
+	LandlineDate    string    `json:"landline_date,omitempty"`
 	Model           string    `json:"model,omitempty"`
 	Effort          string    `json:"effort,omitempty"`
 	Label           string    `json:"label,omitempty"`
@@ -115,10 +119,28 @@ func (a AgentInfo) Attributes() string {
 	for _, each := range []struct{ name, value string }{
 		{"label", a.Label}, {"folder", a.Folder}, {"branch", a.Branch}, {"worktree", a.Worktree},
 		{"model", a.Model}, {"effort", a.Effort}, {"version", a.HarnessVersion}, {"landline", a.LandlineVersion},
+		{"commit", shortCommit(a.LandlineCommit)}, {"built", a.LandlineDate},
 	} {
 		if each.value != "" {
 			parts = append(parts, each.name+": "+oneLine(each.value))
 		}
 	}
 	return strings.Join(parts, "  ")
+}
+
+const (
+	shortCommitLength = 7
+	dirtySuffix       = "-dirty"
+)
+
+func shortCommit(commit string) string {
+	runes := []rune(commit)
+	if len(runes) <= shortCommitLength {
+		return commit
+	}
+	short := string(runes[:shortCommitLength])
+	if strings.HasSuffix(commit, dirtySuffix) {
+		short += dirtySuffix
+	}
+	return short
 }

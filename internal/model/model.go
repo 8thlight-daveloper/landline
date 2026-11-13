@@ -37,6 +37,8 @@ type Agent struct {
 	Worktree        string    `json:"worktree,omitempty"`
 	HarnessVersion  string    `json:"harness_version,omitempty"`
 	LandlineVersion string    `json:"landline_version,omitempty"`
+	LandlineCommit  string    `json:"landline_commit,omitempty"`
+	LandlineDate    string    `json:"landline_date,omitempty"`
 	Model           string    `json:"model,omitempty"`
 	Effort          string    `json:"effort,omitempty"`
 	Label           string    `json:"label,omitempty"`

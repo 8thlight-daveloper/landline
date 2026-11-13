@@ -22,6 +22,8 @@ type Identity struct {
 	Harness         string
 	HarnessVersion  string
 	LandlineVersion string
+	LandlineCommit  string
+	LandlineDate    string
 	Model           string
 	Effort          string
 	Label           string
@@ -57,7 +59,8 @@ func (base Identity) With(over Identity) Identity {
 		Seed: pick(over.Seed, base.Seed), Folder: pick(over.Folder, base.Folder), Branch: pick(over.Branch, base.Branch),
 		Worktree: pick(over.Worktree, base.Worktree), Harness: pick(over.Harness, base.Harness),
 		HarnessVersion:  pick(over.HarnessVersion, base.HarnessVersion),
-		LandlineVersion: pick(over.LandlineVersion, base.LandlineVersion), Model: pick(over.Model, base.Model),
+		LandlineVersion: pick(over.LandlineVersion, base.LandlineVersion),
+		LandlineCommit:  pick(over.LandlineCommit, base.LandlineCommit), LandlineDate: pick(over.LandlineDate, base.LandlineDate), Model: pick(over.Model, base.Model),
 		Effort: pick(over.Effort, base.Effort), Label: pick(over.Label, base.Label),
 	}
 }
@@ -128,6 +131,7 @@ func (s *Session) register() error {
 	out, err := client.New(url, secret).Register(model.RegisterRequest{
 		Seed: identity.Seed, Harness: identity.Harness, Host: host, Session: s.env.Getenv("CLAUDE_CODE_SESSION_ID"),
 		Folder: identity.Folder, Branch: identity.Branch, Worktree: identity.Worktree, HarnessVersion: identity.HarnessVersion, LandlineVersion: identity.LandlineVersion,
+		LandlineCommit: identity.LandlineCommit, LandlineDate: identity.LandlineDate,
 		Model: identity.Model, Effort: identity.Effort, Label: identity.Label,
 	})
 	if err != nil {

@@ -25,11 +25,17 @@ Holds the list of registered agents as a value. Every call takes the list and re
   before the field rules, so a harness of only a tab is `model.ErrNoHarness`. A harness of only a zero-width space or
   another invisible formatting character is not empty after trimming, so it is `model.ErrBadField`.
 
-- The harness, host, session, folder, branch, worktree, harness version, landline version, model, effort, and label are
-  each at most 64 bytes, counted in bytes. They hold no control character, no line or paragraph separator, and no
-  invisible formatting character such as a right-to-left override, which are the Unicode categories Cc, Zl, Zp, and Cf.
-  So none of them can break onto a new line or reorder the text around them. Anything else is `model.ErrBadField`. An
-  empty host or session is allowed.
+- The harness, host, session, folder, branch, worktree, harness version, landline version, landline commit, landline
+  date, model, effort, and label are each at most 64 bytes, counted in bytes. They hold no control character, no line or
+  paragraph separator, and no invisible formatting character such as a right-to-left override, which are the Unicode
+  categories Cc, Zl, Zp, and Cf. So none of them can break onto a new line or reorder the text around them. Anything
+  else is `model.ErrBadField`. An empty host or session is allowed.
+
+- The landline commit and the landline date are plain free-text attributes that follow the rule above, with no other
+  format check. Either is stored as given and found unchanged, and either may be empty. A value over 64 bytes or with a
+  forbidden character is `model.ErrBadField`, the whole registration is refused, and the list passed in is unchanged.
+  Registering a name again replaces both with the new entry's values, so an empty value clears the old one. `Find` and
+  `Resolve` never match on either field.
 
 - The returned list is sorted by name. The input list is never changed, including when `Register` replaces an entry.
 
@@ -79,23 +85,30 @@ None.
 
 ## Wrong implementations tried
 
-| Wrong implementation                                                             | Caught by                                                                          |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Replace an entry inside the caller's list                                        | `TestReplacingAnEntryLeavesTheCallersListUnchanged`                                |
-| Sort the caller's list in place in `Register`                                    | `TestRegisterDoesNotReorderTheCallersList`                                         |
-| Accept a 33 character name or a leading `-`                                      | `TestANameOfExactlyThirtyTwoCharactersIsValidAndThirtyThreeIsNot`                  |
-| Accept a line separator or a bidi override in a field                            | `TestControlCharacterBoundaries`                                                   |
-| Count characters and not bytes in the 64 byte limit                              | `TestTheFieldLimitCountsBytesNotCharacters`                                        |
-| Match names ignoring case                                                        | `TestFindMatchesTheNameExactly`                                                    |
-| Match a query that is the middle or end of a handle or a label                   | `TestResolveDoesNotMatchTheMiddleOrEndOfAHandleOrALabel`                           |
-| Trim the query before matching                                                   | `TestResolveDoesNotTrimTheQuery`                                                   |
-| Fold case in a handle, a label, or a prefix                                      | `TestResolveMatchesHandlesAndLabelsOnlyInTheCaseTheyWereGiven`                     |
-| Break a label tie by a prefix match, or by trying the next step                  | `TestResolveALabelTieIsNotBrokenByAPrefixMatch`                                    |
-| List an agent twice when its handle and label both start with the query          | `TestResolveListsAnAgentOnceWhenItsHandleAndItsLabelBothStartWithTheQuery`         |
-| Skip the invisible-character check on the harness, or let it count as no harness | `TestAHarnessOfOnlyAnInvisibleCharacterThatIsNotWhiteSpaceIsABadFieldNotNoHarness` |
-| Check only some Cf characters, or only some fields                               | `TestEveryFieldRefusesInvisibleFormattingCharacters`                               |
-| Check every field except the landline version, or give it a different limit      | `TestAnOverLongOrInvisibleLandlineVersionIsRefused`                                |
-| Drop the landline version when storing, or keep the old one when it is empty     | `TestALandlineVersionIsStoredAndFoundUnchanged`                                    |
+| Wrong implementation                                                                                   | Caught by                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Replace an entry inside the caller's list                                                              | `TestReplacingAnEntryLeavesTheCallersListUnchanged`                                                                                                                                                     |
+| Sort the caller's list in place in `Register`                                                          | `TestRegisterDoesNotReorderTheCallersList`                                                                                                                                                              |
+| Accept a 33 character name or a leading `-`                                                            | `TestANameOfExactlyThirtyTwoCharactersIsValidAndThirtyThreeIsNot`                                                                                                                                       |
+| Accept a line separator or a bidi override in a field                                                  | `TestControlCharacterBoundaries`                                                                                                                                                                        |
+| Count characters and not bytes in the 64 byte limit                                                    | `TestTheFieldLimitCountsBytesNotCharacters`                                                                                                                                                             |
+| Match names ignoring case                                                                              | `TestFindMatchesTheNameExactly`                                                                                                                                                                         |
+| Match a query that is the middle or end of a handle or a label                                         | `TestResolveDoesNotMatchTheMiddleOrEndOfAHandleOrALabel`                                                                                                                                                |
+| Trim the query before matching                                                                         | `TestResolveDoesNotTrimTheQuery`                                                                                                                                                                        |
+| Fold case in a handle, a label, or a prefix                                                            | `TestResolveMatchesHandlesAndLabelsOnlyInTheCaseTheyWereGiven`                                                                                                                                          |
+| Break a label tie by a prefix match, or by trying the next step                                        | `TestResolveALabelTieIsNotBrokenByAPrefixMatch`                                                                                                                                                         |
+| List an agent twice when its handle and label both start with the query                                | `TestResolveListsAnAgentOnceWhenItsHandleAndItsLabelBothStartWithTheQuery`                                                                                                                              |
+| Skip the invisible-character check on the harness, or let it count as no harness                       | `TestAHarnessOfOnlyAnInvisibleCharacterThatIsNotWhiteSpaceIsABadFieldNotNoHarness`                                                                                                                      |
+| Check only some Cf characters, or only some fields                                                     | `TestEveryFieldRefusesInvisibleFormattingCharacters`                                                                                                                                                    |
+| Check every field except the landline version, or give it a different limit                            | `TestAnOverLongOrInvisibleLandlineVersionIsRefused`                                                                                                                                                     |
+| Drop the landline version when storing, or keep the old one when it is empty                           | `TestALandlineVersionIsStoredAndFoundUnchanged`                                                                                                                                                         |
+| Leave the commit or the date out of the field checks, or give either a limit other than 64 bytes       | `TestAnOverLongOrInvisibleCommitOrDateIsRefusedAndTheListIsUnchanged`, `TestEveryFieldAcceptsExactlySixtyFourBytesAndRefusesTheUnicodeLineBreaks`, `TestEveryFieldRefusesInvisibleFormattingCharacters` |
+| Refuse a 46 byte commit that ends in `-dirty`, or a value that is not a 40 hex hash                    | `TestACommitOfFortySixBytesWithTheDirtyMarkIsAccepted`, `TestALandlineCommitAndDateAreStoredAndFoundUnchanged`                                                                                          |
+| Drop the commit or the date when storing, or keep the old one when it is empty or on a re-registration | `TestALandlineCommitAndDateAreStoredAndFoundUnchanged`, `TestRegisteringAgainReplacesTheCommitAndTheDateAndAnEmptyValueClearsThem`                                                                      |
+| Store the commit in the date field or the reverse, or fold either into the version                     | `TestACommitAndADateAreSeparateFieldsThatDoNotLeakIntoEachOtherOrIntoTheVersion`                                                                                                                        |
+| Refuse by returning a list with the partial entry, or change the caller's list on a refusal            | `TestAnOverLongOrInvisibleCommitOrDateIsRefusedAndTheListIsUnchanged`                                                                                                                                   |
+| Report a bad commit before a bad name or a missing harness                                             | `TestABadCommitDoesNotHideABadNameOrAMissingHarness`                                                                                                                                                    |
+| Match a query on the commit or the date                                                                | `TestResolveAndFindIgnoreTheCommitAndTheDate`                                                                                                                                                           |
 
 ## Fixture sources
 
@@ -108,3 +121,7 @@ None.
 - The invisible characters are Unicode category Cf code points from the Unicode Character Database (`UnicodeData.txt`,
   general category `Cf`): U+00AD, U+0600, U+061C, U+180E, U+200B to U+200F, U+202A, U+202D, U+202E, U+2060, U+2066,
   U+2069, U+FEFF, and the tag characters U+E0001 and U+E0041.
+- The commit `0123456789abcdef0123456789abcdef01234567` and the date `2026-11-12T16:34:00Z` are invented, with the
+  shapes that [0100](../../../docs/decisions/0100-a-build-names-itself-by-version-commit-and-date.md) gives: 40 hex
+  characters, and RFC 3339 in UTC to the second. They are not read from a real commit. The registry checks only the
+  free-text rules, so values of other shapes are stored too.

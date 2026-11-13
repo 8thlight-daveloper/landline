@@ -10,12 +10,20 @@ default:
 
 # Build the landline binary into ./bin.
 build:
-    unset GOROOT; CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(tr -d '[:space:]' < VERSION)" -o bin/landline ./binary
+    stamp="$(tools/stamp/stamp.sh)"; commit="${stamp#commit=}"; commit="${commit%%$'\n'*}"; date="${stamp##*date=}"; \
+      flags="-X main.version=$(tr -d '[:space:]' < VERSION)"; \
+      if [ -n "$commit" ]; then flags="$flags -X main.commit=$commit"; fi; \
+      if [ -n "$date" ]; then flags="$flags -X main.date=$date"; fi; \
+      unset GOROOT; CGO_ENABLED=0 go build -trimpath -ldflags "$flags" -o bin/landline ./binary
 
 # Build and install landline into ~/.local/bin, or into prefix/bin when one is given.
 install prefix="~/.local":
     mkdir -p {{ prefix }}/bin
-    unset GOROOT; CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(tr -d '[:space:]' < VERSION)" -o {{ prefix }}/bin/landline ./binary
+    stamp="$(tools/stamp/stamp.sh)"; commit="${stamp#commit=}"; commit="${commit%%$'\n'*}"; date="${stamp##*date=}"; \
+      flags="-X main.version=$(tr -d '[:space:]' < VERSION)"; \
+      if [ -n "$commit" ]; then flags="$flags -X main.commit=$commit"; fi; \
+      if [ -n "$date" ]; then flags="$flags -X main.date=$date"; fi; \
+      unset GOROOT; CGO_ENABLED=0 go build -trimpath -ldflags "$flags" -o {{ prefix }}/bin/landline ./binary
     @echo "installed {{ prefix }}/bin/landline"
 
 # Build and install landline-tui into ~/.local/bin, or into prefix/bin when one is given.

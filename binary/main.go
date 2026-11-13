@@ -20,8 +20,11 @@ import (
 	"github.com/8thlight-daveloper/landline/internal/wake/codex"
 )
 
-// version is set at build time from VERSION. A plain go build reports dev.
-var version = "dev"
+var (
+	version = "dev"
+	commit  = ""
+	date    = ""
+)
 
 func main() {
 	home, _ := os.UserHomeDir()
@@ -47,7 +50,7 @@ func main() {
 			os.Exit(runTUI(os.Args[2:], env))
 		case "version":
 			fmt.Print(bannerFor(os.Stdout))
-			fmt.Println("landline", version)
+			fmt.Println(versionLine())
 			return
 		}
 	}
@@ -185,7 +188,7 @@ func gitRunner(dir string, args ...string) (string, error) {
 
 func runMCP(args []string, env command.Env) int {
 	channel, as := false, ""
-	overrides := command.Identity{LandlineVersion: version}
+	overrides := command.Identity{LandlineVersion: version, LandlineCommit: commit, LandlineDate: date}
 	targets := map[string]*string{
 		"--as": &as, "--label": &overrides.Label, "--model": &overrides.Model, "--effort": &overrides.Effort,
 		"--folder": &overrides.Folder, "--branch": &overrides.Branch,
@@ -253,4 +256,14 @@ func or(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func versionLine() string {
+	if commit == "" {
+		return "landline " + version
+	}
+	if strings.HasSuffix(commit, "-dirty") || date == "" {
+		return fmt.Sprintf("landline %s (commit %s)", version, commit)
+	}
+	return fmt.Sprintf("landline %s (commit %s, built %s)", version, commit, date)
 }

@@ -18,15 +18,15 @@ landline-tui -h | --help
 - Flags may come before the screen name: `landline-tui --interval 1s agents --json`. `-h` and `--help` print the usage
   on standard output and exit `0`. A bad `--interval` exits `2` with `the interval must be a duration such as 2s`. One
   below the floor exits `2` with `the interval is at least 500ms, not 100ms`, where `100ms` is the value given.
-- `landline-tui agents --json` prints one snapshot and exits `0`. When the hub cannot be reached, it prints the reason on
-  standard error and exits `1`. A usage error exits `2`.
+- `landline-tui agents --json` prints one snapshot and exits `0`. When the hub cannot be reached, it prints the reason
+  on standard error and exits `1`. A usage error exits `2`.
 
 The status line reads `error: <message> | hub <address> | refreshed <time>`, with the error first and only when the last
-poll failed. `refreshing...` appears while a fetch runs, and `r` during a fetch says `already refreshing`. After a failed
-poll the screen keeps the previous list and marks its header `(stale)` until a poll succeeds. The table drops whole
-columns from the lowest priority first when the terminal is narrow (LANDLINE, FOLDER, BRANCH, MODEL, EFFORT, then
-HARNESS and LABEL), and `+N more` marks rows that do not fit the height. When HANDLE and STATE cannot both fit, only the
-handle shows, and its tail if it is still too wide.
+poll failed. `refreshing...` appears while a fetch runs, and `r` during a fetch says `already refreshing`. After a
+failed poll the screen keeps the previous list and marks its header `(stale)` until a poll succeeds. The table drops
+whole columns from the lowest priority first when the terminal is narrow (COMMIT, EFFORT, MODEL, BRANCH, FOLDER,
+LANDLINE, then HARNESS and LABEL), and `+N more` marks rows that do not fit the height. When HANDLE and STATE cannot
+both fit, only the handle shows, and its tail if it is still too wide.
 
 Text that does not come from an agent field is cleaned before it reaches the terminal, the same way agent fields are:
 control, line separator, paragraph separator, and format runes become a space, and invalid UTF-8 becomes U+FFFD. That
@@ -47,6 +47,8 @@ covers the hub address, every error on the status line, and every message on sta
       "harness": "claude",
       "state": "connected",
       "landline_version": "0.9.0",
+      "landline_commit": "0123456789abcdef0123456789abcdef01234567",
+      "landline_date": "2026-11-12T16:34:00Z",
       "harness_version": "2.1.0",
       "folder": "/work/app",
       "branch": "main",
@@ -59,8 +61,9 @@ covers the hub address, every error on the status line, and every message on sta
 }
 ```
 
-Connected agents come first, then labelled before unlabelled, then by label, then by handle. Empty optional fields are left out. The snapshot holds no
-secret and no token.
+Connected agents come first, then labelled before unlabelled, then by label, then by handle. Empty optional fields are
+left out. The COMMIT column shows the first 7 characters of the commit and `-dirty` when it has the mark, and needs 162
+columns. The JSON carries the full commit and the date. The snapshot holds no secret and no token.
 
 ## How it finds the hub
 

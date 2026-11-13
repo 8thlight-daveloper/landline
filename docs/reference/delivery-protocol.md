@@ -11,16 +11,16 @@ takes `Authorization: Bearer <hub secret>`.
 
 ## Routes
 
-| Route                             | Auth                    | Does                                                                           |
-| --------------------------------- | ----------------------- | ------------------------------------------------------------------------------ |
-| `POST /v1/register`               | secret                  | Registers an agent. It takes no delivery fields and carries `landline_version` |
-| `POST /v1/observers`              | secret                  | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}` |
-| `POST /v1/attach`                 | agent token             | Records claims. A Codex proof sends its code as a challenge                    |
-| `GET /v1/stream`                  | agent token             | Opens the delivery stream (below)                                              |
-| `POST /v1/deliveries/{id}/report` | agent token             | The MCP process reports one delivery. Body is `DeliveryReport`                 |
-| `POST /v1/send`                   | agent token             | Sends to one recipient and waits for the delivery report                       |
-| `GET /v1/agents`                  | agent or observer token | Lists agents, each with `connected`                                            |
-| `GET /v1/log`                     | secret                  | Reads the log. Each entry has `result`                                         |
+| Route                             | Auth                    | Does                                                                                 |
+| --------------------------------- | ----------------------- | ------------------------------------------------------------------------------------ |
+| `POST /v1/register`               | secret                  | Registers an agent. It takes no delivery fields and carries the build values (below) |
+| `POST /v1/observers`              | secret                  | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}`       |
+| `POST /v1/attach`                 | agent token             | Records claims. A Codex proof sends its code as a challenge                          |
+| `GET /v1/stream`                  | agent token             | Opens the delivery stream (below)                                                    |
+| `POST /v1/deliveries/{id}/report` | agent token             | The MCP process reports one delivery. Body is `DeliveryReport`                       |
+| `POST /v1/send`                   | agent token             | Sends to one recipient and waits for the delivery report                             |
+| `GET /v1/agents`                  | agent or observer token | Lists agents, each with `connected`                                                  |
+| `GET /v1/log`                     | secret                  | Reads the log. Each entry has `result`                                               |
 
 Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 
@@ -84,7 +84,36 @@ agent has no stream, and it is present for 2 minutes after its last authenticate
 hub deletes the registration and the token, and the token is answered with `401` from then on. The hub checks this
 before every request, against its own clock.
 
-`GET /v1/agents` lists every present agent. Each entry has `connected`, `false` for an agent in its grace.
+`GET /v1/agents` lists every present agent. Each entry has `connected`, `false` for an agent in its grace. An entry also
+has `landline_version`, `landline_commit`, and `landline_date` when the agent registered them, with the full values and
+with a name left out when its value is empty.
+
+## Build values
+
+[0100](../decisions/0100-a-build-names-itself-by-version-commit-and-date.md) adds `landline_commit` and `landline_date`
+to `landline_version`. `POST /v1/register` takes all three in both forms, the name form and the seed form. Each is an
+optional string of at most 64 bytes with no control character, line or paragraph separator, or invisible formatting
+character. A value that breaks the rules answers `400` and registers nothing. An empty value is left out.
+
+A registration by name replaces the earlier one, so registering again replaces the commit and the date, and an empty
+value clears the old one. A registration by seed gets a new handle and replaces nothing. A hand-registered name sends
+none of the three.
+
+| Field              | Example                                          | Meaning                                                                           |
+| ------------------ | ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `landline_version` | `0.1.0`                                          | The content of `VERSION`                                                          |
+| `landline_commit`  | `0123456789abcdef0123456789abcdef01234567-dirty` | The 40 hex character commit of the build, with `-dirty` when tracked files differ |
+| `landline_date`    | `2026-11-12T16:34:00Z`                           | The committer date of that commit in UTC. Absent for a `-dirty` commit            |
+
+```json
+{"name": "alpha", "harness": "claude-code", "host": "mac", "session": "s-1",
+ "landline_version": "0.1.0",
+ "landline_commit": "0123456789abcdef0123456789abcdef01234567",
+ "landline_date": "2026-11-12T16:34:00Z"}
+```
+
+The hub enforces the field rules only. The shapes in the table come from the build, which no flag, environment variable,
+or `landline_register` argument can override.
 
 A send resolves its recipient against the connected agents first, so a label or a prefix picks among them alone and the
 ambiguity rule applies to them alone. When no connected agent matches, the name resolves against the other present

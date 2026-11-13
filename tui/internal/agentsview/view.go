@@ -2,6 +2,7 @@ package agentsview
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/8thlight-daveloper/landline/tui/internal/clean"
@@ -19,6 +20,8 @@ type Row struct {
 	Harness         string `json:"harness"`
 	State           string `json:"state"`
 	LandlineVersion string `json:"landline_version,omitempty"`
+	LandlineCommit  string `json:"landline_commit,omitempty"`
+	LandlineDate    string `json:"landline_date,omitempty"`
 	HarnessVersion  string `json:"harness_version,omitempty"`
 	Folder          string `json:"folder,omitempty"`
 	Branch          string `json:"branch,omitempty"`
@@ -45,6 +48,7 @@ func Build(hub string, at time.Time, agents []hubclient.Agent) View {
 		rows = append(rows, Row{
 			Handle: clean.Text(agent.Name), Label: clean.Text(agent.Label), Harness: clean.Text(agent.Harness), State: state,
 			LandlineVersion: clean.Text(agent.LandlineVersion), HarnessVersion: clean.Text(agent.HarnessVersion),
+			LandlineCommit: clean.Text(agent.LandlineCommit), LandlineDate: clean.Text(agent.LandlineDate),
 			Folder: clean.Text(agent.Folder), Branch: clean.Text(agent.Branch), Worktree: clean.Text(agent.Worktree),
 			Model: clean.Text(agent.Model), Effort: clean.Text(agent.Effort), Host: clean.Text(agent.Host),
 		})
@@ -63,4 +67,21 @@ func Build(hub string, at time.Time, agents []hubclient.Agent) View {
 		return a.Handle < b.Handle
 	})
 	return View{Screen: "agents", FetchedAt: at.UTC().Format(time.RFC3339), Hub: clean.Text(hub), Agents: rows}
+}
+
+const (
+	shortCommitLength = 7
+	dirtySuffix       = "-dirty"
+)
+
+func (r Row) ShortCommit() string {
+	runes := []rune(r.LandlineCommit)
+	if len(runes) <= shortCommitLength {
+		return r.LandlineCommit
+	}
+	short := string(runes[:shortCommitLength])
+	if strings.HasSuffix(r.LandlineCommit, dirtySuffix) {
+		short += dirtySuffix
+	}
+	return short
 }

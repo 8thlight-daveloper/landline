@@ -369,6 +369,10 @@ func setField(entry *model.Agent, field, value string) {
 		entry.HarnessVersion = value
 	case "LandlineVersion":
 		entry.LandlineVersion = value
+	case "LandlineCommit":
+		entry.LandlineCommit = value
+	case "LandlineDate":
+		entry.LandlineDate = value
 	case "Model":
 		entry.Model = value
 	case "Effort":
@@ -380,7 +384,7 @@ func setField(entry *model.Agent, field, value string) {
 
 func TestEveryFieldAcceptsExactlySixtyFourBytesAndRefusesTheUnicodeLineBreaks(t *testing.T) {
 	t.Parallel()
-	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "Model", "Effort", "Label"} {
+	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "LandlineCommit", "LandlineDate", "Model", "Effort", "Label"} {
 		entry := agent("alpha")
 		setField(&entry, field, strings.Repeat("h", 64))
 		if _, err := newImpl().Register(nil, entry, t0); err != nil {
@@ -440,6 +444,7 @@ func TestEveryAttributeIsStoredAsGivenAndMayBeEmpty(t *testing.T) {
 	entry := agent("alpha")
 	entry.Folder, entry.Branch, entry.Worktree, entry.HarnessVersion = "threnos", "fix/login", "wt-2", "2.1.296"
 	entry.LandlineVersion = "0.2.0"
+	entry.LandlineCommit, entry.LandlineDate = fullCommit, buildDate
 	entry.Model, entry.Effort, entry.Label = "claude-opus-5-5", "medium", "  main reviewer  "
 	got, err := newImpl().Register(nil, entry, t0)
 	if err != nil {
@@ -629,7 +634,7 @@ func TestAHarnessOfOnlyAnInvisibleCharacterThatIsNotWhiteSpaceIsABadFieldNotNoHa
 func TestEveryFieldRefusesInvisibleFormattingCharacters(t *testing.T) {
 	t.Parallel()
 	formatting := []string{"\u00ad", "\u0600", "\u061c", "\u180e", "\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202d", "\u202e", "\u2060", "\u2066", "\u2069", "\ufeff", "\U000e0001", "\U000e0041"}
-	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "Model", "Effort", "Label"} {
+	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "LandlineCommit", "LandlineDate", "Model", "Effort", "Label"} {
 		for _, char := range formatting {
 			for _, text := range []string{"a" + char + "b", char + "codex", "codex" + char} {
 				entry := agent("alpha")
@@ -670,5 +675,126 @@ func TestAnOverLongOrInvisibleLandlineVersionIsRefused(t *testing.T) {
 		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
 			t.Errorf("%q: %v", version, err)
 		}
+	}
+}
+
+const (
+	fullCommit = "0123456789abcdef0123456789abcdef01234567"
+	buildDate  = "2026-11-12T16:34:00Z"
+)
+
+func TestALandlineCommitAndDateAreStoredAndFoundUnchanged(t *testing.T) {
+	t.Parallel()
+	for _, pair := range [][2]string{
+		{fullCommit, buildDate},
+		{fullCommit + "-dirty", ""},
+		{"", ""},
+		{"", buildDate},
+		{"  not a hash  ", " 2026-11-12 "},
+		{strings.Repeat("c", 64), strings.Repeat("d", 64)},
+	} {
+		entry := agent("alpha")
+		entry.LandlineCommit, entry.LandlineDate = pair[0], pair[1]
+		agents, err := newImpl().Register(nil, entry, t0)
+		if err != nil {
+			t.Fatalf("%q: %v", pair, err)
+		}
+		found, ok := newImpl().Find(agents, "alpha")
+		if !ok || found.LandlineCommit != pair[0] || found.LandlineDate != pair[1] {
+			t.Fatalf("%q: found %+v, %v", pair, found, ok)
+		}
+	}
+}
+
+func TestACommitAndADateAreSeparateFieldsThatDoNotLeakIntoEachOtherOrIntoTheVersion(t *testing.T) {
+	t.Parallel()
+	entry := agent("alpha")
+	entry.LandlineVersion, entry.LandlineCommit, entry.LandlineDate = "0.2.0", fullCommit, buildDate
+	agents, err := newImpl().Register(nil, entry, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := agents[0]; got.LandlineVersion != "0.2.0" || got.LandlineCommit != fullCommit || got.LandlineDate != buildDate {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestRegisteringAgainReplacesTheCommitAndTheDateAndAnEmptyValueClearsThem(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	first := agent("alpha")
+	first.LandlineCommit, first.LandlineDate = fullCommit, buildDate
+	agents, err := r.Register(nil, first, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := agent("alpha")
+	second.LandlineCommit, second.LandlineDate = strings.Repeat("a", 40)+"-dirty", ""
+	agents, err = r.Register(agents, second, t0.Add(time.Second))
+	if err != nil || len(agents) != 1 || agents[0].LandlineCommit != second.LandlineCommit || agents[0].LandlineDate != "" {
+		t.Fatalf("replace: %+v, %v", agents, err)
+	}
+	agents, err = r.Register(agents, agent("alpha"), t0.Add(2*time.Second))
+	if err != nil || len(agents) != 1 || agents[0].LandlineCommit != "" || agents[0].LandlineDate != "" {
+		t.Fatalf("clear: %+v, %v", agents, err)
+	}
+}
+
+func TestAnOverLongOrInvisibleCommitOrDateIsRefusedAndTheListIsUnchanged(t *testing.T) {
+	t.Parallel()
+	bad := []string{strings.Repeat("c", 65), fullCommit + "\u202e", "\u200b" + fullCommit, "01\u206023", "0123\n4567", "0123\u20284567", "01\x0023", "01\t23", "\U000e0041" + fullCommit}
+	for _, field := range []string{"LandlineCommit", "LandlineDate"} {
+		for _, value := range bad {
+			existing, _ := newImpl().Register(nil, agent("bravo"), t0)
+			before := append([]model.Agent(nil), existing...)
+			entry := agent("alpha")
+			setField(&entry, field, value)
+			got, err := newImpl().Register(existing, entry, t0)
+			if !errors.Is(err, model.ErrBadField) {
+				t.Errorf("%s %q: %v", field, value, err)
+			}
+			if got != nil || !reflect.DeepEqual(existing, before) {
+				t.Errorf("%s %q: returned %+v, input %+v", field, value, got, existing)
+			}
+		}
+	}
+}
+
+func TestACommitOfFortySixBytesWithTheDirtyMarkIsAccepted(t *testing.T) {
+	t.Parallel()
+	entry := agent("alpha")
+	entry.LandlineCommit = fullCommit + "-dirty"
+	if len(entry.LandlineCommit) != 46 {
+		t.Fatal("fixture is not 46 bytes")
+	}
+	if _, err := newImpl().Register(nil, entry, t0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestABadCommitDoesNotHideABadNameOrAMissingHarness(t *testing.T) {
+	t.Parallel()
+	badName := agent("Alpha")
+	badName.LandlineCommit = strings.Repeat("c", 65)
+	if _, err := newImpl().Register(nil, badName, t0); !errors.Is(err, model.ErrBadName) {
+		t.Errorf("got %v, want ErrBadName", err)
+	}
+	noHarness := agent("alpha")
+	noHarness.Harness, noHarness.LandlineDate = "", "bad\ndate"
+	if _, err := newImpl().Register(nil, noHarness, t0); !errors.Is(err, model.ErrNoHarness) {
+		t.Errorf("got %v, want ErrNoHarness", err)
+	}
+}
+
+func TestResolveAndFindIgnoreTheCommitAndTheDate(t *testing.T) {
+	t.Parallel()
+	entry := agent("alpha")
+	entry.LandlineCommit, entry.LandlineDate = fullCommit, buildDate
+	agents, _ := newImpl().Register(nil, entry, t0)
+	if got, rest := newImpl().Resolve(agents, agents, fullCommit); got.Name != "" || rest != nil {
+		t.Fatalf("a commit matched: %+v %+v", got, rest)
+	}
+	if got, ok := newImpl().Find(agents, buildDate); ok {
+		t.Fatalf("a date matched: %+v", got)
 	}
 }

@@ -41,6 +41,9 @@ func TestColumnsAreDroppedFromTheLowestPriorityFirst(t *testing.T) {
 		90:  "HANDLE LABEL HARNESS STATE LANDLINE FOLDER",
 		120: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH",
 		160: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH MODEL EFFORT",
+		161: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH MODEL EFFORT",
+		162: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
+		240: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
 	}
 	for width, titles := range want {
 		got := strings.Join(headerTitles(rendered(shortAgents(3), width)), " ")
@@ -51,7 +54,7 @@ func TestColumnsAreDroppedFromTheLowestPriorityFirst(t *testing.T) {
 }
 
 func TestTheColumnSetDoesNotDependOnTheRows(t *testing.T) {
-	for _, width := range []int{30, 50, 70, 90, 120, 160} {
+	for _, width := range []int{30, 50, 70, 90, 120, 160, 161, 162, 240} {
 		few := headerTitles(rendered(shortAgents(3), width))
 		many := headerTitles(rendered(shortAgents(40), width))
 		if strings.Join(few, " ") != strings.Join(many, " ") {

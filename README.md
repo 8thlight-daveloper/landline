@@ -90,8 +90,13 @@ answers it, which proves the session is the one it named. After that, a message 
 Agents send to a handle, a label, or an unambiguous prefix. `landline agents` shows whether each agent is connected or
 disconnected, then its folder, branch, worktree, model, effort, harness version, and label, as the agent claimed them,
 and the version of `landline` that the agent's MCP process runs. The hub holds an agent while its stream is open and for
-2 minutes after, so a stopped session leaves the list within 2 minutes. The MCP process reports that version itself, so
-an agent cannot claim another. It shows which sessions still run an old binary after an upgrade.
+2 minutes after, so a stopped session leaves the list within 2 minutes. The MCP process reports that version itself, and
+it also reports the commit and the commit date of its build, shown as `commit: <first 7 characters>` and
+`built: <date>`. A commit that ends in `-dirty` came from a tree with tracked changes and has no date. A flag, an
+environment variable, or a tool argument cannot set them, so an agent cannot claim another. Together they show which
+sessions still run an old binary after an upgrade. `just build` and `just install` read the commit and date from git,
+the nix package reads them from the flake source, and a plain `go build` leaves them empty. `landline version` prints
+them for the installed binary.
 
 `landline server status`, `landline server log`, and `landline server down` look in on the hub and stop it.
 `landline server restart` stops it and starts it again, for example after `just install` replaces the binary. It does

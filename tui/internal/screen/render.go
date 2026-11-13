@@ -28,6 +28,7 @@ var columns = []column{
 	{"BRANCH", func(r agentsview.Row) string { return r.Branch }, 22, 8, false},
 	{"MODEL", func(r agentsview.Row) string { return r.Model }, 18, 6, false},
 	{"EFFORT", func(r agentsview.Row) string { return r.Effort }, 7, 5, false},
+	{"COMMIT", func(r agentsview.Row) string { return r.ShortCommit() }, 13, 13, false},
 }
 
 var (
@@ -43,7 +44,7 @@ const (
 	staleMarker = "(stale)"
 )
 
-var priority = []int{0, 3, 1, 2, 4, 5, 6, 7, 8}
+var priority = []int{0, 3, 1, 2, 4, 5, 6, 7, 8, 9}
 
 func naturalWidth(c column, rows []agentsview.Row) int {
 	w := ansi.StringWidth(c.title)
