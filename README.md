@@ -173,8 +173,8 @@ folder that holds `landline`, and says how to install it when it is missing. `la
 snapshot as JSON and exits, for scripts. It prints no secret.
 
 It finds the hub the way the other commands do: `LANDLINE_URL` and `LANDLINE_SECRET`, then the address and secret that
-`landline server up` or `landline join` saved, then `http://127.0.0.1:8787` (`LANDLINE_PORT` changes the port). See
-[tui/README.md](tui/README.md).
+`landline server up` or `landline server join` saved, then `http://127.0.0.1:8787` (`LANDLINE_PORT` changes the port).
+See [tui/README.md](tui/README.md).
 
 ## Two hosts
 

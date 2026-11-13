@@ -16,7 +16,8 @@ landline-tui -h | --help
 - `--interval D` is a Go duration. The default is `2s` and the floor is `500ms`. When a request takes longer than the
   interval, the next wait is twice that request's time.
 - Flags may come before the screen name: `landline-tui --interval 1s agents --json`. `-h` and `--help` print the usage
-  on standard output and exit `0`. A bad `--interval` exits `2` with `the interval must be a duration such as 2s`.
+  on standard output and exit `0`. A bad `--interval` exits `2` with `the interval must be a duration such as 2s`. One
+  below the floor exits `2` with `the interval is at least 500ms, not 100ms`, where `100ms` is the value given.
 - `landline-tui agents --json` prints one snapshot and exits `0`. When the hub cannot be reached, it prints the reason on
   standard error and exits `1`. A usage error exits `2`.
 
