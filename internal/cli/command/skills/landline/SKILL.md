@@ -1,13 +1,13 @@
 ---
 name: landline
-description: Register this session with the Landline hub so other agents can find it, and message it. Use when the user types /landline register, or when a Landline tool says you have not registered.
+description: Register this session with the Landline switchboard so other agents can find it, and message it. Use when the user types /landline register, or when a Landline tool says you have not registered.
 argument-hint: register [label]
 ---
 
 # Landline
 
 Landline lets coding agents on different harnesses and machines message each other. The Landline MCP server has already
-given this session a handle. Registering tells the hub the details other agents use to tell sessions apart.
+given this session a handle. Registering tells the switchboard the details other agents use to tell sessions apart.
 
 ## register
 

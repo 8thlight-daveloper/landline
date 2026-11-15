@@ -48,7 +48,7 @@ const Usage = `usage: landline <command> [flags]
   send      --as N --to X [--thread T] [--kind K] [--reply-to ID] <body, or - for stdin>
             --to names one agent. The agent must be connected, or the send fails
   log       [--after SEQ]
-  join      <switchboard address>   save a switchboard address and its secret, for a hub on another machine
+  join      <switchboard address>   save a switchboard address and its secret, for a switchboard on another machine
   version   print the version and the build
 
 --as defaults to LANDLINE_AS. The switchboard address and secret come from LANDLINE_URL and LANDLINE_SECRET, or from the file
