@@ -4,6 +4,7 @@ status: accepted
 approval: person
 affects: [agent/registry, hub/server, mcp/server, client/http, cli/command, agent/viewer]
 builds-on: ['0060', '0070', '0080', '0090']
+partly-superseded-by: ['0110']
 note: Drafted on 2026-11-12 to add to the attribute list of 0060, which stays as written.
 ---
 
