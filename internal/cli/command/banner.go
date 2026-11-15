@@ -1,6 +1,12 @@
 package command
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"strings"
+	"time"
+	"unicode"
+)
 
 var jackRows = []string{
 	"...###...",
@@ -63,4 +69,33 @@ func Banner(color bool) string {
 		out.WriteString("\n")
 	}
 	return out.String()
+}
+
+func VersionLine(name, version, commit, date string) string {
+	switch {
+	case commit == "":
+		return name + " " + version
+	case strings.HasSuffix(commit, "-dirty") || date == "":
+		return fmt.Sprintf("%s %s (commit %s)", name, version, commit)
+	}
+	return fmt.Sprintf("%s %s (commit %s, built %s)", name, version, commit, date)
+}
+
+func BannerFor(out *os.File) string {
+	info, err := out.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return ""
+	}
+	color := os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+	return Banner(color)
+}
+
+func NotifyToStderr(line string) {
+	plain := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf) {
+			return ' '
+		}
+		return r
+	}, line)
+	fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), plain)
 }

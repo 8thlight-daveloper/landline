@@ -90,18 +90,6 @@ func TestSendReadsTheBodyFromStandardInputForADash(t *testing.T) {
 	}
 }
 
-func TestAgentsListsOnePerLine(t *testing.T) {
-	t.Parallel()
-	var seen []string
-	hub := fakeHub(t, &seen)
-	dir := t.TempDir()
-	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
-	r := do(t, dir, hub.URL, "", "agents", "--as", "alpha")
-	if !strings.Contains(r.out.String(), "bravo\tcodex\tmac\tconnected\n") || !strings.Contains(r.out.String(), "alpha\tclaude-code\tlinux\tconnected\n") || !strings.Contains(r.out.String(), "charlie\tcodex\tmac\tdisconnected\n") {
-		t.Fatalf("got %q", r.out.String())
-	}
-}
-
 func TestRemovedCommandsAreUnknownAndSendHelpDoesNotOfferAll(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"inbox", "listen", "hook", "agentd"} {
@@ -111,7 +99,7 @@ func TestRemovedCommandsAreUnknownAndSendHelpDoesNotOfferAll(t *testing.T) {
 		}
 	}
 	helpRun := do(t, t.TempDir(), "", "", "help")
-	help := helpRun.err.String()
+	help := helpRun.out.String()
 	if strings.Contains(help, "or all") || strings.Contains(help, "inbox") || strings.Contains(help, "--wake") {
 		t.Fatalf("help still offers removed things: %q", help)
 	}
@@ -219,7 +207,7 @@ func TestHubFieldsPrintedByLogSendAndAgentsCarryNoControlSequences(t *testing.T)
 	defer hub.Close()
 	dir := t.TempDir()
 	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
-	for _, args := range [][]string{{"send", "--as", "alpha", "--to", "bravo", "hi"}, {"agents", "--as", "alpha"}} {
+	for _, args := range [][]string{{"send", "--as", "alpha", "--to", "bravo", "hi"}} {
 		r := do(t, dir, hub.URL, "", args...)
 		if strings.ContainsAny(r.out.String(), "\x1b\x07") {
 			t.Errorf("%v printed a control sequence: %q", args, r.out.String())
@@ -254,7 +242,7 @@ func TestACommandWhoseTokenTheHubForgotSaysToRegisterAgain(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"gone"}`), 0o600)
 	want := "the hub does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
-	for _, args := range [][]string{{"send", "--as", "alpha", "--to", "bravo", "hi"}, {"agents", "--as", "alpha"}} {
+	for _, args := range [][]string{{"send", "--as", "alpha", "--to", "bravo", "hi"}} {
 		r := do(t, dir, hub.URL, "", args...)
 		if r.code == 0 || !strings.Contains(r.err.String(), want) || strings.Contains(r.err.String(), "(401)") {
 			t.Errorf("%v: %d %q", args, r.code, r.err.String())

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Three binaries ([0110](docs/decisions/0110-three-binaries-landline-switchboard-and-landline-mcp.md)).
+  `landline-switchboard` is the old hub and serves in the foreground with no arguments. `landline-mcp` is the old
+  `landline mcp`. `landline` is the terminal screen and the commands a person runs, built in the `tui/` module, which now
+  imports the root module. `landline agents` reads the list with an observer token, takes no `--as`, and has a text form
+  and `--json`. `just build` and `just install` build all three, and the flake has a package for each and a bundle as
+  the default. The names are `dev.landline.switchboard`, `landline-switchboard.service`, `switchboard.pid`, and
+  `switchboard.out`. Removed: `landline hub`, `landline mcp`, `landline server run`, `landline tui`, the `landline-tui`
+  binary and package, and `just install-tui`.
+  A running install breaks until you run `landline setup claude|codex` and `landline server install` again. Remove an
+  old launchd unit `dev.landline.hub` or an old systemd unit `landline-hub.service` by hand, and delete a `landline-tui`
+  that is still installed.
 - `landline tui` opens a terminal screen of the connected agents, and `landline-tui agents --json` prints a snapshot as
   JSON ([0090](docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)). `landline-tui`
   is its own binary and Go module in `tui/`, built on Bubble Tea. `just install-tui` installs it, `landline tui` runs

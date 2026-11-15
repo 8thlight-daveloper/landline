@@ -12,9 +12,10 @@
 
 ## Time and ports in acceptance
 
-A scenario drives the built binary, so it cannot move a clock. The hub takes `--keepalive`, `--delivery-timeout`, and
-`--grace` as Go durations. A scenario starts the hub with values of a few hundred milliseconds and waits for the real
-interval to pass. The hub's own tests move the injected clock `Config.Now` instead.
+A scenario builds the three binaries and drives them, so it cannot move a clock. The switchboard takes `--keepalive`,
+`--delivery-timeout`, and `--grace` as Go durations. A scenario starts the switchboard with values of a few hundred
+milliseconds and waits for the real interval to pass. The switchboard's own tests move the injected clock `Config.Now`
+instead.
 
-A scenario starts every hub on `--addr 127.0.0.1:0` or a free port it picked. The one check of the default address sets
-`LANDLINE_PORT` to a free port, so it runs while a person's own hub holds 8787.
+A scenario starts every switchboard on `--addr 127.0.0.1:0` or a free port it picked. The one check of the default
+address sets `LANDLINE_PORT` to a free port, so it runs while a person's own switchboard holds 8787.

@@ -69,8 +69,8 @@ func TestAgentsJSONFailsWithAMessageWhenTheHubIsDown(t *testing.T) {
 
 func TestUsageErrors(t *testing.T) {
 	server := hub(t)
-	for _, args := range [][]string{{"agents"}, {"agents", "--json", "extra"}, {"agents", "--bogus"}, {"--bogus"}, {"extra"}} {
-		if code, _, errs := invoke(t, server.URL, args...); code != 2 || !strings.Contains(errs, "usage:") {
+	for _, args := range [][]string{nil, {"--interval", "5s"}, {"agents", "--json", "extra"}, {"agents", "--bogus"}, {"agents", "extra"}, {"--bogus"}, {"extra"}} {
+		if code, out, errs := invoke(t, server.URL, args...); code != 2 || out != "" || !strings.Contains(errs, "usage: landline <command>") {
 			t.Fatalf("%v: code %d err %q", args, code, errs)
 		}
 	}
@@ -118,7 +118,7 @@ func TestBadHubAddressesFailOnStandardErrorWithoutEchoingTheUserinfo(t *testing.
 		"http://user:hunter2@127.0.0.1:1", "http://127.0.0.1:1?token=hunter2", "http://127.0.0.1:1#hunter2",
 		"ftp://127.0.0.1:1", "http://127.0.0.1:1\x1b]0;pwned\x07",
 	} {
-		for _, args := range [][]string{{"agents", "--json"}, nil} {
+		for _, args := range [][]string{{"agents", "--json"}, {"agents"}} {
 			code, out, errs := invoke(t, bad, args...)
 			if code != 1 || out != "" || !strings.Contains(errs, "the hub address must look like") {
 				t.Fatalf("%q: code %d out %q err %q", bad, code, out, errs)
@@ -175,22 +175,22 @@ func TestTheJSONSnapshotIsOneWrite(t *testing.T) {
 }
 
 func TestBadArgumentsExitTwoWithUsageEvenWhenTheAddressIsBad(t *testing.T) {
-	for _, args := range [][]string{{"--bogus"}, {"extra"}, {"agents"}, {"agents", "--bogus"}, {"agents", "--json", "extra"}, {"--interval", "100ms"}} {
+	for _, args := range [][]string{nil, {"--bogus"}, {"extra"}, {"agents", "--bogus"}, {"agents", "--json", "extra"}, {"--interval", "100ms"}} {
 		code, out, errs := invoke(t, "ftp://not-a-hub", args...)
 		if code != 2 || out != "" || strings.Contains(errs, "the hub address must look like") {
 			t.Fatalf("%v: code %d out %q err %q", args, code, out, errs)
 		}
 	}
 	code, _, errs := invoke(t, "ftp://not-a-hub", "--bogus")
-	if code != 2 || !strings.Contains(errs, "usage:") {
+	if code != 2 || !strings.Contains(errs, "usage: landline <command>") {
 		t.Fatalf("code %d err %q", code, errs)
 	}
 }
 
 func TestHelpPrintsUsageToStandardOutAndExitsZero(t *testing.T) {
-	for _, args := range [][]string{{"-h"}, {"--help"}, {"agents", "--help"}} {
+	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}, {"agents", "--help"}} {
 		code, out, errs := invoke(t, "ftp://not-a-hub", args...)
-		if code != 0 || !strings.Contains(out, "usage: landline-tui") || errs != "" {
+		if code != 0 || !strings.Contains(out, "usage: landline <command>") || strings.Contains(out, "landline-tui") || errs != "" {
 			t.Fatalf("%v: code %d out %q err %q", args, code, out, errs)
 		}
 	}

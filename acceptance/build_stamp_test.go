@@ -31,23 +31,14 @@ func buildStamped(t *testing.T, version, commit, date string) string {
 			flags = append(flags, "-X main."+each.name+"="+each.value)
 		}
 	}
-	bin := filepath.Join(t.TempDir(), "landline")
-	args := []string{"build"}
-	if len(flags) > 0 {
-		args = append(args, "-ldflags", strings.Join(flags, " "))
-	}
-	cmd := exec.Command("go", append(args, "-o", bin, "../binary")...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
-	return bin
+	return buildAllWith(t, strings.Join(flags, " "))
 }
 
 func versionOutput(t *testing.T, bin string) string {
 	t.Helper()
 	out, err := runIn(t, bin, isolatedEnv(t.TempDir()), t.TempDir(), "version")
 	if err != nil {
-		t.Fatalf("landline version: %v: %s", err, out)
+		t.Fatalf("%s version: %v: %s", filepath.Base(bin), err, out)
 	}
 	return out
 }
@@ -144,8 +135,10 @@ func TestADirtyStampedBuildRegistersTheDirtyCommitAndNoDateAndShowsTheShortDirty
 
 func TestAPlainBuildShowsDevAndNoCommitOrDateAnywhere(t *testing.T) {
 	bin := buildStamped(t, "", "", "")
-	if got := lastLine(versionOutput(t, bin)); got != "landline dev" {
-		t.Fatalf("version: %q", got)
+	for _, name := range []string{landlineName, mcpName, switchboardName} {
+		if got := lastLine(versionOutput(t, filepath.Join(filepath.Dir(bin), name))); got != name+" dev" {
+			t.Fatalf("%s version: %q", name, got)
+		}
 	}
 	w := startHub(t, bin, t.TempDir(), "")
 	_, handle := w.selfRegistered("demo-folder", "claude-code")
@@ -164,29 +157,52 @@ func TestAPlainBuildShowsDevAndNoCommitOrDateAnywhere(t *testing.T) {
 	}
 }
 
-func TestLandlineVersionPrintsEachFormForTheMatchingLinkerValues(t *testing.T) {
-	for name, form := range map[string]struct{ version, commit, date, want string }{
-		"clean":                      {"0.1.0", stampCommit, stampDate, "landline 0.1.0 (commit " + stampCommit + ", built " + stampDate + ")"},
-		"dirty":                      {"0.1.0", stampCommit + "-dirty", "", "landline 0.1.0 (commit " + stampCommit + "-dirty)"},
-		"no commit":                  {"0.1.0", "", "", "landline 0.1.0"},
-		"a date without a commit":    {"0.1.0", "", stampDate, "landline 0.1.0"},
-		"plain build":                {"", "", "", "landline dev"},
-		"a commit and no version":    {"", stampCommit, stampDate, "landline dev (commit " + stampCommit + ", built " + stampDate + ")"},
-		"another version and commit": {"2.3.4", strings.Repeat("0", 40), "2001-02-02T19:05:06Z", "landline 2.3.4 (commit " + strings.Repeat("0", 40) + ", built 2001-02-02T19:05:06Z)"},
+func TestEachBinaryPrintsItsOwnVersionLineForTheMatchingLinkerValues(t *testing.T) {
+	for name, form := range map[string]struct{ version, commit, date, tail string }{
+		"clean":                      {"0.1.0", stampCommit, stampDate, "0.1.0 (commit " + stampCommit + ", built " + stampDate + ")"},
+		"dirty":                      {"0.1.0", stampCommit + "-dirty", "", "0.1.0 (commit " + stampCommit + "-dirty)"},
+		"no commit":                  {"0.1.0", "", "", "0.1.0"},
+		"a date without a commit":    {"0.1.0", "", stampDate, "0.1.0"},
+		"plain build":                {"", "", "", "dev"},
+		"a commit and no version":    {"", stampCommit, stampDate, "dev (commit " + stampCommit + ", built " + stampDate + ")"},
+		"another version and commit": {"2.3.4", strings.Repeat("0", 40), "2001-02-02T19:05:06Z", "2.3.4 (commit " + strings.Repeat("0", 40) + ", built 2001-02-02T19:05:06Z)"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			out := versionOutput(t, buildStamped(t, form.version, form.commit, form.date))
-			if got := lastLine(out); got != form.want {
-				t.Fatalf("got %q, want %q (whole output %q)", got, form.want, out)
+			bin := buildStamped(t, form.version, form.commit, form.date)
+			if got, want := lastLine(versionOutput(t, bin)), "landline "+form.tail; got != want {
+				t.Fatalf("landline: got %q, want %q", got, want)
+			}
+			for _, each := range []string{mcpName, switchboardName} {
+				out := versionOutput(t, filepath.Join(filepath.Dir(bin), each))
+				if want := each + " " + form.tail + "\n"; out != want {
+					t.Errorf("%s: got %q, want %q", each, out, want)
+				}
 			}
 		})
 	}
 }
 
+func TestLandlineMCPAndTheSwitchboardPrintOneVersionLineOnStandardOutputAndNothingOnStandardError(t *testing.T) {
+	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
+	for _, name := range []string{mcpName, switchboardName} {
+		result := runBin(t, filepath.Join(filepath.Dir(bin), name), isolatedEnv(t.TempDir()), "version")
+		want := name + " 0.1.0 (commit " + stampCommit + ", built " + stampDate + ")\n"
+		if result.code != 0 || result.stdout != want || result.stderr != "" {
+			t.Errorf("%s: %+v", name, result)
+		}
+	}
+}
+
 func TestADirtyBuildPrintsNoDateEvenWhenALinkerValueGivesOne(t *testing.T) {
-	out := versionOutput(t, buildStamped(t, "0.1.0", stampCommit+"-dirty", stampDate))
-	if got := lastLine(out); got != "landline 0.1.0 (commit "+stampCommit+"-dirty)" {
+	bin := buildStamped(t, "0.1.0", stampCommit+"-dirty", stampDate)
+	want := "0.1.0 (commit " + stampCommit + "-dirty)"
+	if got := lastLine(versionOutput(t, bin)); got != "landline "+want {
 		t.Fatalf("got %q", got)
+	}
+	for _, name := range []string{mcpName, switchboardName} {
+		if got := lastLine(versionOutput(t, filepath.Join(filepath.Dir(bin), name))); got != name+" "+want {
+			t.Errorf("%s: got %q", name, got)
+		}
 	}
 }
 
@@ -243,7 +259,7 @@ func TestNoFlagEnvironmentVariableOrRegisterArgumentOverridesTheBuildCommitOrDat
 		"--commit":          {"--commit", "forged"},
 		"--date":            {"--date", "forged"},
 	} {
-		cmd := exec.Command(bin, append([]string{"mcp"}, args...)...)
+		cmd := exec.Command(mcpOf(bin), args...)
 		cmd.Env = forged
 		cmd.Dir = dir
 		cmd.Stdin = strings.NewReader("")
@@ -405,13 +421,12 @@ func TestAHandRegisteredNameShowsNeitherACommitNorADateEvenOnAStampedBuild(t *te
 	absent(t, w.agentJSON("alpha"), "landline_commit", "landline_date", "landline_version")
 }
 
-func TestTheTUIJSONExportCarriesTheExactCommitAndDateAndOmitsThemForAnAgentWithNone(t *testing.T) {
-	tui := buildTUI(t)
+func TestLandlineAgentsJSONCarriesTheExactCommitAndDateAndOmitsThemForAnAgentWithNone(t *testing.T) {
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	_, stamped := w.selfRegistered("stamped-folder", "claude-code")
 	w.register("alpha")
-	result := runTUI(t, tui, w.env, "agents", "--json")
+	result := runBin(t, bin, w.env, "agents", "--json")
 	if result.code != 0 || result.stderr != "" {
 		t.Fatalf("exit %d, stderr %q", result.code, result.stderr)
 	}
@@ -437,12 +452,11 @@ func TestTheTUIJSONExportCarriesTheExactCommitAndDateAndOmitsThemForAnAgentWithN
 	absent(t, hand, stampTUIKey, "landline_date")
 }
 
-func TestTheTUIJSONExportCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
-	tui := buildTUI(t)
+func TestLandlineAgentsJSONCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
 	bin := buildStamped(t, "0.1.0", stampCommit+"-dirty", "")
 	w := startHub(t, bin, t.TempDir(), "")
 	_, handle := w.selfRegistered("stamped-folder", "claude-code")
-	result := runTUI(t, tui, w.env, "agents", "--json")
+	result := runBin(t, bin, w.env, "agents", "--json")
 	var snapshot struct{ Agents []map[string]any }
 	if result.code != 0 || json.Unmarshal([]byte(result.stdout), &snapshot) != nil {
 		t.Fatalf("exit %d: %s", result.code, result.stdout)
@@ -457,4 +471,57 @@ func TestTheTUIJSONExportCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
 		}
 	}
 	t.Fatalf("no row for %s in %v", handle, snapshot.Agents)
+}
+
+func TestLandlineAgentsTextShowsTheShortCommitAndTheDateInTheAttributeFieldOfTheRow(t *testing.T) {
+	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
+	w := startHub(t, bin, t.TempDir(), "")
+	_, handle := w.selfRegistered("stamped-folder", "claude-code")
+	w.register("alpha")
+	result := runBin(t, bin, w.env, "agents")
+	if result.code != 0 || result.stderr != "" {
+		t.Fatalf("%+v", result)
+	}
+	var fields []string
+	for _, line := range strings.Split(result.stdout, "\n") {
+		if strings.HasPrefix(line, handle+"\t") {
+			fields = strings.Split(line, "\t")
+		}
+		if strings.HasPrefix(line, "alpha\t") && (strings.Contains(line, "commit:") || strings.Contains(line, "built:")) {
+			t.Fatalf("a hand-registered name shows a stamp: %q", line)
+		}
+	}
+	if len(fields) != 5 || fields[1] != "claude-code" || fields[3] != "connected" {
+		t.Fatalf("the row for %s: %q", handle, fields)
+	}
+	if !strings.Contains(fields[4], "landline: 0.1.0  commit: "+stampShort+"  built: "+stampDate) || strings.Contains(result.stdout, stampCommit) {
+		t.Fatalf("the attribute field: %q", fields[4])
+	}
+}
+
+func TestTheRegisteredBuildIsTheOneOfLandlineMCPAndNotTheOneOfTheSwitchboard(t *testing.T) {
+	switchboardBuild := buildStamped(t, "0.1.0", stampCommit, stampDate)
+	otherCommit := strings.Repeat("9", 40)
+	mcpBuild := buildStamped(t, "0.1.0", otherCommit, "2001-02-02T19:05:06Z")
+	w := startHub(t, switchboardBuild, t.TempDir(), "")
+	dir := filepath.Join(t.TempDir(), "demo-folder")
+	os.MkdirAll(dir, 0o755)
+	cmd := exec.Command(mcpOf(mcpBuild))
+	cmd.Env, cmd.Dir = w.env, dir
+	p := newMCP(t, cmd)
+	p.handshake("claude-code", "1.0.0")
+	p.tool("landline_agents", `{}`)
+	var entry map[string]any
+	eventually(t, "the agent to be listed", func() bool {
+		for _, each := range w.agentsJSON() {
+			if each["folder"] == "demo-folder" {
+				entry = each
+				return true
+			}
+		}
+		return false
+	})
+	if entry["landline_commit"] != otherCommit || entry["landline_date"] != "2001-02-02T19:05:06Z" {
+		t.Fatalf("wire entry: %v", entry)
+	}
 }

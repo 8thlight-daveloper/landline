@@ -6,18 +6,28 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/8thlight-daveloper/landline/internal/cli/command"
+	"github.com/8thlight-daveloper/landline/internal/model"
 	"github.com/8thlight-daveloper/landline/tui/internal/agentsview"
 	"github.com/8thlight-daveloper/landline/tui/internal/clean"
 	"github.com/8thlight-daveloper/landline/tui/internal/hubclient"
 	"github.com/8thlight-daveloper/landline/tui/internal/pacing"
 	"github.com/8thlight-daveloper/landline/tui/internal/screen"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 )
 
-const usage = "usage: landline-tui [--interval D]\n       landline-tui agents --json\n       landline-tui -h | --help"
+var (
+	version = "dev"
+	commit  = ""
+	date    = ""
+)
+
+var usage = strings.TrimRight(command.Usage, "\n")
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -31,6 +41,15 @@ type options struct {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	env := environment(stdout, stderr)
+	if len(args) > 0 && args[0] == "version" {
+		fmt.Fprint(stdout, bannerFor(stdout))
+		fmt.Fprintln(stdout, command.VersionLine("landline", version, commit, date))
+		return 0
+	}
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") && args[0] != "agents" {
+		return command.Run(args, env)
+	}
 	opts, problem := parseArgs(args)
 	if opts.help {
 		fmt.Fprintln(stdout, usage)
@@ -40,16 +59,41 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, problem, 2)
 	}
 	if err := pacing.CheckInterval(opts.interval); err != nil {
-		return fail(stderr, "landline-tui: "+err.Error(), 2)
+		return fail(stderr, withUsage("landline: "+err.Error()), 2)
+	}
+	if !opts.agents && !(isTerminal(os.Stdin) && isTerminal(stdout)) {
+		return fail(stderr, usage, 2)
 	}
 	client, code := connect(stderr)
 	if client == nil {
 		return code
 	}
 	if opts.agents {
-		return agents(client, stdout, stderr)
+		return agents(client, opts.asJSON, stdout, stderr)
 	}
 	return interactive(opts.interval, client, stderr)
+}
+
+func environment(stdout, stderr io.Writer) command.Env {
+	home, _ := os.UserHomeDir()
+	host, _ := os.Hostname()
+	return command.Env{
+		Stdin: os.Stdin, Stdout: stdout, Stderr: stderr, Getenv: os.Getenv,
+		ConfigDir: filepath.Join(home, ".config", "landline"), Home: home, Host: host,
+		Banner: func() string { return command.BannerFor(os.Stderr) },
+	}
+}
+
+func bannerFor(out io.Writer) string {
+	if file, ok := out.(*os.File); ok {
+		return command.BannerFor(file)
+	}
+	return ""
+}
+
+func isTerminal(out any) bool {
+	file, ok := out.(*os.File)
+	return ok && isatty.IsTerminal(file.Fd())
 }
 
 func connect(stderr io.Writer) (*hubclient.Client, int) {
@@ -70,20 +114,46 @@ func fail(stderr io.Writer, text string, code int) int {
 	return code
 }
 
-func agents(client *hubclient.Client, stdout, stderr io.Writer) int {
+func agents(client *hubclient.Client, asJSON bool, stdout, stderr io.Writer) int {
 	list, err := client.Agents()
 	if err != nil {
-		return fail(stderr, "landline-tui: "+err.Error(), 1)
+		return fail(stderr, "landline: "+err.Error(), 1)
 	}
-	raw, _ := json.MarshalIndent(agentsview.Build(client.Address(), time.Now(), list), "", "  ")
-	fmt.Fprintln(stdout, string(raw))
+	view := agentsview.Build(client.Address(), time.Now(), list)
+	if asJSON {
+		raw, _ := json.MarshalIndent(view, "", "  ")
+		fmt.Fprintln(stdout, string(raw))
+		return 0
+	}
+	fmt.Fprint(stdout, agentLines(view))
 	return 0
+}
+
+func agentLines(view agentsview.View) string {
+	var out strings.Builder
+	for _, row := range view.Agents {
+		line := fmt.Sprintf("%s\t%s\t%s\t%s", command.Printable(row.Handle), command.Printable(row.Harness), command.Printable(row.Host), row.State)
+		if attributes := rootAgent(row).Attributes(); attributes != "" {
+			line += "\t" + command.Printable(attributes)
+		}
+		out.WriteString(line + "\n")
+	}
+	return out.String()
+}
+
+func rootAgent(row agentsview.Row) model.AgentInfo {
+	return model.AgentInfo{
+		Label: row.Label, Folder: row.Folder, Branch: row.Branch, Worktree: row.Worktree,
+		HarnessVersion: row.HarnessVersion, LandlineVersion: row.LandlineVersion,
+		LandlineCommit: row.LandlineCommit, LandlineDate: row.LandlineDate,
+		Model: row.Model, Effort: row.Effort,
+	}
 }
 
 func interactive(interval time.Duration, client *hubclient.Client, stderr io.Writer) int {
 	model := screen.New(client.Address(), interval, client.Agents, time.Now)
 	if _, err := tea.NewProgram(model, tea.WithAltScreen()).Run(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
-		return fail(stderr, "landline-tui: "+err.Error(), 1)
+		return fail(stderr, "landline: "+err.Error(), 1)
 	}
 	return 0
 }
@@ -129,7 +199,7 @@ func parseArgs(args []string) (options, string) {
 			return opts, usage
 		}
 	}
-	if opts.agents != opts.asJSON {
+	if opts.asJSON && !opts.agents {
 		return opts, usage
 	}
 	return opts, ""

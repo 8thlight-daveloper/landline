@@ -30,8 +30,9 @@ and a date. `tools/stamp/stamp.sh` reads git and `just build` and `just install`
 
 ## Recipes
 
-`just build` and `just install` call the script in the recipe body and pass `-X main.version`, `-X main.commit`, and
-`-X main.date` to the linker. A tree without `.git` still builds, with no commit and no date.
+`just build` and `just install` build all three binaries. They call the script in the recipe body and pass
+`-X main.version`, `-X main.commit`, and `-X main.date` to the linker for each of them. A tree without `.git` still
+builds, with no commit and no date.
 
 ## TUI column
 
@@ -39,4 +40,4 @@ The agent list screen shows the short commit in a `COMMIT` column that comes las
 priority. It is dropped first, is shown whole or not at all (13 columns wide, the width of a short commit with
 `-dirty`), and so first appears at a terminal width of 162 columns. The date is not shown on the screen. The unit tests
 in `tui/internal/screen` cover the commit cell and the column. An acceptance scenario does not, because acceptance
-drives only `landline-tui agents --json` for the TUI.
+drives only `landline agents --json` for the TUI.

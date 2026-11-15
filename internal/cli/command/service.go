@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	LaunchdLabel = "dev.landline.hub"
-	SystemdUnit  = "landline-hub.service"
+	LaunchdLabel = "dev.landline.switchboard"
+	SystemdUnit  = "landline-switchboard.service"
 )
 
 func LaunchdPlist(binary, dataDir string) string {
@@ -23,8 +23,6 @@ func LaunchdPlist(binary, dataDir string) string {
   <key>ProgramArguments</key>
   <array>
     <string>%s</string>
-    <string>server</string>
-    <string>run</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -36,16 +34,16 @@ func LaunchdPlist(binary, dataDir string) string {
   <string>%s</string>
 </dict>
 </plist>
-`, LaunchdLabel, esc(binary), esc(filepath.Join(dataDir, "hub.out")), esc(filepath.Join(dataDir, "hub.out")))
+`, LaunchdLabel, esc(binary), esc(filepath.Join(dataDir, "switchboard.out")), esc(filepath.Join(dataDir, "switchboard.out")))
 }
 
 func SystemdUnitFile(binary string) string {
 	quoted := strings.ReplaceAll(strings.ReplaceAll(binary, `\`, `\\`), `"`, `\"`)
 	return fmt.Sprintf(`[Unit]
-Description=Landline hub, a shared line for coding agents
+Description=Landline switchboard, a shared line for coding agents
 
 [Service]
-ExecStart="%s" server run
+ExecStart="%s"
 Restart=on-failure
 
 [Install]

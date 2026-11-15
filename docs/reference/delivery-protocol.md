@@ -1,7 +1,7 @@
 # Delivery protocol
 
 The HTTP shapes that [0070](../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) names. The hub
-keeps no mail. Each agent's `landline mcp` process opens one stream, the hub sends each message down it, and the MCP
+keeps no mail. Each agent's `landline-mcp` process opens one stream, the hub sends each message down it, and the MCP
 process reports back what it did with the message. The types are in `internal/model/wire.go`.
 
 ## Authentication
@@ -143,10 +143,10 @@ agent, such as a terminal viewer.
 
 ## Timing flags
 
-`landline server run` takes `--keepalive`, `--delivery-timeout`, and `--grace`, each a Go duration such as `200ms`, for
-the 15 second keepalive, the 20 second report wait, and the 2 minute grace. A zero, negative, or unparsable value is
-refused. They exist so a test can run the timing rules fast. `LANDLINE_PORT` sets the default port, 8787, for a hub with
-no `--addr` and for a client with no saved hub.
+`landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, and `--grace`, each a Go
+duration such as `200ms`, for the 15 second keepalive, the 20 second report wait, and the 2 minute grace. A zero,
+negative, or unparsable value is refused. They exist so a test can run the timing rules fast. `LANDLINE_PORT` sets the
+default port, 8787, for a hub with no `--addr` and for a client with no saved hub.
 
 ## Reconnecting
 

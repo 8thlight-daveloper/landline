@@ -2,7 +2,7 @@
 category: architecture
 status: accepted
 approval: person
-affects: [hub/server, cli/command]
+affects: [switchboard/server, cli/command]
 builds-on: ['0020', '0070', '0080']
 partly-superseded-by: ['0110']
 note: Drafted on 2026-11-12 after the registry was checked by hand. Sending from the TUI is left to a later record.

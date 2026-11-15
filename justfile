@@ -8,29 +8,24 @@ md_paths := "docs contracts AGENTS.md README.md"
 default:
     @just --list
 
-# Build the landline binary into ./bin.
-build:
+# Build landline, landline-switchboard, and landline-mcp into ./bin.
+build: (binaries "bin")
+
+# Build and install the three binaries into ~/.local/bin, or into prefix/bin when one is given.
+install prefix="~/.local": (binaries prefix + "/bin")
+    @echo "installed landline, landline-switchboard, and landline-mcp in {{ prefix }}/bin"
+
+[private]
+binaries folder:
+    mkdir -p {{ folder }}
     stamp="$(tools/stamp/stamp.sh)"; commit="${stamp#commit=}"; commit="${commit%%$'\n'*}"; date="${stamp##*date=}"; \
       flags="-X main.version=$(tr -d '[:space:]' < VERSION)"; \
       if [ -n "$commit" ]; then flags="$flags -X main.commit=$commit"; fi; \
       if [ -n "$date" ]; then flags="$flags -X main.date=$date"; fi; \
-      unset GOROOT; CGO_ENABLED=0 go build -trimpath -ldflags "$flags" -o bin/landline ./binary
-
-# Build and install landline into ~/.local/bin, or into prefix/bin when one is given.
-install prefix="~/.local":
-    mkdir -p {{ prefix }}/bin
-    stamp="$(tools/stamp/stamp.sh)"; commit="${stamp#commit=}"; commit="${commit%%$'\n'*}"; date="${stamp##*date=}"; \
-      flags="-X main.version=$(tr -d '[:space:]' < VERSION)"; \
-      if [ -n "$commit" ]; then flags="$flags -X main.commit=$commit"; fi; \
-      if [ -n "$date" ]; then flags="$flags -X main.date=$date"; fi; \
-      unset GOROOT; CGO_ENABLED=0 go build -trimpath -ldflags "$flags" -o {{ prefix }}/bin/landline ./binary
-    @echo "installed {{ prefix }}/bin/landline"
-
-# Build and install landline-tui into ~/.local/bin, or into prefix/bin when one is given.
-install-tui prefix="~/.local":
-    mkdir -p {{ prefix }}/bin
-    out="$(cd {{ prefix }}/bin && pwd)"; cd tui && unset GOROOT; CGO_ENABLED=0 go build -trimpath -o "$out/landline-tui" .
-    @echo "installed {{ prefix }}/bin/landline-tui"
+      out="$(cd {{ folder }} && pwd)"; unset GOROOT; export CGO_ENABLED=0; \
+      go build -trimpath -ldflags "$flags" -o "$out/landline-switchboard" ./cmd/landline-switchboard; \
+      go build -trimpath -ldflags "$flags" -o "$out/landline-mcp" ./cmd/landline-mcp; \
+      (cd tui && go build -trimpath -ldflags "$flags" -o "$out/landline" .)
 
 # Everything CI runs.
 check: fmt-check lint-go lint-tui lint-deps lint-acceptance lint-records test test-tui

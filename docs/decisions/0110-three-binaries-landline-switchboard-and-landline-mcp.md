@@ -2,7 +2,7 @@
 category: architecture
 status: accepted
 approval: person
-affects: [hub/server, mcp/server, cli/command, agent/viewer]
+affects: [switchboard/server, mcp/server, cli/command, agent/viewer]
 builds-on: ['0060', '0070', '0090', '0100']
 partly-supersedes: ['0010', '0060', '0090', '0100']
 note: Drafted on 2026-11-14. It replaces the one-program layout of 0010, the command names of 0060, and the TUI binary of 0090 and 0100.

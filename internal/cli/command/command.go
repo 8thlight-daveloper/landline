@@ -23,6 +23,7 @@ type Env struct {
 	Stderr    io.Writer
 	Getenv    func(string) string
 	ConfigDir string
+	Home      string
 	Host      string
 	Banner    func() string
 }
@@ -32,22 +33,23 @@ type session struct {
 	Token string `json:"token"`
 }
 
-const usage = `landline <command> [flags]
+const Usage = `usage: landline <command> [flags]
 
-  server    up|run|down|status|install|join|log   run and find the hub
-  setup     claude|codex   add the Landline MCP server to a harness, once
+  Run with no command in a terminal, landline opens the agent screen. --interval D sets how often it asks for the list.
+
+  agents    [--json] [--interval D]   list agents and whether each is connected. --json prints the screen's view
+  setup     claude|codex   add the Landline MCP server, landline-mcp, to a harness, once
   claude    [--label L] [-- args]   start Claude Code with the channel loaded
-  mcp       the MCP server a harness starts. It registers itself
-  tui       [args]   open the agent screen. Runs landline-tui, which "just install-tui" builds
+  server    up|down|restart|status|install|join|log   run and find the switchboard
 
   register  --name N --harness H [--host H] [--session S]   needs LANDLINE_URL and LANDLINE_SECRET.
             A hand-registered name holds no delivery stream, so it can send but cannot receive
-            unless "landline mcp --as N --channel" runs for it
-  agents    --as N   lists agents and whether each is connected
+            unless "landline-mcp --as N --channel" runs for it
   send      --as N --to X [--thread T] [--kind K] [--reply-to ID] <body, or - for stdin>
             --to names one agent. The agent must be connected, or the send fails
   log       [--after SEQ]
   join      <hub address>   save a hub address and its secret, for a hub on another machine
+  version   print the version and the build
 
 --as defaults to LANDLINE_AS. The hub address and secret come from LANDLINE_URL and LANDLINE_SECRET, or from the file
 that "landline join" and "landline server up" save, readable only by you.
@@ -55,29 +57,32 @@ that "landline join" and "landline server up" save, readable only by you.
 
 func Run(args []string, env Env) int {
 	env = withConfig(env)
-	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
-		if env.Banner != nil {
-			if banner := env.Banner(); banner != "" {
-				fmt.Fprint(env.Stderr, banner, "\n")
-			}
-		}
-		fmt.Fprint(env.Stderr, usage)
+	if len(args) == 0 {
+		showUsage(env, env.Stderr)
 		return 2
+	}
+	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		showUsage(env, env.Stdout)
+		return 0
 	}
 	var err error
 	switch args[0] {
 	case "register":
 		err = register(args[1:], env)
-	case "agents":
-		err = agents(args[1:], env)
 	case "send":
 		err = send(args[1:], env)
 	case "log":
 		err = logRead(args[1:], env)
 	case "join":
 		err = join(args[1:], env)
+	case "setup":
+		return runSetup(args[1:], env)
+	case "claude":
+		return runClaude(args[1:], env)
+	case "server":
+		return runServer(args[1:], env)
 	default:
-		fmt.Fprintf(env.Stderr, "landline: unknown command %q\n\n%s", args[0], usage)
+		fmt.Fprintf(env.Stderr, "landline: unknown command %q\n\n%s", args[0], Usage)
 		return 2
 	}
 	if err != nil {
@@ -85,6 +90,15 @@ func Run(args []string, env Env) int {
 		return 1
 	}
 	return 0
+}
+
+func showUsage(env Env, out io.Writer) {
+	if env.Banner != nil {
+		if banner := env.Banner(); banner != "" {
+			fmt.Fprint(env.Stderr, banner, "\n")
+		}
+	}
+	fmt.Fprint(out, Usage)
 }
 
 func flags(name string, env Env) *flag.FlagSet {
@@ -178,34 +192,6 @@ func forgotten(err error) error {
 	return err
 }
 
-func agents(args []string, env Env) error {
-	set := flags("agents", env)
-	as := set.String("as", env.Getenv("LANDLINE_AS"), "your agent name")
-	if err := set.Parse(args); err != nil {
-		return err
-	}
-	c, err := connect(*as, env)
-	if err != nil {
-		return err
-	}
-	list, err := c.Agents()
-	if err != nil {
-		return forgotten(err)
-	}
-	for _, a := range list {
-		state := "disconnected"
-		if a.Connected {
-			state = "connected"
-		}
-		line := fmt.Sprintf("%s\t%s\t%s\t%s", printable(a.Name), printable(a.Harness), printable(a.Host), state)
-		if attributes := a.Attributes(); attributes != "" {
-			line += "\t" + printable(attributes)
-		}
-		fmt.Fprintln(env.Stdout, line)
-	}
-	return nil
-}
-
 func send(args []string, env Env) error {
 	set := flags("send", env)
 	as := set.String("as", env.Getenv("LANDLINE_AS"), "your agent name")
@@ -236,6 +222,8 @@ func send(args []string, env Env) error {
 	fmt.Fprintln(env.Stdout)
 	return nil
 }
+
+func Printable(text string) string { return printable(text) }
 
 func printable(text string) string {
 	return strings.Map(func(r rune) rune {

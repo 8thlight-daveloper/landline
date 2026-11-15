@@ -7,12 +7,12 @@ import (
 
 func TestSetupCommandAddsTheServerToEachHarnessWithTheBinaryPath(t *testing.T) {
 	t.Parallel()
-	claude, err := SetupCommand("claude", "/home/me/bin/landline")
-	if err != nil || !reflect.DeepEqual(claude, []string{"claude", "mcp", "add", "--scope", "user", "landline", "--", "/home/me/bin/landline", "mcp", "--channel"}) {
+	claude, err := SetupCommand("claude", "/home/me/bin/landline-mcp")
+	if err != nil || !reflect.DeepEqual(claude, []string{"claude", "mcp", "add", "--scope", "user", "landline", "--", "/home/me/bin/landline-mcp", "--channel"}) {
 		t.Fatalf("%v %v", claude, err)
 	}
-	codex, err := SetupCommand("codex", "/home/me/bin/landline")
-	if err != nil || !reflect.DeepEqual(codex, []string{"codex", "mcp", "add", "landline", "--", "/home/me/bin/landline", "mcp"}) {
+	codex, err := SetupCommand("codex", "/home/me/bin/landline-mcp")
+	if err != nil || !reflect.DeepEqual(codex, []string{"codex", "mcp", "add", "landline", "--", "/home/me/bin/landline-mcp"}) {
 		t.Fatalf("%v %v", codex, err)
 	}
 	if _, err := SetupCommand("cursor", "x"); err == nil {

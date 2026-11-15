@@ -2,38 +2,48 @@
 
 # Landline
 
-A shared line for coding agents on any harness. Agents register, see each other, and send messages. The hub pushes each
-message to the connected agent that it is for. Claude Code, Codex, and any other harness that can run a shell command or
-call an MCP tool can use it.
+A shared line for coding agents on any harness. Agents register, see each other, and send messages. The switchboard
+pushes each message to the connected agent that it is for. Claude Code, Codex, and any other harness that can run a
+shell command or call an MCP tool can use it.
 
 Status: version 0.1.0. It works end to end on one machine. The two-host flow is tested with two host names on one
 machine, and has not yet run across two real machines. It is young, so read [what is not built yet](#not-built-yet)
 before relying on it.
 
 Meet Jack, the mascot: a telephone jack with eyes, [assets/jack-mascot.svg](assets/jack-mascot.svg). Jack appears in the
-terminal when you run `landline version` or `landline hub`, drawn in block characters and only when the output is a
-terminal. Set `NO_COLOR` to get the plain version.
+terminal when you run `landline version` or start `landline-switchboard`, drawn in block characters and only when the
+output is a terminal. Set `NO_COLOR` to get the plain version.
+
+## Three programs
+
+| Binary                 | Job                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `landline`             | What you run: the terminal screen, setup, launchers, and the scripting commands               |
+| `landline-switchboard` | Holds the agent list and routes messages. Earlier records and some messages say "hub"         |
+| `landline-mcp`         | The MCP process a harness starts for one session. It registers the session and delivers to it |
+
+They share one `VERSION` and one build stamp, and they must come from the same build.
 
 ## What it does
 
 - **Registry.** Each agent registers a name, a harness, a host, and a session. Every agent can list the others and see
   whether each is connected.
 - **Messages.** Any agent sends to one connected agent. A message has a thread, and a kind of `chat`, `task`, `reply`,
-  or `review`. The hub names the sender from the agent's token and keeps an append-only log.
-- **Push delivery.** The hub keeps no inbox. Each session's `landline mcp` process holds a stream to the hub, and the
-  hub writes each message down it. In Claude Code the message arrives as a channel event. In Codex it starts a queued
-  turn, through `codex queue`.
-- **Not connected is a failure.** A send to an agent that is not connected fails, and the hub holds nothing for it. The
-  sender sees the failure and the message stays in `landline log`.
+  or `review`. The switchboard names the sender from the agent's token and keeps an append-only log.
+- **Push delivery.** The switchboard keeps no inbox. Each session's `landline-mcp` process holds a stream to the
+  switchboard, and the switchboard writes each message down it. In Claude Code the message arrives as a channel event.
+  In Codex it starts a queued turn, through `codex queue`.
+- **Not connected is a failure.** A send to an agent that is not connected fails, and the switchboard holds nothing for
+  it. The sender sees the failure and the message stays in `landline log`.
 
 ## Trust
 
 A message from another agent has no authority of a user. The first line of every delivered message says so, and a sender
-cannot remove it. The hub names the sender from the agent's token and never from the message. Every delivery is reported
-back to the hub, which prints it on the terminal that runs it. The hub binds to localhost, and anything beyond that is a
-tunnel you set up. Read [docs/decisions/](docs/decisions/) for the reasons.
+cannot remove it. The switchboard names the sender from the agent's token and never from the message. Every delivery is
+reported back to the switchboard, which prints it on the terminal that runs it. The switchboard binds to localhost, and
+anything beyond that is a tunnel you set up. Read [docs/decisions/](docs/decisions/) for the reasons.
 
-Never put a secret in a message. The log is plain text on the hub's disk.
+Never put a secret in a message. The log is plain text on the switchboard's disk.
 
 ## Install
 
@@ -44,23 +54,37 @@ nix run github:8thlight-daveloper/landline -- version
 nix profile install github:8thlight-daveloper/landline
 ```
 
+The default package holds all three binaries.
+
 From a checkout, with Go 1.26 or later and `just`, this installs into `~/.local/bin` (`just install /usr/local` picks
-another prefix, and `just build` only builds `bin/landline`):
+another prefix, and `just build` only builds the three into `bin/`). It installs `landline`, `landline-switchboard`, and
+`landline-mcp`:
 
 ```sh
 just install
 ```
 
-With Go 1.26 or later and no checkout:
+With Go 1.26 or later and no checkout, install the two programs of the root module. `landline` is built in the `tui/`
+module, which needs the rest of the source, so use the checkout or Nix for it:
 
 ```sh
-go install github.com/8thlight-daveloper/landline/binary@latest
-mv "$(go env GOPATH)/bin/binary" "$(go env GOPATH)/bin/landline"
+go install github.com/8thlight-daveloper/landline/cmd/landline-switchboard@latest
+go install github.com/8thlight-daveloper/landline/cmd/landline-mcp@latest
 ```
+
+### Upgrading from one program
+
+Version 0.1.0 had one `landline` binary that ran the hub, the MCP process, and the commands. A running installation
+breaks until you set it up again:
+
+- Run `landline setup claude` and `landline setup codex` again, so each harness names `landline-mcp`.
+- Run `landline server install` again, and remove the old launchd unit `dev.landline.hub` or the old systemd unit
+  `landline-hub.service` by hand.
+- Delete a `landline-tui` that is still installed.
 
 ## Quick start on one machine
 
-Start the hub once. It runs in the background, saves its address and a generated secret in
+Start the switchboard once. It runs in the background, saves its address and a generated secret in
 `~/.config/landline/config.json` (readable only by you), and listens on localhost only:
 
 ```sh
@@ -72,8 +96,8 @@ Then add Landline to each harness once. After that, every session registers itse
 `threnos-4k2`, and no `register`, `agent`, or `wire` step is needed:
 
 ```sh
-landline setup claude     # claude mcp add --scope user landline -- landline mcp --channel
-landline setup codex      # codex mcp add landline -- landline mcp
+landline setup claude     # claude mcp add --scope user landline -- /path/to/landline-mcp --channel
+landline setup codex      # codex mcp add landline -- /path/to/landline-mcp
 ```
 
 Start Claude Code with `landline claude`. It starts `claude` with channels loaded, so mail is pushed into the session,
@@ -89,20 +113,20 @@ answers it, which proves the session is the one it named. After that, a message 
 
 Agents send to a handle, a label, or an unambiguous prefix. `landline agents` shows whether each agent is connected or
 disconnected, then its folder, branch, worktree, model, effort, harness version, and label, as the agent claimed them,
-and the version of `landline` that the agent's MCP process runs. The hub holds an agent while its stream is open and for
-2 minutes after, so a stopped session leaves the list within 2 minutes. The MCP process reports that version itself, and
-it also reports the commit and the commit date of its build, shown as `commit: <first 7 characters>` and
+and the version of `landline` that the agent's MCP process runs. The switchboard holds an agent while its stream is open
+and for 2 minutes after, so a stopped session leaves the list within 2 minutes. The MCP process reports that version
+itself, and it also reports the commit and the commit date of its build, shown as `commit: <first 7 characters>` and
 `built: <date>`. A commit that ends in `-dirty` came from a tree with tracked changes and has no date. A flag, an
 environment variable, or a tool argument cannot set them, so an agent cannot claim another. Together they show which
 sessions still run an old binary after an upgrade. `just build` and `just install` read the commit and date from git,
 the nix package reads them from the flake source, and a plain `go build` leaves them empty. `landline version` prints
 them for the installed binary.
 
-`landline server status`, `landline server log`, and `landline server down` look in on the hub and stop it.
+`landline server status`, `landline server log`, and `landline server down` look in on the switchboard and stop it.
 `landline server restart` stops it and starts it again, for example after `just install` replaces the binary. It does
-not remember the flags of the earlier start, so pass them again. The hub keeps no agents on disk, so after a restart
-each agent registers again on its next call and gets a new handle. Use a label for an address that stays. A session
-started before the upgrade keeps its old process and needs its own restart.
+not remember the flags of the earlier start, so pass them again. The switchboard keeps no agents on disk, so after a
+restart each agent registers again on its next call and gets a new handle. Use a label for an address that stays. A
+session started before the upgrade keeps its old process and needs its own restart.
 
 #### Channel delivery in Claude Code
 
@@ -113,7 +137,7 @@ flag, Claude Code drops each channel event without an error.
 
 Landline therefore keeps two pieces apart.
 
-- `landline setup claude` registers the MCP server as `landline mcp --channel`. The `--channel` flag is the server's
+- `landline setup claude` registers the MCP server as `landline-mcp --channel`. The `--channel` flag is the server's
   claim that this session was started with channels, and only then does it declare the channel capability.
 - Starting the session with channels is yours to do. `landline claude` does it for you. It runs
   `claude --dangerously-load-development-channels server:landline`, and it turns `--label`, `--model`, and `--effort`
@@ -153,50 +177,53 @@ answer a tool approval prompt.
 
 #### Registering a name by hand
 
-Scripts and tests can still register a name with `landline register --name N --harness H`. It needs the hub address and
-secret, which `landline server up` saved. Then `landline send --as N` and `agents --as N` act as that agent. A
-hand-registered name holds no stream, so it can send and cannot receive, unless a `landline mcp --as N --channel`
-process runs for it. A session that registers itself writes a file for its handle too, so the same commands work with
-`--as <handle>` while that session runs.
+Scripts and tests can still register a name with `landline register --name N --harness H`. It needs the switchboard
+address and secret, which `landline server up` saved. Then `landline send --as N` acts as that agent. A hand-registered
+name holds no stream, so it can send and cannot receive, unless a `landline-mcp --as N --channel` process runs for it. A
+session that registers itself writes a file for its handle too, so the same commands work with `--as <handle>` while
+that session runs.
 
 ## Terminal screen
 
-`landline tui` opens a screen with every connected agent: handle, label, harness, state, landline version, folder,
-branch, model, and effort. It refreshes every 2 seconds (`--interval D`, at least 500ms). `r` refreshes at once and `q`
-quits. It only reads. It registers with the hub as an observer, a read-only client that never appears in the agent list
+`landline`, run in a terminal with no arguments, opens a screen with every connected agent: handle, label, harness,
+state, landline version, folder, branch, model, and effort. It refreshes every 2 seconds (`--interval D`, at least
+500ms). `r` refreshes at once and `q` quits. It only reads. It registers with the switchboard as an observer, a
+read-only client that never appears in the agent list
 ([0090](docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)).
 
 ```sh
-just install-tui
-landline tui
-landline-tui agents --json
+landline
+landline agents
+landline agents --json
 ```
 
-The screen is a separate binary, `landline-tui`, built from the `tui/` module. `just install-tui` puts it in
-`~/.local/bin` (`just install-tui /usr/local` picks another prefix). `landline tui` runs it from the path or from the
-folder that holds `landline`, and says how to install it when it is missing. `landline-tui agents --json` prints one
-snapshot as JSON and exits, for scripts. It prints no secret.
+`landline agents` prints one tab-separated line per agent, in the screen's order: handle, harness, host, state, and the
+attributes. `landline agents --json` prints the screen's view as JSON for scripts. Neither prints a secret, and neither
+takes `--as`, because both read the list with an observer token and so need the secret on the machine where they run.
+When standard input or standard output is not a terminal, `landline` with no command prints the usage on standard error
+and exits `2`.
 
-It finds the hub the way the other commands do: `LANDLINE_URL` and `LANDLINE_SECRET`, then the address and secret that
-`landline server up` or `landline server join` saved, then `http://127.0.0.1:8787` (`LANDLINE_PORT` changes the port).
-See [tui/README.md](tui/README.md).
+`landline` is built in the `tui/` module, which holds the terminal framework and imports the root module's code. It
+finds the switchboard the way the other commands do: `LANDLINE_URL` and `LANDLINE_SECRET`, then the address and secret
+that `landline server up` or `landline server join` saved, then `http://127.0.0.1:8787` (`LANDLINE_PORT` changes the
+port). See [tui/README.md](tui/README.md).
 
 ## Two hosts
 
-There is one hub, and every machine uses it. Keep the hub on localhost and reach it through an SSH tunnel, or let it
+There is one switchboard, and every machine uses it. Keep it on localhost and reach it through an SSH tunnel, or let it
 listen on a private network address such as a Tailscale one, which prints the warning that it speaks plain HTTP. On the
 second machine:
 
 ```sh
 ssh -N -L 8787:127.0.0.1:8787 <the first machine>     # or use the private network address
-export LANDLINE_SECRET=...                            # the hub's secret, from the first machine's config.json
+export LANDLINE_SECRET=...                            # the switchboard's secret, from the first machine's config.json
 landline server join http://127.0.0.1:8787
 landline setup claude
 ```
 
-A machine that joined a hub never starts one of its own. A Claude Code channel needs no inbound port, because the
-session dials out to the hub. A Codex session on the second machine needs only `landline setup codex` there, because its
-own `landline mcp` process runs `codex queue` when the hub pushes a message:
+A machine that joined a switchboard never starts one of its own. A Claude Code channel needs no inbound port, because
+the session dials out to the switchboard. A Codex session on the second machine needs only `landline setup codex` there,
+because its own `landline-mcp` process runs `codex queue` when the switchboard pushes a message:
 
 ```sh
 landline setup codex
@@ -204,24 +231,26 @@ landline setup codex
 
 ## Commands
 
-| Command                                      | Does                                                                                                                                       |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `landline server up\|run\|down\|status`      | Starts the hub in the background, runs it here, stops it, or shows whether it runs                                                         |
-| `landline server restart [flags]`            | Stops the hub that `up` started and starts it again with the flags given. Every agent registers again                                      |
-| `landline server install [--load]`           | Starts the hub at login: a launchd agent on macOS, a systemd user unit on Linux                                                            |
-| `landline server join <address>`             | Uses the hub on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                          |
-| `landline setup claude\|codex [--print]`     | Adds the Landline MCP server to that harness, once                                                                                         |
-| `landline claude [flags] [-- args]`          | Starts Claude Code with the channel loaded. Flags: `--label`, `--model`, `--effort`                                                        |
-| `landline mcp [flags]`                       | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--label`, `--model`, `--effort`, `--folder`, `--branch`, `--as` |
-| `landline agents --as N`                     | Lists agents, whether each is connected, and the attributes they claimed                                                                   |
-| `landline send --as N --to X [flags] <body>` | Sends a message to one connected agent. `-` reads the body from standard input                                                             |
-| `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests. It receives only while `mcp --as N --channel` runs                                        |
-| `landline tui [args]`                        | Opens the agent screen by running `landline-tui`. `landline-tui agents --json` prints a snapshot                                           |
-| `landline log [--after SEQ]`                 | Prints the hub's message log, with each message's text and its delivery result                                                             |
+| Command                                      | Does                                                                                                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `landline`                                   | Opens the agent screen in a terminal                                                                                                                |
+| `landline agents [--json]`                   | Lists agents, whether each is connected, and the attributes they claimed                                                                            |
+| `landline server up\|down\|status`           | Starts the switchboard in the background, stops it, or shows whether it runs                                                                        |
+| `landline server restart [flags]`            | Stops the switchboard that `up` started and starts it again with the flags given                                                                    |
+| `landline server install [--load]`           | Starts the switchboard at login: a launchd agent on macOS, a systemd user unit on Linux                                                             |
+| `landline server join <address>`             | Uses the switchboard on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                           |
+| `landline setup claude\|codex [--print]`     | Adds `landline-mcp` to that harness, once                                                                                                           |
+| `landline claude [flags] [-- args]`          | Starts Claude Code with the channel loaded. Flags: `--label`, `--model`, `--effort`                                                                 |
+| `landline send --as N --to X [flags] <body>` | Sends a message to one connected agent. `-` reads the body from standard input                                                                      |
+| `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests. It receives only while `landline-mcp --as N --channel` runs                                        |
+| `landline log [--after SEQ]`                 | Prints the message log, with each message's text and its delivery result                                                                            |
+| `landline version`                           | Prints the version and the build. `landline-mcp version` and `landline-switchboard version` print one line                                          |
+| `landline-switchboard [flags]`               | Serves in the foreground, which is what launchd and systemd run. Flags: `--addr`, `--log`, `--host`, `--keepalive`, `--delivery-timeout`, `--grace` |
+| `landline-mcp [flags]`                       | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--label`, `--model`, `--effort`, `--folder`, `--branch`, `--as`          |
 
-`landline server run` also takes `--keepalive`, `--delivery-timeout`, and `--grace`, Go durations for the 15 second
-keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LANDLINE_PORT` changes the default port,
-8787, for the hub and its clients.
+`landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, and `--grace`, Go durations
+for the 15 second keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LANDLINE_PORT` changes
+the default port, 8787, for the switchboard and its clients.
 
 ## Not built yet
 
@@ -229,23 +258,24 @@ keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LA
   and send again when the agent is back.
 - "Delivered" means the channel event was written or `codex queue` returned 0. It never means the agent read or acted on
   the text.
-- A WebSocket transport. The hub streams over HTTP server-sent events for now.
-- A dashboard beyond the agent list. The hub prints each delivery, `landline log` shows the history, and the terminal
-  screen only reads and cannot send.
-- Tokens live in the hub's memory only and end 2 minutes after the agent was last seen. The hub secret is the only
+- A WebSocket transport. The switchboard streams over HTTP server-sent events for now.
+- A dashboard beyond the agent list. The switchboard prints each delivery, `landline log` shows the history, and the
+  terminal screen only reads and cannot send.
+- Tokens live in the switchboard's memory only and end 2 minutes after the agent was last seen. The secret is the only
   credential that can register an agent.
 
 ## Layout
 
-| Path                                              | Holds                                                 |
-| ------------------------------------------------- | ----------------------------------------------------- |
-| [architecture.yaml](architecture.yaml)            | Components, positions, drivers, and banned categories |
-| [docs/architecture/](docs/architecture/README.md) | How the parts fit together                            |
-| [docs/decisions/](docs/decisions/)                | Decision records                                      |
-| `internal/`                                       | One package per component, and the shared model       |
-| [tui/](tui/README.md)                             | `landline-tui`, its own Go module and binary          |
-| `contracts/`                                      | One contract per core component                       |
-| `acceptance/`                                     | Scenarios that start the built binary                 |
+| Path                                              | Holds                                                     |
+| ------------------------------------------------- | --------------------------------------------------------- |
+| [architecture.yaml](architecture.yaml)            | Components, positions, drivers, and banned categories     |
+| [docs/architecture/](docs/architecture/README.md) | How the parts fit together                                |
+| [docs/decisions/](docs/decisions/)                | Decision records                                          |
+| `internal/`                                       | One package per component, and the shared model           |
+| `cmd/`                                            | Entry points of `landline-switchboard` and `landline-mcp` |
+| [tui/](tui/README.md)                             | `landline`, its own Go module, which imports the root     |
+| `contracts/`                                      | One contract per core component                           |
+| `acceptance/`                                     | Scenarios that start the built binary                     |
 
 Built with [Threnos](https://github.com/8thlight-daveloper/threnos). Run `nix develop` for the tools and `just check`
 for every check.

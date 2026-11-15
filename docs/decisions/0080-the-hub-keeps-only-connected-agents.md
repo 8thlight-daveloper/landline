@@ -2,7 +2,7 @@
 category: behavior
 status: accepted
 approval: person
-affects: [hub/server, mcp/server, cli/command]
+affects: [switchboard/server, mcp/server, cli/command]
 builds-on: ['0040', '0060', '0070']
 partly-supersedes: ['0040', '0060', '0070']
 note: Drafted on 2026-11-12 after a registry check found stopped sessions still listed and a label that matched two agents.

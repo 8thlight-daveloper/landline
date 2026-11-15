@@ -60,18 +60,91 @@ type world struct {
 	addr   string
 }
 
+const (
+	landlineName    = "landline"
+	switchboardName = "landline-switchboard"
+	mcpName         = "landline-mcp"
+	justInstall     = "just install"
+)
+
+var (
+	builtMu sync.Mutex
+	built   = map[string]string{}
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	for _, dir := range built {
+		os.RemoveAll(dir)
+	}
+	os.Exit(code)
+}
+
+func switchboardOf(bin string) string { return filepath.Join(filepath.Dir(bin), switchboardName) }
+
+func mcpOf(bin string) string { return filepath.Join(filepath.Dir(bin), mcpName) }
+
+func buildOne(t *testing.T, dir, name, source, pkg, flags string) {
+	t.Helper()
+	args := []string{"build"}
+	if flags != "" {
+		args = append(args, "-ldflags", flags)
+	}
+	cmd := exec.Command("go", append(args, "-o", filepath.Join(dir, name), pkg)...)
+	cmd.Dir = source
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		text := string(out)
+		for _, offline := range []string{"dial tcp", "no such host", "network is unreachable", "i/o timeout", "proxy.golang.org", "connection refused"} {
+			if strings.Contains(text, offline) {
+				t.Skipf("%s cannot be built without the network: %s", name, text)
+			}
+		}
+		t.Fatalf("build %s: %v\n%s", name, err, text)
+	}
+}
+
+func buildAllWith(t *testing.T, flags string) string {
+	t.Helper()
+	builtMu.Lock()
+	defer builtMu.Unlock()
+	if dir, ok := built[flags]; ok {
+		return filepath.Join(dir, landlineName)
+	}
+	dir, err := os.MkdirTemp("", "landline-acceptance-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	buildOne(t, dir, switchboardName, "..", "./cmd/"+switchboardName, flags)
+	buildOne(t, dir, mcpName, "..", "./cmd/"+mcpName, flags)
+	buildOne(t, dir, landlineName, "../tui", ".", flags)
+	built[flags] = dir
+	return filepath.Join(dir, landlineName)
+}
+
 func build(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "landline")
 	release, err := os.ReadFile("../VERSION")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("go", "build", "-ldflags", "-X main.version="+strings.TrimSpace(string(release)), "-o", bin, "../binary")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
+	return buildAllWith(t, "-X main.version="+strings.TrimSpace(string(release)))
+}
+
+func copyBinary(t *testing.T, source, dir string) string {
+	t.Helper()
+	raw, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return bin
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, filepath.Base(source))
+	if err := os.WriteFile(target, raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return target
 }
 
 func freeAddr(t *testing.T) string {
@@ -116,7 +189,7 @@ func startHub(t *testing.T, bin, config, addr string, extra ...string) *world {
 		"LANDLINE_SECRET="+secret,
 		"LANDLINE_FAKE_CODEX_LOG="+filepath.Join(w.config, "codex.log"),
 	)
-	hub := exec.Command(w.bin, "hub", "--addr", addr, "--log", filepath.Join(w.config, "log.jsonl"), "--host", "mac")
+	hub := exec.Command(switchboardOf(w.bin), "--addr", addr, "--log", filepath.Join(w.config, "log.jsonl"), "--host", "mac")
 	hub.Args = append(hub.Args, extra...)
 	hub.Env = w.env
 	stderr := &syncBuffer{}
@@ -228,7 +301,7 @@ func (w *world) observer() string {
 
 func (w *world) state(name string) string {
 	w.t.Helper()
-	for _, line := range strings.Split(w.must("", "agents", "--as", w.observer()), "\n") {
+	for _, line := range strings.Split(w.must("", "agents"), "\n") {
 		fields := strings.Split(line, "\t")
 		if len(fields) >= 4 && fields[0] == name {
 			return fields[3]
@@ -413,7 +486,7 @@ func (w *world) startMCP(dir string, args ...string) *mcpProcess {
 
 func (w *world) startMCPWith(env []string, dir string, args ...string) *mcpProcess {
 	w.t.Helper()
-	cmd := exec.Command(w.bin, append([]string{"mcp"}, args...)...)
+	cmd := exec.Command(mcpOf(w.bin), args...)
 	cmd.Dir, cmd.Env = dir, env
 	return newMCP(w.t, cmd)
 }
@@ -559,7 +632,7 @@ func TestAMessageReachesAConnectedChannelAgentOnceWithTheMarkerFirstAndTheSendAn
 func TestTwoChannelAgentsTalkAndAReplyComesBack(t *testing.T) {
 	w := start(t)
 	alpha, bravo := w.channelAgent("alpha"), w.channelAgent("bravo")
-	if got := w.must("", "agents", "--as", "alpha"); !strings.Contains(got, "bravo\tclaude-code\tmac\tconnected") || !strings.Contains(got, "alpha\tclaude-code\tmac\tconnected") {
+	if got := w.must("", "agents"); !strings.Contains(got, "bravo\tclaude-code\tmac\tconnected") || !strings.Contains(got, "alpha\tclaude-code\tmac\tconnected") {
 		t.Fatalf("agents: %q", got)
 	}
 	w.must("review the plan", "send", "--as", "alpha", "--to", "bravo", "--kind", "review", "-")
@@ -633,7 +706,7 @@ func TestAStoppedRecipientIsNotConnectedAndTheListShowsItDisconnected(t *testing
 	if err == nil || !strings.Contains(out, notConnected) {
 		t.Fatalf("got %q, %v", out, err)
 	}
-	if listed := w.must("", "agents", "--as", "alpha"); !strings.Contains(listed, "bravo\tclaude-code\tmac\tdisconnected") {
+	if listed := w.must("", "agents"); !strings.Contains(listed, "bravo\tclaude-code\tmac\tdisconnected") {
 		t.Fatalf("agents: %q", listed)
 	}
 	if got := w.logText(); !strings.Contains(got, "    are you there\n") {
@@ -874,17 +947,18 @@ func TestAHubRestartForgetsEveryAgentAndATokenFromBeforeItIsToldToRegisterAgain(
 	first.register("alpha", "bravo")
 	first.stop()
 	second := startHub(t, bin, config, first.addr)
-	for _, args := range [][]string{{"agents", "--as", "alpha"}, {"send", "--as", "alpha", "--to", "bravo", "-"}} {
-		out, err := second.run("before the restart", args...)
-		if err == nil || !strings.Contains(out, forgotten) {
-			t.Fatalf("%v: %q, %v", args, out, err)
-		}
+	out, err := second.run("before the restart", "send", "--as", "alpha", "--to", "bravo", "-")
+	if err == nil || !strings.Contains(out, forgotten) {
+		t.Fatalf("send: %q, %v", out, err)
+	}
+	if listed, err := second.run("", "agents"); err != nil || strings.Contains(listed, "alpha") || strings.Contains(listed, "bravo") {
+		t.Fatalf("agents after the restart: %q, %v", listed, err)
 	}
 	if status := second.get("/v1/agents", second.token("alpha")); status != 401 {
 		t.Fatalf("the old token: %d", status)
 	}
 	second.register("alpha")
-	listed := second.must("", "agents", "--as", "alpha")
+	listed := second.must("", "agents")
 	if !strings.Contains(listed, "alpha\tclaude-code\tmac\tdisconnected") || strings.Contains(listed, "bravo") {
 		t.Fatalf("after registering again: %q", listed)
 	}
@@ -1031,7 +1105,7 @@ func TestALargeMessageReachesAChannelAgentWhole(t *testing.T) {
 
 func TestTheHubRefusesToStartWithAShortSecret(t *testing.T) {
 	bin := build(t)
-	cmd := exec.Command(bin, "hub", "--addr", freeAddr(t))
+	cmd := exec.Command(switchboardOf(bin), "--addr", freeAddr(t))
 	cmd.Env = append(isolatedEnv(t.TempDir()), "LANDLINE_SECRET=short")
 	out, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "at least 16 characters") {
@@ -1101,7 +1175,7 @@ func nonLoopbackAddress() string {
 func TestTheHubListensOnTheLoopbackAddressOfLandlinePortAndNotOnOtherAddresses(t *testing.T) {
 	bin, config := build(t), t.TempDir()
 	_, port, _ := net.SplitHostPort(freeAddr(t))
-	hub := exec.Command(bin, "server", "run", "--log", filepath.Join(config, "log.jsonl"))
+	hub := exec.Command(switchboardOf(bin))
 	hub.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret, "LANDLINE_PORT="+port)
 	stderr := &syncBuffer{}
 	hub.Stderr = stderr
@@ -1127,7 +1201,7 @@ func TestTheHubListensOnTheLoopbackAddressOfLandlinePortAndNotOnOtherAddresses(t
 func TestAnInvalidLandlinePortMakesTheHubExitWithStatusTwoAndAMessage(t *testing.T) {
 	bin, config := build(t), t.TempDir()
 	for _, bad := range []string{"99999", "abc", "0", "-1"} {
-		cmd := exec.Command(bin, "server", "run", "--log", filepath.Join(config, "log.jsonl"))
+		cmd := exec.Command(switchboardOf(bin))
 		cmd.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret, "LANDLINE_PORT="+bad)
 		var out bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &out
@@ -1259,7 +1333,7 @@ func TestAnAgentThatStoppedShowsDisconnectedAtOnceThenIsForgottenAfterTheGraceAn
 		t.Fatalf("inside the grace: %d %s", status, body)
 	}
 	time.Sleep(time.Until(stopped.Add(1500 * time.Millisecond)))
-	eventually(t, handle+" to be unlisted", func() bool { return !strings.Contains(w.must("", "agents", "--as", "alpha"), handle) })
+	eventually(t, handle+" to be unlisted", func() bool { return !strings.Contains(w.must("", "agents"), handle) })
 	if status := w.get("/v1/agents", token); status != 401 {
 		t.Fatalf("the forgotten token: %d", status)
 	}
@@ -1292,7 +1366,9 @@ func TestAHandRegisteredNameIsForgottenOneGraceAfterItsLastRequest(t *testing.T)
 	w.register("alpha")
 	for i := 0; i < 3; i++ {
 		time.Sleep(600 * time.Millisecond)
-		w.must("", "agents", "--as", "alpha")
+		if status := w.get("/v1/agents", w.token("alpha")); status != 200 {
+			t.Fatalf("a request inside the grace: %d", status)
+		}
 	}
 	time.Sleep(1500 * time.Millisecond)
 	if status := w.get("/v1/agents", w.token("alpha")); status != 401 {
@@ -1428,7 +1504,7 @@ func TestTheLogRecordsEachSendsResultAndALogWithoutResultLinesStillLoads(t *test
 
 func TestTheHubWarnsWhenItIsAskedToListenBeyondLocalhost(t *testing.T) {
 	bin, config := build(t), t.TempDir()
-	hub := exec.Command(bin, "hub", "--addr", "0.0.0.0:0", "--log", filepath.Join(config, "log.jsonl"))
+	hub := exec.Command(switchboardOf(bin), "--addr", "0.0.0.0:0", "--log", filepath.Join(config, "log.jsonl"))
 	hub.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret)
 	stderr := &syncBuffer{}
 	hub.Stderr = stderr
@@ -1437,22 +1513,103 @@ func TestTheHubWarnsWhenItIsAskedToListenBeyondLocalhost(t *testing.T) {
 	}
 	defer func() { hub.Process.Kill(); hub.Wait() }()
 	eventually(t, "the warning", func() bool { return strings.Contains(stderr.String(), "not a loopback address") })
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.Contains(line, "not a loopback address") && !strings.Contains(line, "switchboard") {
+			t.Fatalf("the warning does not name the switchboard: %q", line)
+		}
+	}
 }
 
 func TestVersionAndHelp(t *testing.T) {
 	w := start(t)
 	release, _ := os.ReadFile("../VERSION")
-	if got := w.must("", "version"); !strings.HasPrefix(got, "landline "+strings.TrimSpace(string(release))) {
+	if got := lastLine(w.must("", "version")); !strings.HasPrefix(got, "landline "+strings.TrimSpace(string(release))) {
 		t.Fatalf("version: %q", got)
 	}
-	out, err := w.run("", "help")
-	if err == nil || !strings.Contains(out, "landline <command>") {
-		t.Fatalf("help: %q, %v", out, err)
-	}
-	for _, removed := range []string{"inbox", "listen", "hook", "agentd"} {
-		if strings.Contains(out, removed) {
-			t.Errorf("the help still mentions %s:\n%s", removed, out)
+	for _, args := range [][]string{{"help"}, {"-h"}, {"--help"}} {
+		result := runBin(t, w.bin, w.env, args...)
+		if result.code != 0 || result.stderr != "" || !strings.Contains(result.stdout, "landline <command>") {
+			t.Errorf("%v: %+v", args, result)
 		}
+		for _, removed := range []string{"inbox", "listen", "hook", "agentd", "server run"} {
+			if strings.Contains(result.stdout, removed) {
+				t.Errorf("%v: the help still mentions %s:\n%s", args, removed, result.stdout)
+			}
+		}
+		if listed := regexp.MustCompile(`(?m)^\s+(hub|mcp|tui)\b`).FindString(result.stdout); listed != "" {
+			t.Errorf("%v: the help lists the removed command %q:\n%s", args, strings.TrimSpace(listed), result.stdout)
+		}
+	}
+}
+
+func TestLandlineWithNoTerminalPrintsTheUsageOnStandardErrorAndExitsTwoWhenItHasNoCommand(t *testing.T) {
+	bin := build(t)
+	env := isolatedEnv(t.TempDir())
+	for _, args := range [][]string{nil, {"--interval", "5s"}, {"--interval=5s"}, {"--interval", "100ms"}, {"bogus"}, {"bogus", "--as", "alpha"}} {
+		result := runBin(t, bin, env, args...)
+		if result.code != 2 || result.stdout != "" || !showsUsage(result.stderr) {
+			t.Errorf("%v: %+v", args, result)
+		}
+	}
+}
+
+func showsUsage(text string) bool {
+	return strings.Contains(text, "landline <command>") || strings.Contains(text, "landline server <command>")
+}
+
+func TestTheRemovedCommandsAreRefusedWithExitTwoAndTheUsageAndStartNothing(t *testing.T) {
+	w := start(t)
+	addr := freeAddr(t)
+	for name, args := range map[string][]string{
+		"hub":             {"hub", "--addr", addr},
+		"hub bare":        {"hub"},
+		"mcp":             {"mcp"},
+		"mcp with flags":  {"mcp", "--channel", "--label", "lead"},
+		"server run":      {"server", "run", "--addr", addr},
+		"server run bare": {"server", "run"},
+		"tui":             {"tui"},
+		"tui agents":      {"tui", "agents", "--json"},
+	} {
+		result := runBin(t, w.bin, w.env, args...)
+		if result.code != 2 || result.stdout != "" || !showsUsage(result.stderr) {
+			t.Errorf("%s: %+v", name, result)
+		}
+	}
+	if c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
+		c.Close()
+		t.Fatal("a removed command started a listener")
+	}
+}
+
+func TestTheSwitchboardHasNoHubMCPOrTUICommandAndAnUnknownCommandExitsTwoWithTheUsage(t *testing.T) {
+	bin := build(t)
+	env := isolatedEnv(t.TempDir())
+	for _, args := range [][]string{{"mcp"}, {"hub"}, {"tui"}, {"server", "run"}, {"bogus"}, {"agents"}} {
+		result := runBin(t, switchboardOf(bin), env, args...)
+		if result.code != 2 || result.stdout != "" || !regexp.MustCompile(`landline[ -]switchboard`).MatchString(result.stderr) {
+			t.Errorf("%v: %+v", args, result)
+		}
+	}
+	if result := runBin(t, switchboardOf(bin), env, "version"); result.code != 0 || result.stderr != "" {
+		t.Errorf("version: %+v", result)
+	}
+}
+
+func TestTheSwitchboardStartupLineSaysSwitchboardWhereItSaidHub(t *testing.T) {
+	w := start(t)
+	var line string
+	eventually(t, "the listening line", func() bool {
+		for _, each := range strings.Split(w.hubErr.String(), "\n") {
+			if strings.Contains(each, "listening on "+w.addr) {
+				line = each
+				return true
+			}
+		}
+		return false
+	})
+	prefix := strings.ToLower(line[:strings.Index(line, "listening on")])
+	if !strings.Contains(prefix, "switchboard") || strings.Contains(prefix, "hub") {
+		t.Fatalf("the listening line: %q", line)
 	}
 }
 
@@ -1460,20 +1617,21 @@ func TestTheRemovedCommandsAndFlagsAreRefused(t *testing.T) {
 	w := start(t)
 	w.register("alpha")
 	for _, command := range []string{"inbox", "listen", "hook", "agentd"} {
-		out, err := w.run("", command, "--as", "alpha")
-		if err == nil || !strings.Contains(out, "unknown command") {
-			t.Errorf("%s: %q, %v", command, out, err)
+		result := runBin(t, w.bin, w.env, command, "--as", "alpha")
+		if result.code != 2 || !strings.Contains(result.stderr, "unknown command") {
+			t.Errorf("%s: %+v", command, result)
 		}
 	}
-	if out, err := w.run("", "hub", "--window", "1s"); err == nil || !strings.Contains(out, "unknown or incomplete flag --window") {
-		t.Errorf("--window: %q, %v", out, err)
+	switchboard := switchboardOf(w.bin)
+	if result := runBin(t, switchboard, w.env, "--window", "1s"); result.code != 2 || !strings.Contains(result.stderr, "unknown or incomplete flag --window") {
+		t.Errorf("--window: %+v", result)
 	}
 	if out, err := w.run("", "register", "--name", "bravo", "--harness", "codex", "--wake", "codex"); err == nil {
 		t.Errorf("--wake: %q", out)
 	}
 	for _, flag := range []string{"--state", "--retention"} {
-		if out, err := w.run("", "hub", flag, "1s"); err == nil || !strings.Contains(out, "unknown or incomplete flag "+flag) {
-			t.Errorf("%s: %q, %v", flag, out, err)
+		if result := runBin(t, switchboard, w.env, flag, "1s"); result.code != 2 || !strings.Contains(result.stderr, "unknown or incomplete flag "+flag) {
+			t.Errorf("%s: %+v", flag, result)
 		}
 	}
 }
@@ -1666,7 +1824,7 @@ func TestTheLogFileHoldsEveryFieldOfAMessageWithSnakeCaseKeys(t *testing.T) {
 func TestLogShowsTheTextOfEveryMessageSoLostMailCanBeRecovered(t *testing.T) {
 	w := start(t)
 	w.register("alpha", "bravo")
-	w.must("", "agents", "--as", "alpha")
+	w.must("", "agents")
 	w.run("recover me\nsecond line", "send", "--as", "alpha", "--to", "bravo", "-")
 	out := w.logText()
 	if !strings.Contains(out, "alpha -> bravo") || !strings.Contains(out, "    recover me\n") || !strings.Contains(out, "    second line\n") {
@@ -1799,18 +1957,31 @@ func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConf
 	}
 	dir := filepath.Join(t.TempDir(), "found-by-config")
 	os.MkdirAll(dir, 0o755)
-	cmd := exec.Command(bin, "mcp")
+	cmd := exec.Command(mcpOf(bin))
 	cmd.Env, cmd.Dir = env, dir
 	p := newMCP(t, cmd)
 	p.handshake("claude-code", "2.1.296")
 	if agents := p.tool("landline_agents", `{}`); !strings.Contains(agents, "found-by-config-") || !strings.Contains(agents, "folder: found-by-config") {
 		t.Fatalf("the process did not register through the saved config: %s", agents)
 	}
-	if hubOut, _ := os.ReadFile(filepath.Join(home, ".local", "share", "landline", "hub.out")); !strings.Contains(string(hubOut), "listening on "+addr) {
-		t.Fatalf("hub.out: %s", hubOut)
+	data := filepath.Join(home, ".local", "share", "landline")
+	if hubOut, _ := os.ReadFile(filepath.Join(data, "switchboard.out")); !strings.Contains(string(hubOut), "listening on "+addr) {
+		t.Fatalf("switchboard.out: %s", hubOut)
 	}
-	if info, _ := os.Stat(filepath.Join(home, ".local", "share", "landline", "hub.out")); info.Mode().Perm() != 0o600 {
-		t.Fatalf("hub.out mode %v", info.Mode().Perm())
+	if info, _ := os.Stat(filepath.Join(data, "switchboard.out")); info == nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("switchboard.out mode %v", info)
+	}
+	pidText, pidErr := os.ReadFile(filepath.Join(data, "switchboard.pid"))
+	if pidErr != nil {
+		t.Fatalf("switchboard.pid: %v", pidErr)
+	}
+	if ps, _ := exec.Command("ps", "-o", "command=", "-p", strings.TrimSpace(string(pidText))).Output(); !strings.Contains(string(ps), switchboardName) {
+		t.Fatalf("the process in switchboard.pid is %q, not %s", ps, switchboardName)
+	}
+	for _, old := range []string{"hub.out", "hub.pid"} {
+		if _, err := os.Stat(filepath.Join(data, old)); err == nil {
+			t.Errorf("%s was written", old)
+		}
 	}
 	if down, err := runIn(t, bin, env, home, "server", "down"); err != nil || !strings.Contains(down, "the hub stopped") {
 		t.Fatalf("down: %v %s", err, down)
@@ -1823,6 +1994,14 @@ func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConf
 	}
 }
 
+func containsPath(text, path string) bool {
+	if strings.Contains(text, path) {
+		return true
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	return err == nil && strings.Contains(text, resolved)
+}
+
 func TestServerInstallWritesTheLoginServiceFileWithoutTheSecretAndWithoutLoadingIt(t *testing.T) {
 	bin, home := build(t), t.TempDir()
 	env := isolatedEnv(home)
@@ -1832,8 +2011,8 @@ func TestServerInstallWritesTheLoginServiceFileWithoutTheSecretAndWithoutLoading
 	}
 	var path string
 	for _, candidate := range []string{
-		filepath.Join(home, "Library", "LaunchAgents", "dev.landline.hub.plist"),
-		filepath.Join(home, ".config", "systemd", "user", "landline-hub.service"),
+		filepath.Join(home, "Library", "LaunchAgents", "dev.landline.switchboard.plist"),
+		filepath.Join(home, ".config", "systemd", "user", "landline-switchboard.service"),
 	} {
 		if _, statErr := os.Stat(candidate); statErr == nil {
 			path = candidate
@@ -1842,9 +2021,20 @@ func TestServerInstallWritesTheLoginServiceFileWithoutTheSecretAndWithoutLoading
 	if path == "" {
 		t.Fatalf("no service file under %s: %s", home, out)
 	}
+	for _, old := range []string{
+		filepath.Join(home, "Library", "LaunchAgents", "dev.landline.hub.plist"),
+		filepath.Join(home, ".config", "systemd", "user", "landline-hub.service"),
+	} {
+		if _, statErr := os.Stat(old); statErr == nil {
+			t.Errorf("the old unit %s was written", old)
+		}
+	}
 	raw, _ := os.ReadFile(path)
-	if !strings.Contains(string(raw), bin) || !strings.Contains(string(raw), "server") || strings.Contains(string(raw), "secret") {
+	if !containsPath(string(raw), switchboardOf(bin)) || strings.Contains(string(raw), "server run") || strings.Contains(string(raw), "landline hub") || strings.Contains(string(raw), "secret") {
 		t.Fatalf("service file:\n%s", raw)
+	}
+	if strings.HasSuffix(path, ".plist") && !strings.Contains(string(raw), "dev.landline.switchboard") {
+		t.Fatalf("the launchd label is not dev.landline.switchboard:\n%s", raw)
 	}
 	if !strings.Contains(out, "launchctl") && !strings.Contains(out, "systemctl") {
 		t.Fatalf("the load command was not printed: %s", out)
@@ -1889,8 +2079,16 @@ func TestSetupClaudeInstallsTheLandlineSkillThatTheUserRunsAsSlashLandlineRegist
 			t.Errorf("the skill lacks %q", want)
 		}
 	}
-	if args, _ := os.ReadFile(filepath.Join(w.config, "claude-args")); !strings.Contains(string(args), "landline") {
-		t.Fatalf("claude mcp add was not run: %q", args)
+	args, _ := os.ReadFile(filepath.Join(w.config, "claude-args"))
+	lines := strings.Split(strings.TrimSpace(string(args)), "\n")
+	dashes := -1
+	for i, line := range lines {
+		if line == "--" {
+			dashes = i
+		}
+	}
+	if dashes < 0 || len(lines) != dashes+3 || !containsPath(lines[dashes+1], mcpOf(w.bin)) || lines[dashes+2] != "--channel" || !strings.Contains(string(args), "landline") {
+		t.Fatalf("claude mcp add was not run with landline-mcp --channel: %q", args)
 	}
 	w.must("", "setup", "claude")
 	if again, _ := os.ReadFile(path); string(again) != string(skill) {
@@ -1924,7 +2122,7 @@ func (w *world) agentJSON(name string) map[string]any {
 
 func (w *world) agentLine(name string) string {
 	w.t.Helper()
-	for _, line := range strings.Split(w.must("", "agents", "--as", w.observer()), "\n") {
+	for _, line := range strings.Split(w.must("", "agents"), "\n") {
 		if strings.HasPrefix(line, name+"\t") {
 			return line
 		}
@@ -2019,6 +2217,18 @@ func (h *backgroundHub) token(name string) string {
 	return session.Token
 }
 
+func (h *backgroundHub) statusWithToken(name string) (int, error) {
+	h.t.Helper()
+	req, _ := http.NewRequest("GET", "http://"+h.addr+"/v1/agents", nil)
+	req.Header.Set("Authorization", "Bearer "+h.token(name))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
 func (h *backgroundHub) openStream(name string) (*http.Response, error) {
 	req, _ := http.NewRequest("GET", "http://"+h.addr+"/v1/stream", nil)
 	req.Header.Set("Authorization", "Bearer "+h.token(name))
@@ -2046,13 +2256,16 @@ func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndForgetsEverySessio
 	if status, _ := h.run("server", "status"); !strings.Contains(status, "http://"+h.addr) {
 		t.Fatalf("status: %s", status)
 	}
-	if out, err := h.run("agents", "--as", "alpha"); err == nil || !strings.Contains(out, forgotten) {
-		t.Fatalf("agents after restart: %v %q", err, out)
+	if status, _ := h.statusWithToken("alpha"); status != 401 {
+		t.Fatalf("the old token after restart: %d", status)
+	}
+	if listed, err := h.run("agents"); err != nil || strings.Contains(listed, "alpha") {
+		t.Fatalf("agents after restart: %v %q", err, listed)
 	}
 	if out, err := h.run("register", "--name", "alpha", "--harness", "claude-code", "--host", "mac"); err != nil {
 		t.Fatalf("register again: %v %s", err, out)
 	}
-	listed, err := h.run("agents", "--as", "alpha")
+	listed, err := h.run("agents")
 	if err != nil || !strings.Contains(listed, "alpha\tclaude-code\tmac\tdisconnected") {
 		t.Fatalf("agents after registering again: %v %q", err, listed)
 	}
@@ -2214,7 +2427,7 @@ func TestAnObserverIsNeverAnAgentAndSeesTheSameListAnAgentSees(t *testing.T) {
 	w.watch()
 	w.register("alpha")
 	_, handle := w.selfRegistered("lead", "claude-code")
-	before := strings.Count(w.must("", "agents", "--as", "alpha"), "\n")
+	before := strings.Count(w.must("", "agents"), "\n")
 	observer := w.registerObserver("tui")
 	w.registerObserver("web")
 	listed := w.agentsBody(observer)
@@ -2222,7 +2435,7 @@ func TestAnObserverIsNeverAnAgentAndSeesTheSameListAnAgentSees(t *testing.T) {
 	if err := json.Unmarshal([]byte(listed), &entries); err != nil || len(entries) != before {
 		t.Fatalf("the observer's list has %d entries (%v), the agents are %d", len(entries), err, before)
 	}
-	if after := strings.Count(w.must("", "agents", "--as", "alpha"), "\n"); after != before {
+	if after := strings.Count(w.must("", "agents"), "\n"); after != before {
 		t.Fatalf("the CLI list went from %d to %d lines", before, after)
 	}
 	for _, entry := range entries {
@@ -2230,7 +2443,7 @@ func TestAnObserverIsNeverAnAgentAndSeesTheSameListAnAgentSees(t *testing.T) {
 			t.Fatalf("an observer is listed: %v", entry)
 		}
 	}
-	if strings.Contains(w.must("", "agents", "--as", "alpha"), observer) {
+	if strings.Contains(w.must("", "agents"), observer) {
 		t.Fatal("the CLI list shows the observer token")
 	}
 	if status, _ := w.sendHTTP("alpha", "tui", "to an observer"); status != 404 {
@@ -2381,43 +2594,25 @@ func TestAHubRestartForgetsEveryObserver(t *testing.T) {
 	}
 }
 
-func buildTUI(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "landline-tui")
-	cmd := exec.Command("go", "build", "-o", bin, ".")
-	cmd.Dir = "../tui"
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		text := string(out)
-		for _, offline := range []string{"dial tcp", "no such host", "network is unreachable", "i/o timeout", "proxy.golang.org", "connection refused"} {
-			if strings.Contains(text, offline) {
-				t.Skipf("landline-tui cannot be built without the network: %s", text)
-			}
-		}
-		t.Fatalf("build landline-tui: %v\n%s", err, text)
-	}
-	return bin
-}
-
-type tuiResult struct {
+type binResult struct {
 	stdout, stderr string
 	code           int
 }
 
-func runTUI(t *testing.T, bin string, env []string, args ...string) tuiResult {
+func runBin(t *testing.T, bin string, env []string, args ...string) binResult {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Env = env
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
-	result := tuiResult{stdout: out.String(), stderr: errb.String()}
+	result := binResult{stdout: out.String(), stderr: errb.String()}
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit):
 		result.code = exit.ExitCode()
 	case err != nil:
-		t.Fatalf("landline-tui %v: %v", args, err)
+		t.Fatalf("%s %v: %v", filepath.Base(bin), args, err)
 	}
 	return result
 }
@@ -2504,8 +2699,7 @@ func labelOrderDiffersFromHandleOrder(group []listedAgent) bool {
 	return fmt.Sprint(byLabel) != fmt.Sprint(byHandle)
 }
 
-func TestTheTUIJSONExportAgainstARealHubListsConnectedFirstThenLabelledThenLabelThenHandleAndPrintsNoSecretOrToken(t *testing.T) {
-	tui := buildTUI(t)
+func TestLandlineAgentsJSONAgainstARealSwitchboardListsConnectedFirstThenLabelledThenLabelThenHandleAndPrintsNoSecretOrToken(t *testing.T) {
 	w := start(t)
 	w.register("tango", "alpha")
 	w.registerLabelled("delta", "yankee")
@@ -2515,8 +2709,8 @@ func TestTheTUIJSONExportAgainstARealHubListsConnectedFirstThenLabelledThenLabel
 	plainLate := w.selfRegisteredWithLabel("d-x", "")
 	plainEarly := w.selfRegisteredWithLabel("c-x", "")
 	connected := []string{labelledLate, labelledEarly, plainLate, plainEarly}
-	const total = 9
-	result := runTUI(t, tui, w.env, "agents", "--json")
+	const total = 8
+	result := runBin(t, w.bin, w.env, "agents", "--json")
 	if result.code != 0 || result.stderr != "" {
 		t.Fatalf("exit %d, stderr %q", result.code, result.stderr)
 	}
@@ -2536,7 +2730,7 @@ func TestTheTUIJSONExportAgainstARealHubListsConnectedFirstThenLabelledThenLabel
 		t.Fatalf("fetched_at %q: %v", snapshot.FetchedAt, err)
 	}
 	for _, interval := range []string{"500ms", "600ms"} {
-		at := runTUI(t, tui, w.env, "agents", "--json", "--interval", interval)
+		at := runBin(t, w.bin, w.env, "agents", "--json", "--interval", interval)
 		var again struct{ Agents []map[string]any }
 		if at.code != 0 || json.Unmarshal([]byte(at.stdout), &again) != nil || len(again.Agents) != total {
 			t.Errorf("--interval %s: %+v", interval, at)
@@ -2571,7 +2765,7 @@ func TestTheTUIJSONExportAgainstARealHubListsConnectedFirstThenLabelledThenLabel
 		}
 		groups[key] = append(groups[key], agent)
 	}
-	for key, size := range map[string]int{"connected/labelled": 2, "connected/plain": 2, "disconnected/labelled": 2, "disconnected/plain": 3} {
+	for key, size := range map[string]int{"connected/labelled": 2, "connected/plain": 2, "disconnected/labelled": 2, "disconnected/plain": 2} {
 		if len(groups[key]) != size {
 			t.Fatalf("the group %s has %d agents, want %d: %v", key, len(groups[key]), size, observed)
 		}
@@ -2614,35 +2808,36 @@ func TestTheTUIJSONExportAgainstARealHubListsConnectedFirstThenLabelledThenLabel
 			}
 		}
 	}
-	if lines := strings.Count(w.must("", "agents", "--as", "alpha"), "\n"); lines != total {
-		t.Fatalf("the TUI changed the agent list: %d lines", lines)
+	if lines := strings.Count(w.must("", "agents"), "\n"); lines != total {
+		t.Fatalf("landline agents changed the agent list: %d lines", lines)
 	}
 }
 
-func TestTheTUIJSONExportFailsWithExitOneForAWrongSecretAndAnUnreachableHubWithoutEchoingTheSecret(t *testing.T) {
-	tui := buildTUI(t)
+func TestLandlineAgentsFailsWithExitOneForAWrongSecretAndAnUnreachableSwitchboardWithoutEchoingTheSecret(t *testing.T) {
 	w := start(t)
 	wrong := "wrong-secret-0123456789-abcdef"
-	result := runTUI(t, tui, withEnv(w.env, "LANDLINE_SECRET="+wrong), "agents", "--json")
+	result := runBin(t, w.bin, withEnv(w.env, "LANDLINE_SECRET="+wrong), "agents", "--json")
 	if result.code != 1 || result.stdout != "" || strings.TrimSpace(result.stderr) == "" {
 		t.Fatalf("a wrong secret: %+v", result)
+	}
+	if text := runBin(t, w.bin, withEnv(w.env, "LANDLINE_SECRET="+wrong), "agents"); text.code != 1 || text.stdout != "" || strings.Contains(text.stderr, wrong) {
+		t.Fatalf("a wrong secret, text form: %+v", text)
 	}
 	if strings.Contains(result.stderr, wrong) || strings.Contains(result.stderr, secret) {
 		t.Fatalf("the message echoes a secret: %s", result.stderr)
 	}
 	dead := "127.0.0.1:" + strings.Split(freeAddr(t), ":")[1]
-	result = runTUI(t, tui, withEnv(w.env, "LANDLINE_URL=http://"+dead), "agents", "--json")
+	result = runBin(t, w.bin, withEnv(w.env, "LANDLINE_URL=http://"+dead), "agents", "--json")
 	if result.code != 1 || result.stdout != "" || strings.TrimSpace(result.stderr) == "" || strings.Contains(result.stderr, secret) {
 		t.Fatalf("an unreachable hub: %+v", result)
 	}
-	result = runTUI(t, tui, withEnv(w.env, "LANDLINE_URL=http://user:hunter2@"+w.addr), "agents", "--json")
+	result = runBin(t, w.bin, withEnv(w.env, "LANDLINE_URL=http://user:hunter2@"+w.addr), "agents", "--json")
 	if result.code != 1 || strings.Contains(result.stderr+result.stdout, "hunter2") {
 		t.Fatalf("an address with credentials: %+v", result)
 	}
 }
 
-func TestTheHubRefusesHostileAgentFieldsSoNothingRawCanReachTheTUIOutput(t *testing.T) {
-	tui := buildTUI(t)
+func TestTheHubRefusesHostileAgentFieldsSoNothingRawCanReachTheAgentsOutput(t *testing.T) {
 	w := start(t)
 	w.register("alpha")
 	hostile := "x\x1b[2J\x1b]0;owned\x07y"
@@ -2652,55 +2847,26 @@ func TestTheHubRefusesHostileAgentFieldsSoNothingRawCanReachTheTUIOutput(t *test
 			t.Errorf("%s %q: %d %s", field, hostile, status, body)
 		}
 	}
-	for _, args := range [][]string{{"agents", "--json"}, {"agents", "--json", "--interval", "1s"}} {
-		result := runTUI(t, tui, w.env, args...)
+	for _, args := range [][]string{{"agents", "--json"}, {"agents", "--json", "--interval", "1s"}, {"agents"}} {
+		result := runBin(t, w.bin, w.env, args...)
 		if result.code != 0 || strings.ContainsAny(result.stdout+result.stderr, "\x1b\x07") || strings.Contains(result.stdout, "mallory") {
 			t.Fatalf("%v: %+v", args, result)
 		}
 	}
 }
 
-func TestTheTUIRefusesAnIntervalBelowTheFloorWithExitTwo(t *testing.T) {
-	tui := buildTUI(t)
+func TestLandlineRefusesAnIntervalBelowTheFloorWithExitTwo(t *testing.T) {
 	w := start(t)
 	for _, args := range [][]string{{"--interval", "100ms", "agents", "--json"}, {"agents", "--json", "--interval", "100ms"}, {"agents", "--json", "--interval", "499ms"}} {
-		result := runTUI(t, tui, w.env, args...)
+		result := runBin(t, w.bin, w.env, args...)
 		if result.code != 2 || result.stdout != "" || !strings.Contains(result.stderr, "interval") {
 			t.Errorf("%v: %+v", args, result)
 		}
 	}
 	for _, args := range [][]string{{"--interval", "soon", "agents", "--json"}} {
-		result := runTUI(t, tui, w.env, args...)
+		result := runBin(t, w.bin, w.env, args...)
 		if result.code != 2 || result.stdout != "" || !strings.Contains(result.stderr, "the interval must be a duration such as 2s") {
 			t.Errorf("%v: %+v", args, result)
 		}
-	}
-}
-
-func TestLandlineTUIRunsLandlineTUIFromThePathWithItsArgumentsAndSaysHowToInstallItWhenItIsMissing(t *testing.T) {
-	tui := buildTUI(t)
-	w := start(t)
-	w.selfRegistered("lead", "claude-code")
-	tuiDir := t.TempDir()
-	if err := os.Rename(tui, filepath.Join(tuiDir, "landline-tui")); err != nil {
-		t.Fatal(err)
-	}
-	withTUI := withEnv(w.env, "PATH="+tuiDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	direct := runTUI(t, filepath.Join(tuiDir, "landline-tui"), withTUI, "agents", "--json")
-	viaLauncher := runTUI(t, w.bin, withTUI, "tui", "agents", "--json")
-	normalize := regexp.MustCompile(`"fetched_at": ?"[^"]*"`)
-	if direct.code != 0 || viaLauncher.code != 0 || viaLauncher.stderr != "" {
-		t.Fatalf("direct %+v, launcher %+v", direct, viaLauncher)
-	}
-	if normalize.ReplaceAllString(direct.stdout, "") != normalize.ReplaceAllString(viaLauncher.stdout, "") {
-		t.Fatalf("the outputs differ:\n%s\n%s", direct.stdout, viaLauncher.stdout)
-	}
-	if bad := runTUI(t, w.bin, withTUI, "tui", "--interval", "100ms", "agents", "--json"); bad.code != 2 {
-		t.Errorf("the exit code of landline-tui is not passed on: %+v", bad)
-	}
-	empty := t.TempDir()
-	missing := runTUI(t, w.bin, withEnv(w.env, "PATH="+empty), "tui", "agents", "--json")
-	if missing.code != 1 || missing.stdout != "" || strings.TrimSpace(missing.stderr) != "landline-tui is not installed. Build it with: just install-tui" {
-		t.Fatalf("with no landline-tui on the path: %+v", missing)
 	}
 }

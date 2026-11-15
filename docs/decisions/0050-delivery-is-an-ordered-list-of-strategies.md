@@ -2,7 +2,7 @@
 category: architecture
 status: accepted
 approval: person
-affects: [mcp/server, hub/server, wake/codex, cli/command]
+affects: [mcp/server, switchboard/server, wake/codex, cli/command]
 builds-on: ['0020', '0030', '0040']
 note: Drafted on 2026-11-11 after reading Claude Code's cross-session messaging and channels documentation. Delivery by inbox, hub-side wake, and the long poll is superseded by 0070.
 partly-superseded-by: ['0070']

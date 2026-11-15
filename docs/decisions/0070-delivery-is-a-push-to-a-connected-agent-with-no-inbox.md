@@ -2,7 +2,7 @@
 category: architecture
 status: accepted
 approval: person
-affects: [hub/server, mcp/server, wake/codex, message/router, client/http, cli/command]
+affects: [switchboard/server, mcp/server, wake/codex, message/router, client/http, cli/command]
 builds-on: ['0010', '0020', '0060']
 partly-supersedes: ['0020', '0030', '0040', '0050', '0060']
 partly-superseded-by: ['0080']

@@ -1,25 +1,34 @@
-# landline-tui
+# landline
 
-A terminal screen for the agents registered with a Landline hub. It is its own Go module and its own binary, as
-[decision 0090](../docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) describes. It
+The `landline` program: a terminal screen for the agents registered with a Landline switchboard, and the commands a
+person runs. It is built in this Go module, as [decision 0090](../docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)
+and [decision 0110](../docs/decisions/0110-three-binaries-landline-switchboard-and-landline-mcp.md) describe. The screen
 only reads.
+
+The module requires the root module, with a `replace` to the folder above it. Only `main.go` imports root packages. The
+packages under `internal/` import none, and keep their own types. Third-party dependencies live only in this module.
 
 ## Usage
 
 ```
-landline-tui [--interval D]
-landline-tui agents --json
-landline-tui -h | --help
+landline [--interval D]
+landline agents [--json] [--interval D]
+landline <command> [flags]
+landline -h | --help
 ```
 
-- `landline-tui` opens the agent list and polls the hub. `q` or ctrl+c quits. `r` refreshes at once.
+- `landline` in a terminal opens the agent list and polls the switchboard. `q` or ctrl+c quits. `r` refreshes at once.
+  When standard input or standard output is not a terminal, it prints the usage on standard error and exits `2`.
 - `--interval D` is a Go duration. The default is `2s` and the floor is `500ms`. When a request takes longer than the
   interval, the next wait is twice that request's time.
-- Flags may come before the screen name: `landline-tui --interval 1s agents --json`. `-h` and `--help` print the usage
-  on standard output and exit `0`. A bad `--interval` exits `2` with `the interval must be a duration such as 2s`. One
-  below the floor exits `2` with `the interval is at least 500ms, not 100ms`, where `100ms` is the value given.
-- `landline-tui agents --json` prints one snapshot and exits `0`. When the hub cannot be reached, it prints the reason
-  on standard error and exits `1`. A usage error exits `2`.
+- Flags may come before the command name: `landline --interval 1s agents --json`. `-h`, `--help`, and `help` print the
+  usage on standard output and exit `0`. A bad `--interval` exits `2` with `the interval must be a duration such as 2s`.
+  One below the floor exits `2` with `the interval is at least 500ms, not 100ms`, where `100ms` is the value given.
+- `landline agents` prints one tab-separated line per agent in the screen's order: handle, harness, host, state, and the
+  attribute text. `landline agents --json` prints one snapshot and exits `0`. When the switchboard cannot be reached,
+  either prints the reason on standard error and exits `1`. A usage error exits `2`. Neither takes `--as`.
+- Every other command, such as `setup`, `claude`, `register`, `send`, `log`, `join`, and `server`, is handled by
+  `internal/cli/command` in the root module. `landline version` prints the banner and the build.
 
 The status line reads `error: <message> | hub <address> | refreshed <time>`, with the error first and only when the last
 poll failed. `refreshing...` appears while a fetch runs, and `r` during a fetch says `already refreshing`. After a
@@ -67,7 +76,7 @@ columns. The JSON carries the full commit and the date. The snapshot holds no se
 
 ## How it finds the hub
 
-The same way `landline` does. `LANDLINE_URL` and `LANDLINE_SECRET` win. Otherwise it reads `url` and `secret` from
+The same way the other commands do. `LANDLINE_URL` and `LANDLINE_SECRET` win. Otherwise it reads `url` and `secret` from
 `$HOME/.config/landline/config.json`. With no address it uses `http://127.0.0.1:<port>`, where the port is
 `LANDLINE_PORT` or 8787.
 
@@ -86,6 +95,6 @@ secret and the token are never printed.
 ## Build and test
 
 ```
-go build -o landline-tui .
+go build -o landline .
 go test -race -count=1 ./...
 ```

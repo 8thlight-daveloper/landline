@@ -10,9 +10,9 @@ const ChannelServerName = "landline"
 func SetupCommand(harness, binary string) ([]string, error) {
 	switch harness {
 	case "claude":
-		return []string{"claude", "mcp", "add", "--scope", "user", ChannelServerName, "--", binary, "mcp", "--channel"}, nil
+		return []string{"claude", "mcp", "add", "--scope", "user", ChannelServerName, "--", binary, "--channel"}, nil
 	case "codex":
-		return []string{"codex", "mcp", "add", ChannelServerName, "--", binary, "mcp"}, nil
+		return []string{"codex", "mcp", "add", ChannelServerName, "--", binary}, nil
 	}
 	return nil, fmt.Errorf("landline setup knows claude and codex, and not %q", harness)
 }

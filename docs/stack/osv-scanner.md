@@ -41,8 +41,8 @@ a script. A finding makes the command exit nonzero. Keep that behavior so a chec
 ## This project
 
 Landline commits two lockfiles: `go.mod` at the root, which lists no third-party dependency, and `tui/go.mod` with
-`tui/go.sum`, which lists the dependencies of `landline-tui`. The recursive scan covers both, so run it from the
-repository root:
+`tui/go.sum`, which lists the dependencies of `landline`. The recursive scan covers both, so run it from the repository
+root:
 
 ```sh
 osv-scanner scan source --recursive .

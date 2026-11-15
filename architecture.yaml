@@ -1,12 +1,15 @@
-# The rules of docs/decisions/0010-one-go-program-over-http.md, 0030-wake-adapters-per-harness.md, and
-# 0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md, as data.
+# The rules of docs/decisions/0010-one-go-program-over-http.md, 0030-wake-adapters-per-harness.md,
+# 0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md, and
+# 0110-three-binaries-landline-switchboard-and-landline-mcp.md, as data.
 # The dependency rules, as data. A checker compares this with a graph that a
 # language adapter extracts from the code. Protected like a contract.
 
 components_root: internal
 model: internal/model
 contracts_root: contracts
-entry_point: binary
+# The entry points are not components and may import any of them: cmd/landline-switchboard, cmd/landline-mcp, and
+# tui/main.go, which builds landline in its own module.
+entry_point: cmd
 
 naming:
   component_path: "<noun>/<role>"
@@ -29,7 +32,7 @@ drivers:
   - log/store
   - wake/codex
   - client/http
-  - hub/server
+  - switchboard/server
   - cli/command
   - mcp/server
   - agent/viewer
@@ -52,7 +55,7 @@ components:
   - name: client/http
     position: 2
     depends_on: []
-  - name: hub/server
+  - name: switchboard/server
     position: 3
     depends_on: [agent/registry, message/router]
   - name: cli/command
@@ -61,7 +64,8 @@ components:
   - name: mcp/server
     position: 3
     depends_on: []
-  # The tui/ module, which is its own Go module outside components_root. It reaches the hub over HTTP, so it imports no component.
+  # The screen packages of the tui/ module, which is its own Go module outside components_root. They reach the switchboard
+  # over HTTP and import no root package. Only tui/main.go imports the root module.
   - name: agent/viewer
     position: 3
     depends_on: []
