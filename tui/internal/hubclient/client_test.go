@@ -116,13 +116,13 @@ func TestAgentsReportsARefusedSecretWithoutPrintingIt(t *testing.T) {
 	server := httptest.NewServer(newStubHub("right-right-right-right"))
 	defer server.Close()
 	_, err := New(server.URL, "wrong-wrong-wrong-wrong").Agents()
-	if err == nil || !strings.Contains(err.Error(), "refused the hub secret") || strings.Contains(err.Error(), "wrong-wrong") {
+	if err == nil || !strings.Contains(err.Error(), "refused the switchboard secret") || strings.Contains(err.Error(), "wrong-wrong") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 func TestAgentsNeedsASecret(t *testing.T) {
-	if _, err := New("http://127.0.0.1:1", "").Agents(); err != ErrNoSecret {
+	if _, err := New("http://127.0.0.1:1", "").Agents(); err != ErrNoSecret || !strings.Contains(ErrNoSecret.Error(), "there is no switchboard secret") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestAgentsSaysWhenTheHubIsUnreachable(t *testing.T) {
 	address := server.URL
 	server.Close()
 	_, err := New(address, "s3cret-s3cret-s3cret").Agents()
-	if err == nil || !strings.Contains(err.Error(), "cannot reach the hub at "+address) {
+	if err == nil || !strings.Contains(err.Error(), "cannot reach the switchboard at "+address) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -173,7 +173,7 @@ func TestAgentsFailsWithinTheTimeoutWhenTheHubNeverAnswers(t *testing.T) {
 	client := newWithTimeout(server.URL, "s3cret-s3cret-s3cret", 100*time.Millisecond)
 	start := time.Now()
 	_, err := client.Agents()
-	if err == nil || !strings.Contains(err.Error(), "cannot reach the hub") {
+	if err == nil || !strings.Contains(err.Error(), "cannot reach the switchboard") {
 		t.Fatalf("got %v", err)
 	}
 	if took := time.Since(start); took > 2*time.Second {
@@ -196,7 +196,7 @@ func TestAgentsRejectsAnAnswerOverTheLimitWithAnExplicitError(t *testing.T) {
 	server := oversizedHub(maxResponseBytes + 1)
 	defer server.Close()
 	_, err := New(server.URL, "s3cret-s3cret-s3cret").Agents()
-	if err == nil || !strings.Contains(err.Error(), "the hub answered with more than 8 MiB") {
+	if err == nil || !strings.Contains(err.Error(), "the switchboard answered with more than 8 MiB") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -232,7 +232,7 @@ func TestARedirectIsAnErrorThatNeverEchoesLocationAndIsNeverFollowed(t *testing.
 		client := New(server.URL, "s3cret-s3cret-s3cret")
 		_, err := client.Agents()
 		server.Close()
-		if err == nil || err.Error() != "the hub answered with a redirect" || strings.Contains(err.Error(), "pwned") {
+		if err == nil || err.Error() != "the switchboard answered with a redirect" || strings.Contains(err.Error(), "pwned") {
 			t.Fatalf("%d: got %v", status, err)
 		}
 		if requests != 1 {
@@ -324,7 +324,7 @@ func TestAnAnswerOneHundredTimesTheLimitIsRejectedWithoutReadingItAll(t *testing
 	defer server.Close()
 	start := time.Now()
 	_, err := New(server.URL, "s3cret-s3cret-s3cret").Agents()
-	if err == nil || err.Error() != "the hub answered with more than 8 MiB" {
+	if err == nil || err.Error() != "the switchboard answered with more than 8 MiB" {
 		t.Fatalf("got %v", err)
 	}
 	if took := time.Since(start); took > 3*time.Second {
@@ -340,7 +340,7 @@ func TestASecretWithAControlCharacterIsRefusedWithoutEchoingIt(t *testing.T) {
 	defer server.Close()
 	for _, secret := range []string{"s3cret\nx-injected: 1", "s3cret\x00", "s3cret\x1b[2J", "s3cret\r"} {
 		_, err := New(server.URL, secret).Agents()
-		if err == nil || err.Error() != "the hub secret contains a control character" || strings.Contains(err.Error(), "s3cret") {
+		if err == nil || err.Error() != "the switchboard secret contains a control character" || strings.Contains(err.Error(), "s3cret") {
 			t.Fatalf("%q: got %v", secret, err)
 		}
 	}

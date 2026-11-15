@@ -111,7 +111,7 @@ func HubURL(env Env) string {
 func validHubURL(text string) error {
 	parsed, err := url.Parse(text)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || (parsed.Path != "" && parsed.Path != "/") {
-		return errors.New("the hub address must look like http://host:port")
+		return errors.New("the switchboard address must look like http://host:port")
 	}
 	return nil
 }
@@ -122,7 +122,7 @@ func join(args []string, env Env) error {
 		return err
 	}
 	if set.NArg() != 1 {
-		return errors.New("usage: landline server join <hub address>. The hub secret comes from LANDLINE_SECRET or standard input")
+		return errors.New("usage: landline server join <switchboard address>. The switchboard secret comes from LANDLINE_SECRET or standard input")
 	}
 	address := strings.TrimRight(set.Arg(0), "/")
 	if err := validHubURL(address); err != nil {
@@ -130,17 +130,17 @@ func join(args []string, env Env) error {
 	}
 	secret := env.Getenv("LANDLINE_SECRET")
 	if secret == "" {
-		fmt.Fprint(env.Stderr, "Hub secret: ")
+		fmt.Fprint(env.Stderr, "Switchboard secret: ")
 		raw := make([]byte, 256)
 		n, _ := env.Stdin.Read(raw)
 		secret = strings.TrimSpace(string(raw[:n]))
 	}
 	if len(secret) < 16 {
-		return errors.New("the hub secret is at least 16 characters")
+		return errors.New("the switchboard secret is at least 16 characters")
 	}
 	if err := SaveConfig(env, Config{URL: address, Secret: secret}); err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "joined the hub at %s. The address and secret are saved in %s, readable only by you\n", address, configPath(env))
+	fmt.Fprintf(env.Stdout, "joined the switchboard at %s. The address and secret are saved in %s, readable only by you\n", address, configPath(env))
 	return nil
 }

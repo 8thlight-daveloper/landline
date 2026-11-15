@@ -103,7 +103,7 @@ func TestAFailedPollOverAStaleListKeepsTheErrorFirstAndVisible(t *testing.T) {
 		m := New(hub, 2*time.Second, nil, func() time.Time { return clock })
 		m, _ = send(m, tea.WindowSizeMsg{Width: width, Height: 20})
 		m, _ = send(m, snapshotMsg{agents: sample, at: clock})
-		m, _ = send(m, snapshotMsg{err: errors.New("cannot reach the hub: refused"), at: clock})
+		m, _ = send(m, snapshotMsg{err: errors.New("cannot reach the switchboard: refused"), at: clock})
 		lines := strings.Split(m.View(), "\n")
 		status := lines[len(lines)-2]
 		if !strings.HasPrefix(status, "error: cannot reach") {

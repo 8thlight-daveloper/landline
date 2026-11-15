@@ -62,7 +62,7 @@ func TestAgentsJSONFailsWithAMessageWhenTheHubIsDown(t *testing.T) {
 	address := server.URL
 	server.Close()
 	code, out, errs := invoke(t, address, "agents", "--json")
-	if code == 0 || out != "" || !strings.Contains(errs, "cannot reach the hub") || strings.Contains(errs, secret) {
+	if code == 0 || out != "" || !strings.Contains(errs, "cannot reach the switchboard") || strings.Contains(errs, secret) {
 		t.Fatalf("code %d out %q err %q", code, out, errs)
 	}
 }
@@ -105,7 +105,7 @@ func TestAHostileDialErrorReachesStandardErrorOnlyCleaned(t *testing.T) {
 	}))
 	defer server.Close()
 	code, out, errs := invoke(t, server.URL, "agents", "--json")
-	if code != 1 || out != "" || !strings.Contains(errs, "the hub answered with a redirect") {
+	if code != 1 || out != "" || !strings.Contains(errs, "the switchboard answered with a redirect") {
 		t.Fatalf("code %d out %q err %q", code, out, errs)
 	}
 	if strings.Contains(errs, "evil") || strings.Contains(errs, "pwned") {
@@ -120,7 +120,7 @@ func TestBadHubAddressesFailOnStandardErrorWithoutEchoingTheUserinfo(t *testing.
 	} {
 		for _, args := range [][]string{{"agents", "--json"}, {"agents"}} {
 			code, out, errs := invoke(t, bad, args...)
-			if code != 1 || out != "" || !strings.Contains(errs, "the hub address must look like") {
+			if code != 1 || out != "" || !strings.Contains(errs, "the switchboard address must look like") {
 				t.Fatalf("%q: code %d out %q err %q", bad, code, out, errs)
 			}
 			for _, forbidden := range []string{"hunter2", "pwned", "\x1b", "user"} {
@@ -177,7 +177,7 @@ func TestTheJSONSnapshotIsOneWrite(t *testing.T) {
 func TestBadArgumentsExitTwoWithUsageEvenWhenTheAddressIsBad(t *testing.T) {
 	for _, args := range [][]string{nil, {"--bogus"}, {"extra"}, {"agents", "--bogus"}, {"agents", "--json", "extra"}, {"--interval", "100ms"}} {
 		code, out, errs := invoke(t, "ftp://not-a-hub", args...)
-		if code != 2 || out != "" || strings.Contains(errs, "the hub address must look like") {
+		if code != 2 || out != "" || strings.Contains(errs, "the switchboard address must look like") {
 			t.Fatalf("%v: code %d out %q err %q", args, code, out, errs)
 		}
 	}

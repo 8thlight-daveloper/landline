@@ -257,7 +257,7 @@ func TestServerDownAndStatusIgnoreAPidInTheSwitchboardPidFileThatIsNotTheSwitchb
 	if err := os.WriteFile(filepath.Join(data, "switchboard.pid"), []byte(fmt.Sprint(sleeper.Process.Pid)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if status, _ := h.run("server", "status"); !strings.Contains(status, "no hub") {
+	if status, _ := h.run("server", "status"); !strings.Contains(status, "no switchboard started by landline server up is running") {
 		t.Fatalf("status: %s", status)
 	}
 	if out, err := h.run("server", "down"); err != nil {

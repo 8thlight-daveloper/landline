@@ -24,7 +24,7 @@ const serverUsage = `landline server <command>
                     Without --addr it listens on 127.0.0.1:8787, or on the port in LANDLINE_PORT
   down              stop the switchboard that "up" started
   restart [flags]   stop that switchboard and start it again with the flags given. It keeps no agents, so each one registers again
-  status            say whether the hub is running
+  status            say whether the switchboard is running
   log               print the message log
   join <address>    use a switchboard on another machine, with its secret from LANDLINE_SECRET or standard input
   install [--load]  start the switchboard at login: a launchd agent on macOS and a systemd user unit on Linux
@@ -81,7 +81,7 @@ func newSecret() (string, error) {
 func ensureLocalConfig(env Env, addr string) error {
 	config := LoadConfig(env)
 	if config.URL != "" && !isLocalURL(config.URL) {
-		return fmt.Errorf("this machine joined the hub at %s. Edit or remove %s to run a hub here instead", config.URL, filepath.Join(env.ConfigDir, "config.json"))
+		return fmt.Errorf("this machine joined the switchboard at %s. Edit or remove %s to run a switchboard here instead", config.URL, filepath.Join(env.ConfigDir, "config.json"))
 	}
 	if config.Secret == "" {
 		secret, err := newSecret()
@@ -127,7 +127,7 @@ func serverUp(args []string, env Env, dataDir string) int {
 		return 2
 	}
 	if pid, running := switchboardPID(dataDir); running {
-		fmt.Fprintf(env.Stdout, "the hub is already running (pid %d) at %s\n", pid, HubURL(env))
+		fmt.Fprintf(env.Stdout, "the switchboard is already running (pid %d) at %s\n", pid, HubURL(env))
 		return 0
 	}
 	defaultAddr, err := DefaultAddr(env.Getenv)
@@ -175,13 +175,13 @@ func serverUp(args []string, env Env, dataDir string) int {
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		if raw, _ := os.ReadFile(outPath); strings.Contains(string(raw), "listening on") {
-			fmt.Fprintf(env.Stdout, "the hub is running (pid %d) at %s. Its output is in %s\n", pid, "http://"+addr, outPath)
+			fmt.Fprintf(env.Stdout, "the switchboard is running (pid %d) at %s. Its output is in %s\n", pid, "http://"+addr, outPath)
 			return 0
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	raw, _ := os.ReadFile(outPath)
-	fmt.Fprintf(env.Stderr, "the hub did not start:\n%s", raw)
+	fmt.Fprintf(env.Stderr, "the switchboard did not start:\n%s", raw)
 	return 1
 }
 
@@ -189,19 +189,19 @@ func serverDown(env Env, dataDir string) int {
 	pid, running := switchboardPID(dataDir)
 	if !running {
 		os.Remove(pidFile(dataDir))
-		fmt.Fprintln(env.Stdout, "no hub started by landline server up is running")
+		fmt.Fprintln(env.Stdout, "no switchboard started by landline server up is running")
 		return 0
 	}
 	syscall.Kill(pid, syscall.SIGTERM)
 	for i := 0; i < 60; i++ {
 		if syscall.Kill(pid, 0) != nil {
 			os.Remove(pidFile(dataDir))
-			fmt.Fprintln(env.Stdout, "the hub stopped")
+			fmt.Fprintln(env.Stdout, "the switchboard stopped")
 			return 0
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	fmt.Fprintf(env.Stderr, "the hub (pid %d) did not stop\n", pid)
+	fmt.Fprintf(env.Stderr, "the switchboard (pid %d) did not stop\n", pid)
 	return 1
 }
 
@@ -222,10 +222,10 @@ func serverRestart(args []string, env Env, dataDir string) int {
 
 func serverStatus(env Env, dataDir string) int {
 	if pid, running := switchboardPID(dataDir); running {
-		fmt.Fprintf(env.Stdout, "the hub is running (pid %d) at %s\n", pid, HubURL(env))
+		fmt.Fprintf(env.Stdout, "the switchboard is running (pid %d) at %s\n", pid, HubURL(env))
 		return 0
 	}
-	fmt.Fprintf(env.Stdout, "no hub started by landline server up is running. The saved address is %s\n", HubURL(env))
+	fmt.Fprintf(env.Stdout, "no switchboard started by landline server up is running. The saved address is %s\n", HubURL(env))
 	return 0
 }
 

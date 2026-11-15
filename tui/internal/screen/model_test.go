@@ -32,7 +32,7 @@ var sample = []hubclient.Agent{
 }
 
 func TestViewShowsLoadingBeforeTheFirstPoll(t *testing.T) {
-	if view := newModel().View(); !strings.Contains(view, "Loading") || !strings.Contains(view, "hub http://hub:1") {
+	if view := newModel().View(); !strings.Contains(view, "Loading") || !strings.Contains(view, "switchboard http://hub:1") {
 		t.Fatal(view)
 	}
 }
@@ -41,7 +41,7 @@ func TestSnapshotShowsAgentsAndTheStatusLine(t *testing.T) {
 	m, _ := send(newModel(), tea.WindowSizeMsg{Width: 200, Height: 20})
 	m, cmd := send(m, snapshotMsg{agents: sample, at: clock, took: 10 * time.Millisecond})
 	view := m.View()
-	for _, want := range []string{"HANDLE", "alpha", "lead", "connected", "bravo", "disconnected", "/work/app", "opus", "hub http://hub:1", "refreshed 10:30:05"} {
+	for _, want := range []string{"HANDLE", "alpha", "lead", "connected", "bravo", "disconnected", "/work/app", "opus", "switchboard http://hub:1", "refreshed 10:30:05"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("missing %q in\n%s", want, view)
 		}
@@ -56,7 +56,7 @@ func TestSnapshotShowsAgentsAndTheStatusLine(t *testing.T) {
 
 func TestEmptyListSaysSo(t *testing.T) {
 	m, _ := send(newModel(), snapshotMsg{agents: nil, at: clock})
-	if !strings.Contains(m.View(), "No agents are registered with this hub.") {
+	if !strings.Contains(m.View(), "No agents are registered with this switchboard.") {
 		t.Fatal(m.View())
 	}
 }
@@ -64,9 +64,9 @@ func TestEmptyListSaysSo(t *testing.T) {
 func TestFailedPollKeepsThePreviousDataAndShowsTheError(t *testing.T) {
 	m, _ := send(newModel(), snapshotMsg{agents: sample, at: clock})
 	m, _ = send(m, tea.WindowSizeMsg{Width: 200, Height: 20})
-	m, _ = send(m, snapshotMsg{err: errors.New("cannot reach the hub at http://hub:1: refused"), at: clock.Add(time.Minute)})
+	m, _ = send(m, snapshotMsg{err: errors.New("cannot reach the switchboard at http://hub:1: refused"), at: clock.Add(time.Minute)})
 	view := m.View()
-	if !strings.Contains(view, "alpha") || !strings.Contains(view, "error: cannot reach the hub") || !strings.Contains(view, "refreshed 10:30:05") {
+	if !strings.Contains(view, "alpha") || !strings.Contains(view, "error: cannot reach the switchboard") || !strings.Contains(view, "refreshed 10:30:05") {
 		t.Fatal(view)
 	}
 	m, _ = send(m, snapshotMsg{agents: sample, at: clock.Add(2 * time.Minute)})
@@ -192,7 +192,7 @@ func TestFortyAgentsInA24RowWindowShowHeaderPrefixMoreAndStatus(t *testing.T) {
 	if lines[20] != "+21 more" {
 		t.Fatalf("got %q", lines[20])
 	}
-	if !strings.Contains(lines[22], "hub http://hub:1") || !strings.Contains(lines[23], "q quit") {
+	if !strings.Contains(lines[22], "switchboard http://hub:1") || !strings.Contains(lines[23], "q quit") {
 		t.Fatalf("footer %q", lines[21:])
 	}
 	if strings.Contains(m.View(), "agent19") {
@@ -218,7 +218,7 @@ func TestEveryHeightKeepsTheStatusLineWithinTheWindow(t *testing.T) {
 		if n := len(strings.Split(view, "\n")); n > height {
 			t.Fatalf("height %d: %d lines", height, n)
 		}
-		if !strings.Contains(view, "hub http://hub:1") {
+		if !strings.Contains(view, "switchboard http://hub:1") {
 			t.Fatalf("height %d: no status line in\n%s", height, view)
 		}
 		if height >= 4 && !strings.Contains(view, "HANDLE") {
@@ -295,7 +295,7 @@ func TestHostileErrorAndHubNeverReachTheViewAndTheStatusStaysOneLine(t *testing.
 	lines := strings.Split(view, "\n")
 	var status string
 	for _, l := range lines {
-		if strings.Contains(l, "hub ") && strings.Contains(l, "refreshed") {
+		if strings.Contains(l, "switchboard ") && strings.Contains(l, "refreshed") {
 			status = l
 		}
 	}

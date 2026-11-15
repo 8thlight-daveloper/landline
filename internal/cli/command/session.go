@@ -115,7 +115,7 @@ func (s *Session) Handle() string {
 
 func (s *Session) hubDown(err error) error {
 	if err != nil && (strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "no such host") || strings.Contains(err.Error(), "dial tcp")) {
-		return fmt.Errorf("the Landline hub is not running at %s. Run: landline server up", HubURL(s.env))
+		return fmt.Errorf("the Landline switchboard is not running at %s. Run: landline server up", HubURL(s.env))
 	}
 	return err
 }
@@ -123,7 +123,7 @@ func (s *Session) hubDown(err error) error {
 func (s *Session) register() error {
 	secret := s.env.Getenv("LANDLINE_SECRET")
 	if secret == "" {
-		return errors.New("there is no hub secret. Run: landline server up, or landline join <hub address>")
+		return errors.New("there is no switchboard secret. Run: landline server up, or landline join <switchboard address>")
 	}
 	host := s.env.Host
 	identity := s.detect().With(Identity{Harness: HarnessFromClient(s.clientName, s.env.Getenv("AI_AGENT")), HarnessVersion: s.clientVersion}).With(s.overrides)

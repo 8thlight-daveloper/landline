@@ -318,8 +318,8 @@ func (h *harness) logged() []model.Envelope {
 
 func TestTheSecretMustBeLongEnough(t *testing.T) {
 	t.Parallel()
-	if _, err := New(Config{Secret: "short"}, nil); err == nil {
-		t.Fatal("accepted a short secret")
+	if _, err := New(Config{Secret: "short"}, nil); err == nil || !strings.Contains(err.Error(), "the switchboard secret must be at least 16 characters") {
+		t.Fatalf("a short secret: %v", err)
 	}
 }
 
@@ -327,8 +327,8 @@ func TestTheSecretMinimumIsSixteenCharactersExactly(t *testing.T) {
 	t.Parallel()
 	log, _ := store.Open(filepath.Join(t.TempDir(), "log.jsonl"))
 	defer log.Close()
-	if _, err := New(Config{Secret: strings.Repeat("s", 15)}, log); err == nil {
-		t.Fatal("accepted 15 characters")
+	if _, err := New(Config{Secret: strings.Repeat("s", 15)}, log); err == nil || !strings.Contains(err.Error(), "the switchboard secret must be at least 16 characters") {
+		t.Fatalf("15 characters: %v", err)
 	}
 	if _, err := New(Config{Secret: strings.Repeat("s", 16)}, log); err != nil {
 		t.Fatalf("refused 16 characters: %v", err)
@@ -771,8 +771,8 @@ func TestTheLogNeedsTheSecretAndReturnsWhatWasSent(t *testing.T) {
 	bravo := h.register("bravo")
 	stream := h.openStream(bravo)
 	h.deliveredSend(alpha, stream, bravo, model.SendBody{To: "bravo", Body: "logged"})
-	if status, _ := h.call("GET", "/v1/log", alpha, nil); status != 401 {
-		t.Fatalf("an agent token read the log: %d", status)
+	if status, body := h.call("GET", "/v1/log", alpha, nil); status != 401 || !strings.Contains(string(body), "missing or wrong switchboard secret") {
+		t.Fatalf("an agent token read the log: %d %s", status, body)
 	}
 	status, raw := h.call("GET", "/v1/log", secret, nil)
 	if status != 200 || !strings.Contains(string(raw), "logged") {

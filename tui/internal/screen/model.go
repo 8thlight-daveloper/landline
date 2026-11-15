@@ -124,7 +124,7 @@ func (m Model) body(width int) []string {
 	case m.view == nil:
 		return []string{"No agent list yet."}
 	case len(m.view.Agents) == 0:
-		return []string{"No agents are registered with this hub."}
+		return []string{"No agents are registered with this switchboard."}
 	}
 	return table(m.view.Agents, width, m.err != nil)
 }
@@ -160,7 +160,7 @@ func (m Model) status(width int) string {
 	if !m.refreshed.IsZero() {
 		refreshed = m.refreshed.Format("15:04:05")
 	}
-	hub := "hub " + clean.Text(m.hub)
+	hub := "switchboard " + clean.Text(m.hub)
 	lead := []string{}
 	plainLead := []string{}
 	if m.err != nil {

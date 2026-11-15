@@ -23,7 +23,7 @@ type StatusError struct {
 
 func (e *StatusError) Error() string {
 	if e.Message == "" {
-		return fmt.Sprintf("the hub answered %d", e.Status)
+		return fmt.Sprintf("the switchboard answered %d", e.Status)
 	}
 	return fmt.Sprintf("%s (%d)", e.Message, e.Status)
 }
@@ -142,7 +142,7 @@ func (c *Client) Stream(ctx context.Context, handle func(model.Delivery)) error 
 			if event == "delivery" && len(data) > 0 {
 				var delivery model.Delivery
 				if err := json.Unmarshal([]byte(strings.Join(data, "\n")), &delivery); err != nil {
-					return fmt.Errorf("the hub sent a delivery that is not valid JSON: %w", err)
+					return fmt.Errorf("the switchboard sent a delivery that is not valid JSON: %w", err)
 				}
 				handle(delivery)
 			}

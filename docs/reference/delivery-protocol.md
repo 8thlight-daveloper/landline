@@ -1,13 +1,13 @@
 # Delivery protocol
 
-The HTTP shapes that [0070](../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) names. The hub
-keeps no mail. Each agent's `landline-mcp` process opens one stream, the hub sends each message down it, and the MCP
-process reports back what it did with the message. The types are in `internal/model/wire.go`.
+The HTTP shapes that [0070](../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) names. The
+switchboard keeps no mail. Each agent's `landline-mcp` process opens one stream, the switchboard sends each message down
+it, and the MCP process reports back what it did with the message. The types are in `internal/model/wire.go`.
 
 ## Authentication
 
-Unchanged. An agent route takes `Authorization: Bearer <agent token>`, the token from `POST /v1/register`. A hub route
-takes `Authorization: Bearer <hub secret>`.
+Unchanged. An agent route takes `Authorization: Bearer <agent token>`, the token from `POST /v1/register`. A switchboard
+route takes `Authorization: Bearer <switchboard secret>`.
 
 ## Routes
 
@@ -29,13 +29,14 @@ Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 `GET /v1/stream` answers `200` with `Content-Type: text/event-stream` and holds the response open.
 
 - Each delivery is one event: `event: delivery`, then `data: <one line of Delivery JSON>`, then a blank line.
-- Every 15 seconds with no delivery, the hub writes the comment line `: keepalive` and a blank line, and flushes. A
-  write deadline of 30 seconds applies to each write. A write that fails or misses the deadline closes the stream. A
-  peer that vanished without closing can keep absorbing small writes into the kernel buffer, so the deadline alone does
-  not promise detection within 30 seconds.
+- Every 15 seconds with no delivery, the switchboard writes the comment line `: keepalive` and a blank line, and
+  flushes. A write deadline of 30 seconds applies to each write. A write that fails or misses the deadline closes the
+  stream. A peer that vanished without closing can keep absorbing small writes into the kernel buffer, so the deadline
+  alone does not promise detection within 30 seconds.
 - An agent has at most one open stream. A second `GET /v1/stream` for the same agent closes the first and replaces it.
-- The agent is `connected` while its stream is open. When the stream closes, the hub marks the agent disconnected and
-  sets its last-seen time to that moment. A stream that a newer stream replaced does not mark the agent disconnected.
+- The agent is `connected` while its stream is open. When the stream closes, the switchboard marks the agent
+  disconnected and sets its last-seen time to that moment. A stream that a newer stream replaced does not mark the agent
+  disconnected.
 - A `Delivery` has an `id` (unique per delivery), a `kind`, the rendered `text`, and for a message the `message`
   envelope (`WireEnvelope`, whose `text` equals the delivery `text`). Kind `message` is one agent's message. Kind
   `challenge` is the Codex proof: `target` is the Codex thread, and `text` is what to queue into it.
@@ -54,9 +55,9 @@ or label). It then:
 1. Report not `ok`: answers `502` with `{"error": "<reported error>"}`.
 1. No report in time: answers `504` with `{"error": "no delivery report"}`.
 
-After the delivery ends, the hub appends a result line to the log for the envelope: `{"seq": N, "result": "..."}`, where
-the result is `delivered` or the error the sender saw. `GET /v1/log` returns each envelope with its `result`, empty when
-none was recorded, as in a log from before this change.
+After the delivery ends, the switchboard appends a result line to the log for the envelope:
+`{"seq": N, "result": "..."}`, where the result is `delivered` or the error the sender saw. `GET /v1/log` returns each
+envelope with its `result`, empty when none was recorded, as in a log from before this change.
 
 A recipient named `all` is an unknown recipient. A message to oneself is refused as before.
 
@@ -68,21 +69,21 @@ it, otherwise `403`. An unknown or already reported id is `404`. "Delivered" mea
 
 ## The Codex proof
 
-`POST /v1/attach` with a `codex_thread` and no code answers as today, except that the hub sends the code as a
+`POST /v1/attach` with a `codex_thread` and no code answers as today, except that the switchboard sends the code as a
 `challenge` delivery down the caller's own stream and waits for its report. With no open stream it answers `409`
 `not connected`. The MCP process runs `codex queue --thread <target> --message <text>` for a challenge and reports the
-result. The hub sends at most 5 challenges per agent in any 5 minutes. Past that, `POST /v1/attach` answers `429` with
-`{"error": "too many proof challenges, try again later"}` and sends nothing. The second call with the code is unchanged,
-except that a proved agent records nothing about the thread on the hub: the MCP process keeps the thread and runs the
-adapter itself.
+result. The switchboard sends at most 5 challenges per agent in any 5 minutes. Past that, `POST /v1/attach` answers
+`429` with `{"error": "too many proof challenges, try again later"}` and sends nothing. The second call with the code is
+unchanged, except that a proved agent records nothing about the thread on the switchboard: the MCP process keeps the
+thread and runs the adapter itself.
 
 ## Listing
 
 [0080](../decisions/0080-the-hub-keeps-only-connected-agents.md) holds agents in memory only, and only while they are
 present. An agent is present while its stream is open, and for 2 minutes after its stream closes. A hand-registered
 agent has no stream, and it is present for 2 minutes after its last authenticated request. When that time runs out the
-hub deletes the registration and the token, and the token is answered with `401` from then on. The hub checks this
-before every request, against its own clock.
+switchboard deletes the registration and the token, and the token is answered with `401` from then on. The switchboard
+checks this before every request, against its own clock.
 
 `GET /v1/agents` lists every present agent. Each entry has `connected`, `false` for an agent in its grace. An entry also
 has `landline_version`, `landline_commit`, and `landline_date` when the agent registered them, with the full values and
@@ -112,46 +113,47 @@ none of the three.
  "landline_date": "2026-11-12T16:34:00Z"}
 ```
 
-The hub enforces the field rules only. The shapes in the table come from the build, which no flag, environment variable,
-or `landline_register` argument can override.
+The switchboard enforces the field rules only. The shapes in the table come from the build, which no flag, environment
+variable, or `landline_register` argument can override.
 
 A send resolves its recipient against the connected agents first, so a label or a prefix picks among them alone and the
 ambiguity rule applies to them alone. When no connected agent matches, the name resolves against the other present
 agents, so a send to an agent in its grace answers `409` `not connected`. A name that matches no present agent,
-including a handle the hub has forgotten, answers `404` unknown recipient.
+including a handle the switchboard has forgotten, answers `404` unknown recipient.
 
-The hub keeps no state file. A hub restart forgets every agent and token, and each agent registers again and gets a new
-handle. The hub does not issue a handle that a present agent holds, and a forgotten handle may be issued again.
+The switchboard keeps no state file. A switchboard restart forgets every agent and token, and each agent registers again
+and gets a new handle. The switchboard does not issue a handle that a present agent holds, and a forgotten handle may be
+issued again.
 
 ## Observers
 
 [0090](../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) adds a client that is not an
 agent, such as a terminal viewer.
 
-- `POST /v1/observers` takes the hub secret and a body `{"kind": "tui"}`, and answers `200` with
+- `POST /v1/observers` takes the switchboard secret and a body `{"kind": "tui"}`, and answers `200` with
   `{"token": "<observer token>"}`. `kind` is required and follows the free-text rules of the registry: at most 64 bytes,
   no control, line or paragraph separator, or format characters, and not empty after trimming white space. Otherwise the
-  hub answers `400`. A missing or wrong secret is `401`.
+  switchboard answers `400`. A missing or wrong secret is `401`.
 - An observer is not an agent. It has no handle and no stream, and it never appears in `GET /v1/agents`.
 - An observer token is read-only. `GET /v1/agents` answers it with the list an agent gets. Every other route, including
   the secret routes, refuses it with `403` and `{"error": "..."}` that says the token is read-only. An unknown token is
   `401`.
-- The hub holds observers in memory only. An observer is forgotten after 2 minutes (`--grace`) without a request, and
-  the boundary is inclusive as for agents. Every request with its token, refused or not, resets that time. The hub
-  checks this before every request, against its own clock, and the token then answers `401`. A hub restart forgets every
-  observer. A client registers again with the hub secret on a `401`.
+- The switchboard holds observers in memory only. An observer is forgotten after 2 minutes (`--grace`) without a
+  request, and the boundary is inclusive as for agents. Every request with its token, refused or not, resets that time.
+  The switchboard checks this before every request, against its own clock, and the token then answers `401`. A
+  switchboard restart forgets every observer. A client registers again with the switchboard secret on a `401`.
 
 ## Timing flags
 
 `landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, and `--grace`, each a Go
 duration such as `200ms`, for the 15 second keepalive, the 20 second report wait, and the 2 minute grace. A zero,
 negative, or unparsable value is refused. They exist so a test can run the timing rules fast. `LANDLINE_PORT` sets the
-default port, 8787, for a hub with no `--addr` and for a client with no saved hub.
+default port, 8787, for a switchboard with no `--addr` and for a client with no saved switchboard.
 
 ## Reconnecting
 
 The MCP process reconnects with delays that start at one second, double, and stop at 30 seconds. It presents the same
-agent token, so a reconnect inside the 2 minute grace keeps its handle. After the grace the hub answers `401`. The MCP
-process then registers again once, gets a new handle, and removes the session file of the handle it replaced. A CLI
-command that gets `401` prints that the hub does not know the agent any more and tells the person to run
+agent token, so a reconnect inside the 2 minute grace keeps its handle. After the grace the switchboard answers `401`.
+The MCP process then registers again once, gets a new handle, and removes the session file of the handle it replaced. A
+CLI command that gets `401` prints that the switchboard does not know the agent any more and tells the person to run
 `landline register` again.

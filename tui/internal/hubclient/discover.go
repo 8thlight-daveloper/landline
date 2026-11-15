@@ -43,7 +43,7 @@ func Discover(getenv func(string) string, home string) (address, secret string, 
 	return address, secret, nil
 }
 
-var errAddress = errors.New("the hub address must look like http://host:port, with no credentials, query, or fragment")
+var errAddress = errors.New("the switchboard address must look like http://host:port, with no credentials, query, or fragment")
 
 func CheckAddress(address string) error {
 	parsed, err := url.Parse(address)

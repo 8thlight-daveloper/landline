@@ -5,7 +5,7 @@ Three binaries with one job each ([0110](../decisions/0110-three-binaries-landli
 one session, and `landline` is what a person runs. The first two are entry points in the root module under `cmd/`.
 `landline` is built in the module under `tui/`, which imports the root module's code, and holds the terminal screen
 ([0090](../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)). Earlier records call the
-switchboard the hub. [architecture.yaml](../../architecture.yaml) holds the dependency rules.
+switchboard "the hub". [architecture.yaml](../../architecture.yaml) holds the dependency rules.
 
 ## Components
 

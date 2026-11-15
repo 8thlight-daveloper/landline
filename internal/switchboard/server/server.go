@@ -80,7 +80,7 @@ const maxRequestBytes = 6*model.MaxBodyBytes + 4096
 
 func New(cfg Config, store Store) (*Server, error) {
 	if len(cfg.Secret) < minSecretLength {
-		return nil, errors.New("the hub secret must be at least 16 characters")
+		return nil, errors.New("the switchboard secret must be at least 16 characters")
 	}
 	if cfg.KeepaliveInterval == 0 {
 		cfg.KeepaliveInterval = 15 * time.Second
@@ -238,7 +238,7 @@ func (s *Server) secretOnly(w http.ResponseWriter, r *http.Request) bool {
 	if s.observerRefreshed(r) {
 		fail(w, http.StatusForbidden, "an observer token is read-only and may only list agents")
 	} else {
-		fail(w, http.StatusUnauthorized, "missing or wrong hub secret")
+		fail(w, http.StatusUnauthorized, "missing or wrong switchboard secret")
 	}
 	return false
 }

@@ -389,3 +389,26 @@ func TestRenewingATokenRemovesTheSessionFileOfTheHandleItReplaced(t *testing.T) 
 		t.Fatalf("a missing old file broke the renewal: %v", err)
 	}
 }
+
+func TestTheSessionSaysTheSwitchboardIsNotRunningWhenItCannotConnect(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close()
+	s, _ := newSession(t, srv, "0123456789abcdef")
+	_, err := s.Send(model.SendBody{To: "x", Body: "b"})
+	if err == nil || !strings.Contains(err.Error(), "the Landline switchboard is not running at "+url+". Run: landline server up") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestTheSessionSaysThereIsNoSwitchboardSecret(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	s, _ := newSession(t, srv, "")
+	_, err := s.Send(model.SendBody{To: "x", Body: "b"})
+	if err == nil || !strings.Contains(err.Error(), "there is no switchboard secret. Run: landline server up, or landline join <switchboard address>") {
+		t.Fatalf("%v", err)
+	}
+}

@@ -60,11 +60,10 @@
         {
           go = pkgs.go;
           inherit landline-switchboard landline-mcp landline;
-          default = pkgs.symlinkJoin {
-            name = "landline-${releaseVersion}";
-            paths = [ landline landline-switchboard landline-mcp ];
-            meta.mainProgram = "landline";
-          };
+          default = pkgs.runCommand "landline-${releaseVersion}" { meta.mainProgram = "landline"; } ''
+            mkdir -p $out/bin
+            cp ${landline}/bin/landline ${landline-switchboard}/bin/landline-switchboard ${landline-mcp}/bin/landline-mcp $out/bin/
+          '';
         };
     };
     in
@@ -74,6 +73,10 @@
           landline-version = nixpkgs.legacyPackages.${system}.runCommand "landline-version-check" { } ''
             bundle=${outputs.packages.${system}.default}
             for name in landline landline-switchboard landline-mcp; do
+              if [ -L "$bundle/bin/$name" ]; then
+                echo "$name in the bundle is a symlink, so its siblings are not beside it" >&2
+                exit 1
+              fi
               got="$("$bundle/bin/$name" version | tail -n 1)"
               case "$name" in
                 landline) want=${builtins.toJSON (expectedVersionLine "landline")} ;;

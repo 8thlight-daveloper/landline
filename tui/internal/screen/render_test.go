@@ -99,7 +99,7 @@ func TestAtLeastOneAgentRowShowsWhenTheHeightAllowsItAndTheMoreCountIsExact(t *t
 		if height >= 4 && more != 30-rows {
 			t.Fatalf("height %d: shows %d rows and says %d more\n%s", height, rows, more, view)
 		}
-		if !strings.Contains(view, "hub http://hub:1") {
+		if !strings.Contains(view, "switchboard http://hub:1") {
 			t.Fatalf("height %d: no status line", height)
 		}
 	}

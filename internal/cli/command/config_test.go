@@ -80,16 +80,21 @@ func TestJoinSavesTheAddressAndSecretAndRefusesBadOnes(t *testing.T) {
 	if got := LoadConfig(env); got.URL != "http://tailnet-mac:8787" || got.Secret != "a-long-enough-secret-1" {
 		t.Fatalf("%+v", got)
 	}
-	for _, bad := range [][]string{{"join"}, {"join", "ftp://x"}, {"join", "http://u:p@x:1"}, {"join", "http://x:1/path"}, {"join", "not a url"}} {
+	for _, bad := range [][]string{{"join", "ftp://x"}, {"join", "http://u:p@x:1"}, {"join", "http://x:1/path"}, {"join", "not a url"}} {
 		var e strings.Builder
 		env := Env{ConfigDir: t.TempDir(), Stdout: &out, Stderr: &e, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
-		if code := Run(bad, env); code == 0 {
-			t.Errorf("%v was accepted", bad)
+		if code := Run(bad, env); code == 0 || !strings.Contains(e.String(), "the switchboard address must look like") {
+			t.Errorf("%v: %d %q", bad, code, e.String())
 		}
 	}
+	var usage strings.Builder
+	bare := Env{ConfigDir: t.TempDir(), Stdout: &out, Stderr: &usage, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
+	if code := Run([]string{"join"}, bare); code == 0 || !strings.Contains(usage.String(), "usage: landline server join <switchboard address>. The switchboard secret comes from") {
+		t.Errorf("bare join: %d %q", code, usage.String())
+	}
 	short := Env{ConfigDir: t.TempDir(), Stdout: &out, Stderr: &errOut, Stdin: strings.NewReader("short\n"), Getenv: func(string) string { return "" }}
-	if Run([]string{"join", "http://x:1"}, short) == 0 {
-		t.Fatal("a short secret was accepted")
+	if Run([]string{"join", "http://x:1"}, short) == 0 || !strings.Contains(errOut.String(), "Switchboard secret: ") || !strings.Contains(errOut.String(), "the switchboard secret is at least 16 characters") {
+		t.Fatalf("a short secret: %q", errOut.String())
 	}
 }
 

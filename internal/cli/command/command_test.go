@@ -241,7 +241,7 @@ func TestACommandWhoseTokenTheHubForgotSaysToRegisterAgain(t *testing.T) {
 	t.Cleanup(hub.Close)
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "session-alpha.json"), []byte(`{"url":"`+hub.URL+`","token":"gone"}`), 0o600)
-	want := "the hub does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
+	want := "the switchboard does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
 	for _, args := range [][]string{{"send", "--as", "alpha", "--to", "bravo", "hi"}} {
 		r := do(t, dir, hub.URL, "", args...)
 		if r.code == 0 || !strings.Contains(r.err.String(), want) || strings.Contains(r.err.String(), "(401)") {

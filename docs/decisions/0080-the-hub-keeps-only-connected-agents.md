@@ -5,6 +5,7 @@ approval: person
 affects: [switchboard/server, mcp/server, cli/command]
 builds-on: ['0040', '0060', '0070']
 partly-supersedes: ['0040', '0060', '0070']
+partly-superseded-by: ['0130']
 note: Drafted on 2026-11-12 after a registry check found stopped sessions still listed and a label that matched two agents.
 ---
 

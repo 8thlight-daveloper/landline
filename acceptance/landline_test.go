@@ -881,7 +881,7 @@ func TestAnAgentCannotProveAThreadItWasNotToldTheCodeFor(t *testing.T) {
 	}
 }
 
-const forgotten = "the hub does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
+const forgotten = "the switchboard does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
 
 func (w *world) sessionFile(name string) string {
 	return filepath.Join(w.config, ".config", "landline", "session-"+name+".json")
@@ -1108,7 +1108,7 @@ func TestTheHubRefusesToStartWithAShortSecret(t *testing.T) {
 	cmd := exec.Command(switchboardOf(bin), "--addr", freeAddr(t))
 	cmd.Env = append(isolatedEnv(t.TempDir()), "LANDLINE_SECRET=short")
 	out, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "at least 16 characters") {
+	if err == nil || !strings.Contains(string(out), "the switchboard secret must be at least 16 characters") {
 		t.Fatalf("got %q, %v", out, err)
 	}
 }
@@ -1938,7 +1938,7 @@ func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConf
 	addr := freeAddr(t)
 	t.Cleanup(func() { runIn(t, bin, env, home, "server", "down") })
 	out, err := runIn(t, bin, env, home, "server", "up", "--addr", addr)
-	if err != nil || !strings.Contains(out, "the hub is running") {
+	if err != nil || !strings.Contains(out, "the switchboard is running") {
 		t.Fatalf("up: %v %s", err, out)
 	}
 	config := filepath.Join(home, ".config", "landline", "config.json")
@@ -1949,7 +1949,7 @@ func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConf
 	if statErr != nil || info.Mode().Perm() != 0o600 || saved.URL != "http://"+addr || len(saved.Secret) != 32 {
 		t.Fatalf("config %v %v %s", info, statErr, raw)
 	}
-	if again, _ := runIn(t, bin, env, home, "server", "up", "--addr", addr); !strings.Contains(again, "already running") {
+	if again, _ := runIn(t, bin, env, home, "server", "up", "--addr", addr); !strings.Contains(again, "the switchboard is already running") {
 		t.Fatalf("a second up: %s", again)
 	}
 	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "is running") {
@@ -1983,10 +1983,10 @@ func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConf
 			t.Errorf("%s was written", old)
 		}
 	}
-	if down, err := runIn(t, bin, env, home, "server", "down"); err != nil || !strings.Contains(down, "the hub stopped") {
+	if down, err := runIn(t, bin, env, home, "server", "down"); err != nil || !strings.Contains(down, "the switchboard stopped") {
 		t.Fatalf("down: %v %s", err, down)
 	}
-	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "no hub") {
+	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "no switchboard started by landline server up is running") {
 		t.Fatalf("status after down: %s", status)
 	}
 	if refused := p.tool("landline_agents", `{}`); !strings.Contains(refused, "landline server up") {
@@ -2050,11 +2050,11 @@ func TestServerJoinSavesAnotherMachinesHubAndServerUpRefusesToStartASecondHub(t 
 	env := isolatedEnv(home)
 	cmd := exec.Command(bin, "server", "join", "http://tailnet-mac:8787")
 	cmd.Env, cmd.Dir = append(env, "LANDLINE_SECRET=a-long-enough-secret-1"), home
-	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "joined the hub at http://tailnet-mac:8787") {
+	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "joined the switchboard at http://tailnet-mac:8787") {
 		t.Fatalf("join: %v %s", err, out)
 	}
 	out, err := runIn(t, bin, env, home, "server", "up", "--addr", freeAddr(t))
-	if err == nil || !strings.Contains(out, "joined the hub at http://tailnet-mac:8787") {
+	if err == nil || !strings.Contains(out, "this machine joined the switchboard at http://tailnet-mac:8787") || !strings.Contains(out, "to run a switchboard here instead") {
 		t.Fatalf("up after join: %v %s", err, out)
 	}
 }
@@ -2246,7 +2246,7 @@ func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndForgetsEverySessio
 	}
 	out, err := h.run("server", "restart", "--addr", h.addr)
 	last := out[strings.LastIndex(strings.TrimSpace(out), "\n")+1:]
-	if err != nil || !regexp.MustCompile(`^the hub is running \(pid \d+\) at http://`+regexp.QuoteMeta(h.addr)+`(\.|$)`).MatchString(strings.TrimSpace(last)) {
+	if err != nil || !regexp.MustCompile(`^the switchboard is running \(pid \d+\) at http://`+regexp.QuoteMeta(h.addr)+`(\.|$)`).MatchString(strings.TrimSpace(last)) {
 		t.Fatalf("restart: %v %q", err, out)
 	}
 	after := h.pid()
@@ -2274,7 +2274,7 @@ func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndForgetsEverySessio
 func TestServerRestartWithNoHubRunningJustStartsOne(t *testing.T) {
 	h := newBackgroundHub(t)
 	out, err := h.run("server", "restart", "--addr", h.addr)
-	if err != nil || !strings.Contains(out, "the hub is running") {
+	if err != nil || !strings.Contains(out, "the switchboard is running") {
 		t.Fatalf("restart: %v %s", err, out)
 	}
 	if status, _ := h.run("server", "status"); !strings.Contains(status, "is running") || !strings.Contains(status, "http://"+h.addr) {

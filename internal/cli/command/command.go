@@ -48,10 +48,10 @@ const Usage = `usage: landline <command> [flags]
   send      --as N --to X [--thread T] [--kind K] [--reply-to ID] <body, or - for stdin>
             --to names one agent. The agent must be connected, or the send fails
   log       [--after SEQ]
-  join      <hub address>   save a hub address and its secret, for a hub on another machine
+  join      <switchboard address>   save a switchboard address and its secret, for a hub on another machine
   version   print the version and the build
 
---as defaults to LANDLINE_AS. The hub address and secret come from LANDLINE_URL and LANDLINE_SECRET, or from the file
+--as defaults to LANDLINE_AS. The switchboard address and secret come from LANDLINE_URL and LANDLINE_SECRET, or from the file
 that "landline join" and "landline server up" save, readable only by you.
 `
 
@@ -127,7 +127,7 @@ func register(args []string, env Env) error {
 		return err
 	}
 	if out.Name != *name {
-		return fmt.Errorf("the hub registered %q and not the name that was asked for. Nothing was saved", out.Name)
+		return fmt.Errorf("the switchboard registered %q and not the name that was asked for. Nothing was saved", out.Name)
 	}
 	if err := saveSession(env, out.Name, session{URL: url, Token: out.Token}); err != nil {
 		return err
@@ -182,7 +182,7 @@ func connect(as string, env Env) (*client.Client, error) {
 	return client.New(s.URL, s.Token), nil
 }
 
-const forgottenAgent = "the hub does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
+const forgottenAgent = "the switchboard does not know this agent any more (it forgets an agent 2 minutes after it was last seen). Run landline register again"
 
 func forgotten(err error) error {
 	var status *client.StatusError
