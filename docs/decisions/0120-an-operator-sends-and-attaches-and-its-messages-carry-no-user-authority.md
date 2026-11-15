@@ -1,6 +1,9 @@
 ---
 category: behavior
-status: proposed
+status: accepted
+approval: agent
+approver: {kind: agent, harness: codex, session: 01a1de23-3023-7172-899c-ba91a4161cc2}
+author: {kind: agent, harness: claude-code, session: 1cd97a22-f4bc-448d-afc8-d36dc3a68f34}
 affects: [switchboard/server, client/http, cli/command, agent/viewer, agent/registry, message/router, mcp/server]
 builds-on: ['0020', '0070', '0080', '0090', '0100', '0110']
 note: Drafted on 2026-11-15 to add to 0090, which stays as written for observers.

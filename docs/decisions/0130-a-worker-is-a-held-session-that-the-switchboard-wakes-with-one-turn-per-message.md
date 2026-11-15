@@ -63,9 +63,12 @@ secret. This record states what it can and cannot limit.
   message. A later change to its format needs a record that says how the old file loads.
 - `GET /v1/workers` takes the secret, refuses every other token with `403`, and answers each worker with its `name`,
   `harness`, `session`, `folder`, `label`, `model`, `policy`, and `state`. `landline worker list` prints it.
-- The turn's MCP process reads the secret from the saved configuration, as every MCP process does. `landline worker add`
-  therefore refuses, with a message, when the saved configuration on this machine does not hold the secret it is using,
-  as happens for a switchboard that has only an environment variable.
+- The turn's MCP process reads the secret from the saved configuration of the switchboard's own account, as every MCP
+  process does, and the switchboard is the only place that can say whether that file exists. `POST /v1/workers` and the
+  start of every turn therefore read that file, and refuse with `409` at creation and `502` at a start, with a message,
+  when it is missing or its secret or address does not match the switchboard's own. A switchboard that has only an
+  environment variable cannot run workers until `landline server join` or `landline server up` has saved the file.
+  `landline worker add` makes the same check on its own machine first, as an early message.
 
 **What a turn runs is fixed by the adapter table below.** A worker record holds no command, flag, or environment. The
 table is a pure function from a worker, a prompt, and the switchboard's address to an argument list, an environment, and
