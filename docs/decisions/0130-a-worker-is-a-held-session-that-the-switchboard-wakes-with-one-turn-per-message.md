@@ -1,7 +1,7 @@
 ---
 category: behavior
 status: proposed
-affects: [switchboard/server, client/http, cli/command, agent/viewer, agent/registry]
+affects: [switchboard/server, client/http, cli/command, agent/viewer, agent/registry, message/router, mcp/server]
 builds-on: ['0020', '0070', '0080', '0110', '0120']
 partly-supersedes: ['0080']
 note: Drafted on 2026-11-15 to add a kind of agent that the switchboard remembers, which 0080 says it does not.
@@ -36,51 +36,73 @@ secret. This record states what it can and cannot limit.
 **A worker is a record that the switchboard holds.** It names a stored session of one harness and a folder to run in.
 
 - A worker has a `name`, a `harness` (`claude-code`, `codex`, or `opencode`), a `session` id, a `folder`, an optional
-  `label` and `model`, and a `policy` that is `read-only` or `write`. The folder must exist on the switchboard's host
-  and be the folder the session was started in, because the harnesses keep sessions per folder. The name matches
-  `^[a-z0-9][a-z0-9-]{0,31}$`, is not `all` or `operator`, and does not change. It is the worker's identity, and no MCP
-  handle is. The pair of harness and session is unique.
+  `label` and `model`, and a `policy` that is `read-only` or `write`. Each field is checked when the worker is created
+  and again when the file is read.
+  - `name` matches `^[a-z0-9][a-z0-9-]{0,31}$`, is not `all` or `operator`, and does not change. It is the worker's
+    identity, and no MCP handle is.
+  - `session` matches `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$` and `model` matches `^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,63}$`,
+    so neither can start with a dash or hold a space, and no field of a worker reaches a command as an option. `label`
+    follows the free-text rules of the registry.
+  - `folder` is an absolute path to a folder that exists on the switchboard's host and is the folder the session was
+    started in, because the harnesses keep sessions per folder.
+  - The pair of harness and session is unique.
 - `POST /v1/workers` creates one and `DELETE /v1/workers/<name>` removes one. Both take the secret and refuse an agent,
   observer, or operator token with `403`. `DELETE` of a running worker answers `409`, and removes the worker's log file
   otherwise. `landline worker add --name N --harness H --session S --folder F [--label L] [--model M] [--policy P]`,
   `landline worker list`, and `landline worker remove N` use them. `policy` defaults to `read-only`, and `write` must be
   named.
 - A name that is taken, or that equals the handle or label of a present agent, is refused with `409`. After creation,
-  the switchboard refuses a registration whose name, handle, or label equals a worker's name with `409`, and it makes a
-  new handle again when a random one equals a worker's name.
-- The switchboard saves workers in `workers.json` in its data folder, as a private file written through a temporary file
-  and a rename. It holds the fields above and no secret or token. A missing file means no workers, and a file that
-  cannot be read stops the start with a message. A later change to the format needs a record that says how the old file
-  loads.
+  the switchboard refuses a registration whose name or label equals a worker's name with `409`, and makes a new handle
+  again when a random one equals a worker's name. These are rules of the switchboard, which passes the worker names to
+  the registry and the router, since neither holds workers itself.
+- The data folder is the folder of the `--log` path, which is `~/.local/share/landline` by default, and the switchboard
+  makes it with mode `0700` when it is missing. It holds `workers.json`, `worker-<name>.log`, and the turn files below.
+  `workers.json` is written through a temporary file and a rename with mode `0600`. It holds the fields above and no
+  secret or token. A missing file means no workers, and a file that cannot be read stops the start with a message. A
+  later change to its format needs a record that says how the old file loads.
 
-**What a turn runs is fixed by the adapter table below.** A worker record holds no command, flag, or environment.
+**What a turn runs is fixed by the adapter table below.** A worker record holds no command, flag, or environment. The
+table is a pure function from a worker, a prompt, and the switchboard's address to an argument list, an environment, and
+the input for standard input. The `worker/runner` component holds it and starts the process, and the lock, the counters,
+and the states stay in the switchboard.
 
-| Harness       | `read-only` turn                                                                                                 | `write` turn                                      |
-| ------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `claude-code` | `claude -p --resume S --permission-mode plan --strict-mcp-config --mcp-config F --allowedTools <landline tools>` | The same with `--permission-mode acceptEdits`     |
-| `codex`       | `codex exec resume S -c sandbox_mode="read-only" -c approval_policy="never" -`                                   | The same with `sandbox_mode="workspace-write"`    |
-| `opencode`    | `opencode run --standalone --session S --agent plan --format json MESSAGE`                                       | The same with `--auto` and without `--agent plan` |
+| Harness       | `read-only` turn                                                                                                            | `write` turn                                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `claude-code` | `claude -p --resume S --permission-mode plan --tools "" --strict-mcp-config --mcp-config F --allowedTools <landline tools>` | `claude -p --resume S --permission-mode acceptEdits --strict-mcp-config --mcp-config F --allowedTools <landline tools>` |
+| `codex`       | `codex exec resume S -c sandbox_mode="read-only" -c approval_policy="never" -`                                              | The same with `sandbox_mode="workspace-write"`                                                                          |
+| `opencode`    | `opencode run --standalone --session S --agent plan --format json MESSAGE`                                                  | The same with `--auto` and without `--agent plan`                                                                       |
 
-- `S` is the session id, and the prompt goes to standard input for Claude Code and Codex and as the last argument for
+- `S` is the session id. The prompt goes to standard input for Claude Code and Codex and as the last argument for
   opencode, where other users of the machine can see it in the process list. `--model` follows when the worker has a
-  model. The turn's working folder is the worker's folder. For Claude Code, `F` is a file that the runner writes for the
-  turn, in the data folder with mode `0600`, which names only `landline-mcp` as the one MCP server, and removes after
-  the turn. `<landline tools>` are `mcp__landline__landline_send` and `mcp__landline__landline_agents`.
-- Only Claude Code limits the turn to the Landline tools. Codex and opencode load every MCP server in their own
-  configuration, so a turn can use their side effects. A `read-only` policy limits file edits and commands that change
-  state, and does not limit other tools or the network.
+  model, and the argument list is built with no shell. The turn's working folder is the worker's folder. `-p` skips
+  Claude Code's trust dialog, which is acceptable for a folder the session already ran in.
+- For Claude Code, `F` is a file that the runner writes for the turn in the data folder with mode `0600` and removes
+  after it. It names `landline-mcp` as the only MCP server, with its absolute path, the arguments `--label` and
+  `worker <name>`, and the switchboard's address in `LANDLINE_URL` in its environment. `<landline tools>` are
+  `mcp__landline__landline_send` and `mcp__landline__landline_agents`. `--allowedTools` pre-approves those tools, and
+  `--tools ""` removes the built-in ones from a `read-only` turn. A `write` turn keeps them.
+- Only a Claude Code `read-only` turn is limited to the Landline tools. Codex and opencode load every MCP server in
+  their own configuration, so a turn can use their side effects, and a `read-only` policy limits file edits and commands
+  that change state and does not limit other tools or the network.
+- The turn's MCP process of Codex and opencode is the one in the owner's own configuration. The runner puts
+  `LANDLINE_LABEL` and `LANDLINE_URL` in the process environment, and whether the harness passes them on is an owner
+  check. Without them the turn's agent registers with a random handle and no label, which still lets it send.
 - The `opencode` row is not checked. The adapter accepts `read-only` for opencode only after a hand check against a
-  throwaway session shows that `--agent plan` refuses an edit. Until then the creation of a `read-only` opencode worker
-  is refused with `400`.
+  throwaway session shows that `--agent plan` refuses an edit, and until then the creation of a `read-only` opencode
+  worker is refused with `400`. `opencode run --session` creates a session that does not exist, so a wrong id gives an
+  empty history and no error, and the runner cannot tell. A Codex folder must lie in a git repository.
 - The runner looks up the harness binary on the switchboard's path when a turn starts. A binary that is missing fails
   the send, and the message names it.
 - The environment of the process is built from a list and not from the switchboard's own. It holds `PATH`, `HOME`,
-  `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TMPDIR`, and for Claude Code `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`,
-  and `ANTHROPIC_BASE_URL`, for Codex `CODEX_HOME` and `OPENAI_API_KEY`, and for opencode `OPENCODE_CONFIG` and the
-  `XDG_*` folders, when the switchboard has them. It sets `LANDLINE_LABEL` to `worker <name>`, which no worker name can
-  equal. It never passes `LANDLINE_SECRET`.
+  `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TMPDIR`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, and
+  `NODE_EXTRA_CA_CERTS`, and for Claude Code `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_BASE_URL`, for
+  Codex `CODEX_HOME` and `OPENAI_API_KEY`, and for opencode `OPENCODE_CONFIG` and the `XDG_*` folders, when the
+  switchboard has them. It sets `LANDLINE_LABEL` to `worker <name>`, which no worker name can equal, and `LANDLINE_URL`
+  to the switchboard's own address. It never passes `LANDLINE_SECRET`.
 - The runner refuses to start a turn when the prompt does not start with the full marker line of
   [0020](0020-messages-carry-no-user-authority.md), as a wake adapter does.
+- The runner offers `Start` of a worker, a prompt, and an address, which answers a turn or an error, and a turn offers
+  `Wait`, which answers the exit status, and `Stop`, which ends the process group as the lifecycle below says.
 
 **A worker is an agent that is idle or running.** The agent list gains a row for each worker, with `worker: true`,
 `connected: true`, and a state of `idle` or `running`. The row has the worker's `name`, `harness`, `label`, `model`, and
@@ -90,7 +112,8 @@ connected agents.
 - While a turn runs, the harness's MCP process registers as an ordinary agent with the label `worker <name>`. After the
   turn it exits and is forgotten by the grace of [0080](0080-the-hub-keeps-only-connected-agents.md).
 - A send resolves in this order: an exact handle, an exact worker name, a connected label or prefix, then a present
-  agent in its grace. A worker name matches only exactly.
+  agent in its grace. A worker name matches only exactly. The switchboard gives the router the worker names as
+  recipients, and a send to a worker starts a turn and does not use a stream.
 
 **A message to an idle worker starts one turn.** The switchboard starts the adapter's command in its own process group
 with the rendered message as the prompt, so the prompt starts with the marker.
@@ -129,9 +152,10 @@ log.
   a worker anything keeps no workers.
 - `workers.json` and the worker rows are new. The rows carry no session id or folder, but the file does, and it is
   private.
-- `internal/model` gains the `worker` field, the `state` values, and the `delivery` answer. `docs/reference/` gains the
-  routes, the answers `started`, `busy`, and `429`, and the adapter table. A new component, `worker/runner`, joins
-  `architecture.yaml`, which is protected, as a driver at the position before `switchboard/server`.
+- `internal/model` gains the `worker` and `state` fields of an agent row and the `delivery` field of a send answer, and
+  the `landline_send` tool prints `started` for it. `docs/reference/` gains the routes, the answers `started`, `busy`,
+  and `429`, and the adapter table. A new component, `worker/runner`, joins `architecture.yaml`, which is protected, as
+  a driver at the position before `switchboard/server`.
 - A worker has an identity apart from any process, so a trusted-peer list can name it later.
 - The acceptance suite gains worker creation, the refusal for each token kind, the name pattern and reserved names, a
   collision with a later registration, the saved file and its mode, a restart that keeps the worker, a send that starts

@@ -2,7 +2,7 @@
 category: behavior
 status: proposed
 affects: [switchboard/server, client/http, cli/command, agent/viewer, agent/registry, message/router, mcp/server]
-builds-on: ['0020', '0070', '0090', '0100', '0110']
+builds-on: ['0020', '0070', '0080', '0090', '0100', '0110']
 note: Drafted on 2026-11-15 to add to 0090, which stays as written for observers.
 ---
 
@@ -50,15 +50,17 @@ report, as a send does.
   `operator`, the label of the operator's kind, and the switchboard's own host name as its host, so the stamp reads
   `operator (operator on <switchboard host>)` and never has an empty host.
 - The sender comes from the token, and no request field can name another sender. The names `operator` and `all` are
-  reserved: the registry refuses to register an agent with either, by name, by seed, or by label. A harness or label
-  that reads `operator` on an agent is still the agent's own claim, and the name `operator` is the part that a peer can
-  rely on.
+  reserved: the registry refuses to register an agent with either as its name or its label, and the label update of an
+  attached agent follows the same rule. A harness that reads `operator` on an agent is still the agent's own claim, and
+  the name `operator` is the part that a peer can rely on.
 - The log records the message with the sender `operator`.
-- A reply to an operator has no stream to reach. The recipient `operator` is accepted by the router, so the message is
-  logged and the sender is told `not connected`, as for an agent with no open stream. A person reads the reply with
-  `landline log`.
+- The router treats `operator` as a known sender, with the stamp above, and as a known recipient that has no stream. A
+  reply to `operator` is therefore logged and the sender is told `not connected`, and the switchboard resolves the name
+  `operator` before it looks at labels, so no agent can take it. A message from `operator` to `operator` is refused as a
+  send to oneself. A person reads a reply with `landline log`.
 - The agent instructions of the MCP process say that a message from `operator` is information, as any other message is,
-  and that the person's own instruction is what they type in their own session.
+  and that the person's own instruction is what they type in their own session. They also say that a reply to `operator`
+  that answers `not connected` is logged, and that the agent does not retry it.
 
 **The command line gains `landline operator send`.** It takes `--to`, `--body`, `--kind`, `--thread`, and
 `--in-reply-to`, registers an operator with the secret, sends, prints the result as `landline send` does, and exits with
@@ -81,19 +83,29 @@ they are set and registers two attributes, `tmux_socket` and `tmux_pane`.
 
 **The TUI sends and attaches.** It gains a selected row, which `up` and `down` or `k` and `j` move.
 
+- The selection follows the agent's handle across polls, and the poll goes on while a prompt is open.
+
 - `s` opens a one-line prompt for the message, and Enter sends it as an operator message with kind `chat`, and Escape
   cancels. The screen shows the result line that `landline send` prints.
+
 - `a` attaches to the selected agent's terminal. The TUI never builds a shell string. It runs `tmux` with an argument
   list, and shows a command only for the person to copy.
+
   - When the agent has no tmux attributes, or a value fails its pattern, the TUI says it cannot attach and why.
-  - For an agent on another host, it shows `ssh -t <host> tmux -L <socket> attach-session -t <session>`, only when the
+  - For an agent on another host, it shows `ssh -t <host> tmux -L <socket> attach-session -t '<pane>'`, only when the
     host matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, and does not run it.
-  - For an agent on this host, the TUI shows the target and asks for `y`, because the target is the agent's own claim.
-    On `y` it runs `tmux -L <socket> display-message -p -t <pane> '#{session_id}'` to find the pane's session, then
-    `select-window -t <pane>` and `select-pane -t <pane>`, then hands the terminal to `attach-session -t <session>`, or
-    to `switch-client -t <session>` when its own environment has `TMUX` set. It returns to the screen when tmux exits.
+  - For an agent on this host, the TUI first runs `tmux -L <socket> display-message -p -t <pane>` with the format
+    `#{session_name} #{pane_current_command} #{pane_current_path}`. It stops with a message when the command fails or
+    prints nothing, because a pane that does not exist prints an empty line and exits `0`. Otherwise it shows the three
+    values, marked as tmux's answer and not the agent's claim, with the target, and asks for `y`.
+  - On `y` it runs `select-window -t <pane>` and `select-pane -t <pane>`, and stops if either fails. It then hands the
+    terminal to `attach-session -t <pane>`, which tmux resolves to the pane's session. When the TUI's own `TMUX` names
+    the same socket by the same rule, it runs `switch-client -t <pane>` instead. When it names another socket, the child
+    runs with `TMUX` unset, since tmux refuses to nest. It returns to the screen when tmux exits.
+
 - Whatever a person types after attaching is the person's input in that session, with the person's authority, and
   Landline plays no part in it.
+
 - `landline agents --json` gains `tmux_socket` and `tmux_pane` per row.
 
 **The TUI's own types gain the two fields and the screen packages stay free of the root module,** as
@@ -117,6 +129,8 @@ they are set and registers two attributes, `tmux_socket` and `tmux_pane`.
   refusal to register the name `operator`, the logged reply with `not connected`, hostile tmux values, and the tmux
   attributes through an MCP process started with and without `TMUX` and `TMUX_PANE`, with a socket in the default layout
   and in another. The attach path is checked with a real tmux on its own socket when the tool is present.
+- `docs/architecture/components.md`, `tui/README.md`, and the `agent/viewer` description say that the TUI only reads,
+  and change with this record.
 - A hub restart forgets operators. A running TUI registers again on its next send.
 - Operators have no rate limit of their own. Where a later record limits sends, it says whether operators count.
 - Records before this one say the observer token gets no send right. That still holds for observers.
