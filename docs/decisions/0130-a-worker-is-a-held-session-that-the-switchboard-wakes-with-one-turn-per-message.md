@@ -55,11 +55,17 @@ secret. This record states what it can and cannot limit.
   the switchboard refuses a registration whose name or label equals a worker's name with `409`, and makes a new handle
   again when a random one equals a worker's name. These are rules of the switchboard, which passes the worker names to
   the registry and the router, since neither holds workers itself.
-- The data folder is the folder of the `--log` path, which is `~/.local/share/landline` by default, and the switchboard
-  makes it with mode `0700` when it is missing. It holds `workers.json`, `worker-<name>.log`, and the turn files below.
-  `workers.json` is written through a temporary file and a rename with mode `0600`. It holds the fields above and no
-  secret or token. A missing file means no workers, and a file that cannot be read stops the start with a message. A
-  later change to its format needs a record that says how the old file loads.
+- The worker folder is the folder `workers` inside the folder of the `--log` path, which is `~/.local/share/landline` by
+  default. The switchboard makes it with mode `0700` when it is missing, and refuses to start when the `--log` path
+  itself is that folder. It holds `index.json`, `<name>.log`, and `<name>.mcp.json`, so no worker name can collide with
+  the message log. `index.json` is written through a temporary file and a rename with mode `0600`. It holds the fields
+  above and no secret or token. A missing file means no workers, and a file that cannot be read stops the start with a
+  message. A later change to its format needs a record that says how the old file loads.
+- `GET /v1/workers` takes the secret, refuses every other token with `403`, and answers each worker with its `name`,
+  `harness`, `session`, `folder`, `label`, `model`, `policy`, and `state`. `landline worker list` prints it.
+- The turn's MCP process reads the secret from the saved configuration, as every MCP process does. `landline worker add`
+  therefore refuses, with a message, when the saved configuration on this machine does not hold the secret it is using,
+  as happens for a switchboard that has only an environment variable.
 
 **What a turn runs is fixed by the adapter table below.** A worker record holds no command, flag, or environment. The
 table is a pure function from a worker, a prompt, and the switchboard's address to an argument list, an environment, and
@@ -76,7 +82,7 @@ and the states stay in the switchboard.
   opencode, where other users of the machine can see it in the process list. `--model` follows when the worker has a
   model, and the argument list is built with no shell. The turn's working folder is the worker's folder. `-p` skips
   Claude Code's trust dialog, which is acceptable for a folder the session already ran in.
-- For Claude Code, `F` is a file that the runner writes for the turn in the data folder with mode `0600` and removes
+- For Claude Code, `F` is a file that the runner writes for the turn in the worker folder with mode `0600` and removes
   after it. It names `landline-mcp` as the only MCP server, with its absolute path, the arguments `--label` and
   `worker <name>`, and the switchboard's address in `LANDLINE_URL` in its environment. `<landline tools>` are
   `mcp__landline__landline_send` and `mcp__landline__landline_agents`. `--allowedTools` pre-approves those tools, and
@@ -131,15 +137,16 @@ with the rendered message as the prompt, so the prompt starts with the marker.
   switchboard sends `SIGTERM` to the process group and `SIGKILL` after 10 seconds. A stopping switchboard does the same
   to every running turn. The state returns to `idle` and the switchboard prints one line with the worker, the sender,
   the message id, and the exit.
-- The process's output goes to `worker-<name>.log` in the data folder, a private file that is cut at the start of each
-  turn. It holds whatever the harness prints. The switchboard never prints or sends it.
+- The process's output goes to `<name>.log` in the worker folder, a private file that is cut at the start of each turn.
+  It holds whatever the harness prints. The switchboard never prints or sends it.
 - A switchboard that crashes can leave a turn running, which the owner stops. The restarted switchboard shows the worker
   as `idle`.
 
 **The reply is the worker's own send.** A worker answers with `landline_send`, as an agent does. A sender that wants the
 answer reads it from its own mail. A message that started a turn from an operator has no reply path, as
 [0120](0120-an-operator-sends-and-attaches-and-its-messages-carry-no-user-authority.md) says, so the reply is in the
-log.
+log. A reply goes to the sender's handle, which is temporary, so a worker whose turn has ended cannot be started again
+by a reply to a handle that no longer exists.
 
 ## Consequences
 
@@ -150,7 +157,7 @@ log.
   the saved configuration that holds the secret. A message that persuades a worker to leak it is a prompt injection, and
   the marker and the agent instructions are the defence. A person who does not trust the agents on their machine to send
   a worker anything keeps no workers.
-- `workers.json` and the worker rows are new. The rows carry no session id or folder, but the file does, and it is
+- `index.json` and the worker rows are new. The rows carry no session id or folder, but the file does, and it is
   private.
 - `internal/model` gains the `worker` and `state` fields of an agent row and the `delivery` field of a send answer, and
   the `landline_send` tool prints `started` for it. `docs/reference/` gains the routes, the answers `started`, `busy`,

@@ -71,10 +71,11 @@ outside.
 they are set and registers two attributes, `tmux_socket` and `tmux_pane`.
 
 - `tmux_socket` is the name of the socket, which is the last segment of the first field of `TMUX`. It is registered only
-  when the directory of that path is named `tmux-<digits>`, the layout tmux uses by default, so that `tmux -L <name>`
-  reaches the same server. For any other socket nothing is registered. It must match `^[A-Za-z0-9._][A-Za-z0-9._-]*$`
-  and be at most 64 bytes. `tmux_pane` is the value of `TMUX_PANE` and must match `^%[0-9]{1,9}$`. A value that fails
-  its pattern refuses the registration, as any bad attribute does.
+  when the process has no `TMUX_TMPDIR` and the socket's directory is `/tmp/tmux-<digits>` or
+  `/private/tmp/tmux-<digits>`, which is where tmux puts a default socket, so that `tmux -L <name>` reaches the same
+  server from any process that also leaves `TMUX_TMPDIR` unset. For any other socket nothing is registered. It must
+  match `^[A-Za-z0-9._][A-Za-z0-9._-]*$` and be at most 64 bytes. `tmux_pane` is the value of `TMUX_PANE` and must match
+  `^%[0-9]{1,9}$`. A value that fails its pattern refuses the registration, as any bad attribute does.
 - Neither can be set by a flag, by `LANDLINE_*`, or by a `landline_register` argument, so they stay a fact the process
   read and not a claim by a person. The agent still reports them, so a peer and an operator treat them as self-reported.
 - The agent list and its JSON carry both, and the attribute text of `landline agents` adds `tmux: <socket>:<pane>`.
@@ -89,15 +90,16 @@ they are set and registers two attributes, `tmux_socket` and `tmux_pane`.
   cancels. The screen shows the result line that `landline send` prints.
 
 - `a` attaches to the selected agent's terminal. The TUI never builds a shell string. It runs `tmux` with an argument
-  list, and shows a command only for the person to copy.
+  list and without `TMUX_TMPDIR` in its environment, so that it reaches the default socket directory, and shows a
+  command only for the person to copy.
 
   - When the agent has no tmux attributes, or a value fails its pattern, the TUI says it cannot attach and why.
   - For an agent on another host, it shows `ssh -t <host> tmux -L <socket> attach-session -t '<pane>'`, only when the
     host matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, and does not run it.
   - For an agent on this host, the TUI first runs `tmux -L <socket> display-message -p -t <pane>` with the format
     `#{session_name} #{pane_current_command} #{pane_current_path}`. It stops with a message when the command fails or
-    prints nothing, because a pane that does not exist prints an empty line and exits `0`. Otherwise it shows the three
-    values, marked as tmux's answer and not the agent's claim, with the target, and asks for `y`.
+    prints nothing but whitespace, because a pane that does not exist prints an empty line and exits `0`. Otherwise it
+    shows the three values, marked as tmux's answer and not the agent's claim, with the target, and asks for `y`.
   - On `y` it runs `select-window -t <pane>` and `select-pane -t <pane>`, and stops if either fails. It then hands the
     terminal to `attach-session -t <pane>`, which tmux resolves to the pane's session. When the TUI's own `TMUX` names
     the same socket by the same rule, it runs `switch-client -t <pane>` instead. When it names another socket, the child
