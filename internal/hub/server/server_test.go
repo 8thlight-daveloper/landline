@@ -850,7 +850,7 @@ func TestASendToAnAgentWithNoLandlineVersionOnRecordSaysItMustBeRestarted(t *tes
 	h.registerVersioned("old", "")
 	h.registerVersioned("current", "0.2.0")
 	status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: "old", Body: "x"})
-	if status != 409 || !strings.Contains(string(raw), "not connected: no landline version is on record") || !strings.Contains(string(raw), "Restart its session") {
+	if status != 409 || !strings.Contains(string(raw), "not connected: no landline version is on record") || !strings.Contains(string(raw), "hand-registered name, which can send and cannot receive") || !strings.Contains(string(raw), "Restart its session if it is a landline session") {
 		t.Fatalf("an unversioned agent: %d %s", status, raw)
 	}
 	status, raw = h.call("POST", "/v1/send", sender, model.SendBody{To: "current", Body: "x"})

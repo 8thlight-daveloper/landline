@@ -1368,7 +1368,7 @@ func TestAnExitedSelfRegisteredProcessIsPlainlyNotConnectedWhileAHandRegisteredN
 		t.Fatalf("self-registered: %d %s", status, body)
 	}
 	status, body = w.sendHTTP("alpha", "bravo", "to the hand-registered name")
-	if status != 409 || !strings.Contains(body, noVersionPrefix) || !strings.Contains(body, "Restart its session") {
+	if status != 409 || !strings.Contains(body, noVersionPrefix) || !strings.Contains(body, "hand-registered name, which can send and cannot receive") || !strings.Contains(body, "Restart its session if it is a landline session") {
 		t.Fatalf("hand-registered: %d %s", status, body)
 	}
 }

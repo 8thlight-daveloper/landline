@@ -48,7 +48,7 @@ or label). It then:
 1. Appends the envelope to the log, as today.
 1. If the recipient is not connected, answers `409` with `{"error": "not connected"}`. Nothing is held. When no
    `landline_version` is on record for the recipient, the text is
-   `not connected: no landline version is on record, so it is an older landline or a hand-registered name. Restart its session`.
+   `not connected: no landline version is on record, so it is a hand-registered name, which can send and cannot receive, or an older landline. Restart its session if it is a landline session`.
 1. Otherwise writes a `message` delivery to the recipient's stream and waits for its report, up to 20 seconds.
 1. Report `ok`: answers `200` with `SendResponse` (`id`, `seq`, `recipients` of length one).
 1. Report not `ok`: answers `502` with `{"error": "<reported error>"}`.

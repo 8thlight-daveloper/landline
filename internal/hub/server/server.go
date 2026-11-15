@@ -501,7 +501,7 @@ func plainProblem(problem string) string {
 
 const notConnected = "not connected"
 
-const unversionedHint = ": no landline version is on record, so it is an older landline or a hand-registered name. Restart its session"
+const unversionedHint = ": no landline version is on record, so it is a hand-registered name, which can send and cannot receive, or an older landline. Restart its session if it is a landline session"
 
 func (s *Server) notConnectedLocked(name string) string {
 	if agent, found := s.reg.Find(s.agents, name); found && agent.LandlineVersion == "" {
