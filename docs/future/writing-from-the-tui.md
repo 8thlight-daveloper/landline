@@ -31,8 +31,11 @@ An operator at the TUI sends a message to an agent, or moves to the terminal the
 
 ## Where to start again
 
-- Read the draft in git history at commit `961b8ff`. It holds the marker rules, the reserved sender name, the tmux
-  patterns, and the attach steps.
+- Read the draft in [draft-decisions](draft-decisions/operator-sends-and-attaches.md). It holds the marker rules, the
+  reserved sender name, the tmux patterns, and the attach steps.
+- Take the tests from the branch `draft/operator-send-and-attach`. It adds contract, acceptance, and TUI tests for the
+  draft on top of `1951711`. They do not compile until the draft is built, so the branch is red by design. Rebase it
+  onto `main` before use.
 - Check which harnesses can show a message in an open session before designing a send for them.
 - Decide first whether a person's message through Landline should ever carry the person's authority. The draft said no.
   A path that says yes needs its own record and a person's approval.

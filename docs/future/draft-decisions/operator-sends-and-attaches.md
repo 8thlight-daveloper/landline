@@ -1,7 +1,8 @@
 # 0120. An operator sends and attaches, and its messages carry no user authority
 
 A draft record, not a decision. It was never approved by a person and nothing is built from it. The TUI stays read-only
-for now, so the draft waits. See [writing from the TUI](../writing-from-the-tui.md).
+for now, so the draft waits. See [writing from the TUI](../writing-from-the-tui.md). Tests for this draft are on the
+branch `draft/operator-send-and-attach`.
 
 Builds on [0020](../../decisions/0020-messages-carry-no-user-authority.md),
 [0070](../../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md),
