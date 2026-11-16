@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Three binaries ([0110](docs/decisions/0110-three-binaries-landline-switchboard-and-landline-mcp.md)).
   `landline-switchboard` is the old hub and serves in the foreground with no arguments. `landline-mcp` is the old
