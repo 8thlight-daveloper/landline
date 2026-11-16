@@ -46,8 +46,8 @@ This adds a fourth binary to the three of 0110, and the other three are unchange
   pins them to `docs/reference/delivery-protocol.md`.
 - It uses one systray library, with menus only and no web view. The stack document names the library and its version.
   Its dependencies stay inside `menubar/`. The root module and the `tui` module gain none.
-- It runs with no Dock icon and no window. When the library cannot do that from a bare binary, the build wraps the
-  binary in an app bundle that sets `LSUIElement`.
+- It runs with no Dock icon and no window. The bundle that `just install` makes sets `LSUIElement`, and the bare binary
+  does too, through the activation policy that the library sets.
 
 **It reads like the TUI and nothing more.** It finds the switchboard address and secret the way
 [0090](0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) and the TUI do: `LANDLINE_URL` and
@@ -55,7 +55,8 @@ This adds a fourth binary to the three of 0110, and the other three are unchange
 login has no environment, so the file is the usual source.
 
 - It registers as an observer with `kind` `menubar`, sends the observer token on every poll, and registers again on a
-  `401`. The token may call `GET /v1/agents` and nothing else.
+  `401`. The token may call `GET /v1/agents` and `GET /v1/build`, which extends the one read route of 0090, and nothing
+  else.
 - It never shows, logs, or writes the secret or the token.
 - It has no send or attach item. A later record adds those, and the observer token gains no right here. The server items
   below run commands and do not use the token.
@@ -108,7 +109,7 @@ show. The stack document says how the images are made from the SVG. The count is
   the old flags are not remembered. A person who runs the switchboard with its own flags starts it from a terminal.
 - A disabled line shows the switchboard's build as `Switchboard 0.2.0 (abc1234)`. It reads `Switchboard dev` for an
   unstamped build, and `Switchboard (build unknown)` when the switchboard predates the route below. It adds
-  ` (differs from this app)` when the commit differs from the menu bar app's own.
+  ` (differs from this app)` when both commits are non-empty and differ.
 
 **The switchboard reports its own build.** `GET /v1/build` takes the secret or an observer token and answers
 `{"version": "0.2.0", "commit": "<40 hex>", "date": "<RFC 3339>"}` from the values that
@@ -133,6 +134,9 @@ harnesses also have `mcp remove`, which `landline` does not call yet.
   file is byte for byte the skill that `setup` installs, and removes the `landline` folder when that leaves it empty. A
   file that differs stays, and `setup` says so on standard output and still exits `0`. `--print` shows the harness
   command and changes nothing, as it does for the add.
+- The skill removal runs whatever the harness command's status is, so a skill left behind when nothing is registered can
+  still be cleaned. The exit status stays the harness command's. When the harness is not on the path, `setup` exits `1`
+  and names it on standard error, and the skill removal still runs.
 - Any other argument exits `2` with the usage. `--remove` takes `--print`, and nothing else.
 - Removing the registration changes new sessions only. A running session keeps its MCP process until it exits.
 - Another harness is added to `setup` and `--remove` together when it has a delivery path or a send path, as
@@ -171,6 +175,11 @@ harnesses also have `mcp remove`, which `landline` does not call yet.
 - No other 8th Light mark is used. The brand rules place the 8\* mark and the logotype in set corners of a layout, and a
   panel with two lines of credits has no such layout.
 
+**Failures show as states.** When the agent list cannot be read, for any reason including a missing or wrong secret, the
+menu shows the unreachable state and exits `0` under `menu --text`. When only `GET /v1/build` fails, the menu shows
+`Switchboard (build unknown)` and nothing else changes. When the list cannot be read, the build line is
+`Switchboard (build unknown)` as well, and `Start` follows the `Not running` rule.
+
 **It polls every 5 seconds.** `--interval D` changes that, with the floor of 500 milliseconds and the slow-request
 backoff that 0090 sets for the TUI. `Refresh` polls at once. The menu is rebuilt only when the list changed, so an open
 menu does not flicker.
@@ -179,9 +188,25 @@ menu does not flicker.
 waits for the hook events in the future note, which carry what an agent is doing and not only whether it is there.
 
 **Install and run.** `just build` builds `landline-menubar` on macOS and skips it elsewhere, and `just install` installs
-it beside the others. The flake exposes the package for Darwin systems only, and `default` includes it there. A person
-starts it by hand or adds it as a login item. No `landline` command starts it in this record, and the menu bar app
-starts nothing but `landline server`.
+it beside the others.
+
+- `just install` also assembles an app bundle, `Landline Menubar.app`, so a person can start the item from Spotlight or
+  Launchpad. The bundle holds the same binary as `Contents/MacOS/landline-menubar`, an `Info.plist` that names it
+  `Landline Menubar`, gives it a bundle identifier, the stamped version, and `LSUIElement` so it has no Dock icon, and
+  an icon made from `assets/jack.svg`. The build signs the bundle ad hoc, because a bundle on Apple silicon needs a
+  signature to launch.
+- The bundle goes to `~/Applications` by default. Spotlight indexes that folder, it belongs to the person, and writing
+  to it needs no administrator password. A recipe argument, `just install-app <folder>`, changes the folder, for example
+  to `/Applications`. The path of `just install` for the other binaries is unchanged, and `just install` calls
+  `install-app` with its default.
+- A bundle started from Spotlight has no shell environment. The app already finds `landline` next to its binary and then
+  on the login shell's path, and reads its address and secret from `~/.config/landline/config.json`, so the bundle needs
+  `landline` on the login shell's path. `~/.local/bin`, where `just install` puts it, is on that path only when the
+  person's shell profile adds it.
+- The flake exposes the binary for Darwin systems only, and `default` includes it there. The flake does not build the
+  bundle.
+- A person adds the app as a login item by hand. No `landline` command starts it in this record, and the menu bar app
+  starts nothing but `landline server`.
 
 ## Consequences
 
