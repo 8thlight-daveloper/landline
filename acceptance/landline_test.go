@@ -356,16 +356,20 @@ type rawStream struct {
 
 func (w *world) openStream(name string, autoReport bool) *rawStream {
 	w.t.Helper()
+	return w.openStreamWith(w.token(name), autoReport)
+}
+
+func (w *world) openStreamWith(token string, autoReport bool) *rawStream {
+	w.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	w.t.Cleanup(cancel)
 	req, _ := http.NewRequestWithContext(ctx, "GET", w.url+"/v1/stream", nil)
-	req.Header.Set("Authorization", "Bearer "+w.token(name))
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		w.t.Fatal(err)
 	}
 	s := &rawStream{events: make(chan streamDelivery, 32), closed: make(chan struct{}), status: resp.StatusCode, contentType: resp.Header.Get("Content-Type")}
-	token := w.token(name)
 	go func() {
 		defer close(s.closed)
 		defer resp.Body.Close()
@@ -591,7 +595,7 @@ func (w *world) firstCodexMessage() string {
 func isolatedEnv(home string) []string {
 	var out []string
 	for _, pair := range os.Environ() {
-		if strings.HasPrefix(pair, "LANDLINE_") || strings.HasPrefix(pair, "HOME=") || strings.HasPrefix(pair, "NO_COLOR=") ||
+		if strings.HasPrefix(pair, "LANDLINE_") || strings.HasPrefix(pair, "TMUX") || strings.HasPrefix(pair, "HOME=") || strings.HasPrefix(pair, "NO_COLOR=") ||
 			strings.HasPrefix(pair, "CLAUDE") || strings.HasPrefix(pair, "CODEX_") || strings.HasPrefix(pair, "AI_AGENT=") {
 			continue
 		}
@@ -2476,6 +2480,8 @@ func TestAnObserverTokenReadsTheAgentListAndEveryOtherRouteAnswers403WithNothing
 		{"POST", "/v1/deliveries/some-id/report", map[string]any{"ok": true}},
 		{"POST", "/v1/register", map[string]string{"name": "mallory", "harness": "x", "host": "mac"}},
 		{"POST", "/v1/observers", map[string]string{"kind": "tui"}},
+		{"POST", "/v1/operators", map[string]string{"kind": "tui"}},
+		{"POST", "/v1/operator/send", map[string]string{"to": "watcher", "body": "from an observer"}},
 		{"GET", "/v1/log", nil},
 	}
 	for _, r := range requests {
@@ -2531,6 +2537,8 @@ func TestARefusedRequestOnEachRouteWithTheObserverTokenKeepsItAliveAndAnObserver
 		{"report", "POST", "/v1/deliveries/x/report", map[string]any{"ok": true}},
 		{"register", "POST", "/v1/register", map[string]string{"name": "mallory", "harness": "x", "host": "mac"}},
 		{"observers", "POST", "/v1/observers", map[string]string{"kind": "tui"}},
+		{"operators", "POST", "/v1/operators", map[string]string{"kind": "tui"}},
+		{"operator send", "POST", "/v1/operator/send", map[string]string{"to": "x", "body": "x"}},
 		{"log", "GET", "/v1/log", nil},
 	}
 	tokens := make([]string, len(routes))

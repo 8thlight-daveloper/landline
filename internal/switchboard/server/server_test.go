@@ -1732,6 +1732,8 @@ func TestAnObserverTokenIsRefusedOnEveryOtherRoute(t *testing.T) {
 		{"GET", "/v1/log", nil},
 		{"POST", "/v1/register", model.RegisterRequest{Name: "charlie", Harness: "codex"}},
 		{"POST", "/v1/observers", ObserverRequest{Kind: "tui"}},
+		{"POST", "/v1/operators", map[string]string{"kind": "tui"}},
+		{"POST", "/v1/operator/send", model.SendBody{To: "alpha", Body: "x"}},
 	}
 	for _, route := range routes {
 		status, raw := h.call(route.method, route.path, observer, route.body)

@@ -12,8 +12,16 @@ Holds the list of registered agents as a value. Every call takes the list and re
 
 - `Register` adds an agent, or replaces the entry with the same name. It sets `LastSeen` to the `now` it was given.
 
-- A name is 1 to 32 lowercase letters, digits, `-` or `_`, starts with a letter or digit, and is not `all`. Anything
-  else is `model.ErrBadName`. An agent with no harness is `model.ErrNoHarness`.
+- A name is 1 to 32 lowercase letters, digits, `-` or `_`, starts with a letter or digit, and is neither `all` nor
+  `operator`. Anything else is `model.ErrBadName`. An agent with no harness is `model.ErrNoHarness`. A name that only
+  contains or starts with a reserved name, such as `operator-1` or `all-1`, is accepted.
+
+- The label may not be `all` or `operator`, compared exactly and case-sensitively. A registration with either as its
+  label is `model.ErrBadField`, the whole registration is refused, and the list passed in is unchanged. The label update
+  of an attached agent goes through `Register` with the changed entry, so it follows the same rule and the old label
+  stays. A label such as `operators`, `Operator`, or `all-in` is accepted.
+  [0120](../../../docs/decisions/0120-an-operator-sends-and-attaches-and-its-messages-carry-no-user-authority.md) sets
+  both names apart, because the switchboard resolves `operator` before it looks at labels.
 
 - A name is checked as ASCII only, 32 characters at most.
 
@@ -36,6 +44,15 @@ Holds the list of registered agents as a value. Every call takes the list and re
   forbidden character is `model.ErrBadField`, the whole registration is refused, and the list passed in is unchanged.
   Registering a name again replaces both with the new entry's values, so an empty value clears the old one. `Find` and
   `Resolve` never match on either field.
+
+- An agent may carry two tmux attributes, `tmux_socket` and `tmux_pane` (`TmuxSocket` and `TmuxPane` in the model, and
+  `tmux_socket` and `tmux_pane` in its JSON). They are plain attributes with their own patterns, checked with the other
+  fields, after the name and the harness. `tmux_socket` is empty, or matches `^[A-Za-z0-9._][A-Za-z0-9._-]*$` and is at
+  most 64 bytes. `tmux_pane` is empty, or matches `^%[0-9]{1,9}$`. The digits are ASCII, and a trailing newline does not
+  match. A value that fails its pattern is `model.ErrBadField`, the whole registration is refused, and the list passed
+  in is unchanged. Each is stored as given and found unchanged, and either may be empty, so a registration may carry one
+  without the other. Registering a name again replaces both with the new entry's values, so an empty value clears the
+  old one. `Find` and `Resolve` never match on either.
 
 - The returned list is sorted by name. The input list is never changed, including when `Register` replaces an entry.
 
@@ -79,6 +96,8 @@ None.
 
 ## Not covered
 
+- A label of `operator` or `all` with padding, such as ` operator`. It is a different string and the registry accepts
+  it.
 - Whether the 64 byte limit on the harness applies before or after trimming. The stored value is never trimmed, and the
   limit is measured on it as stored.
 - Duplicate names in the list passed in. The registry never creates one.
@@ -110,17 +129,39 @@ None.
 | Report a bad commit before a bad name or a missing harness                                             | `TestABadCommitDoesNotHideABadNameOrAMissingHarness`                                                                                                                                                    |
 | Match a query on the commit or the date                                                                | `TestResolveAndFindIgnoreTheCommitAndTheDate`                                                                                                                                                           |
 
+| Wrong implementation (0120)                                                          | Caught by                                                                                                                                                |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Refuse only `all` as a name, or refuse `operator-1` and `all-1` too                  | `TestTheNamesOperatorAndAllAreRefusedAsAName`, `TestNamesThatOnlyContainOrResembleOperatorAreAccepted`                                                   |
+| Leave the label unchecked, or refuse `operators`, `Operator`, and `all-in`           | `TestTheNamesOperatorAndAllAreRefusedAsALabelAndTheListIsUnchanged`, `TestLabelsThatOnlyContainOrDifferInCaseFromTheReservedNamesAreAccepted`            |
+| Let a label update of an attached agent take `operator`                              | `TestReRegisteringAnAttachedAgentWithTheLabelOperatorIsRefusedAndKeepsItsOldLabel`                                                                       |
+| Report a reserved label before a bad name or a missing harness                       | `TestAReservedLabelDoesNotHideABadNameOrAMissingHarness`                                                                                                 |
+| Store the tmux values and never check them, or check them with a looser pattern      | `TestAHostileTmuxSocketRefusesTheWholeRegistrationAndLeavesTheListUnchanged`, `TestAHostileTmuxPaneRefusesTheWholeRegistrationAndLeavesTheListUnchanged` |
+| Misplace the length limits of 64 bytes and 9 digits                                  | `TestATmuxSocketOfExactlySixtyFourBytesIsAcceptedAndSixtyFiveIsNot`, `TestATmuxPaneOfNineDigitsIsAcceptedAndTenIsNot`                                    |
+| Drop the tmux values when storing, or keep the old ones when a registration has none | `TestAValidTmuxSocketAndPaneAreStoredAndFoundUnchanged`, `TestRegisteringANameAgainReplacesTheTmuxValuesAndNoValuesClearThem`                            |
+| Report a bad tmux value before a bad name or a missing harness                       | `TestABadTmuxValueDoesNotHideABadNameOrAMissingHarness`                                                                                                  |
+| Match a query on a tmux value, or let one leak into another field                    | `TestResolveAndFindIgnoreTheTmuxValues`, `TestTmuxValuesDoNotLeakIntoOtherFields`                                                                        |
+| Replace the stored entry when a tmux re-registration is refused                      | `TestARefusedTmuxReRegistrationKeepsTheOldValuesInTheCallersList`                                                                                        |
+
 ## Fixture sources
+
+- The tmux values `default`, `work`, `%3`, and the hostile strings are invented. The patterns come from
+  [0120](../../../docs/decisions/0120-an-operator-sends-and-attaches-and-its-messages-carry-no-user-authority.md). The
+  tests set and read the two values through the JSON keys of the model, so the contract names the keys and not Go
+  fields.
 
 - Handles `alpha`, `bravo`, `tutor-1`, and the labels `tutor`, `reviewer` are invented for these tests. They are
   fictional agent names, as `AGENTS.md` requires.
+
 - The query forms for trimming and case come from the rules above: the contract says the query is matched exactly and
   not trimmed. The Unicode White_Space characters used are the ones the harness rule names.
+
 - The landline versions `0.2.0`, `0.2.0-rc 1`, and `dev` are invented values that look like a release, a pre-release,
   and a development build. They are not read from a real build.
+
 - The invisible characters are Unicode category Cf code points from the Unicode Character Database (`UnicodeData.txt`,
   general category `Cf`): U+00AD, U+0600, U+061C, U+180E, U+200B to U+200F, U+202A, U+202D, U+202E, U+2060, U+2066,
   U+2069, U+FEFF, and the tag characters U+E0001 and U+E0041.
+
 - The commit `0123456789abcdef0123456789abcdef01234567` and the date `2026-11-12T16:34:00Z` are invented, with the
   shapes that [0100](../../../docs/decisions/0100-a-build-names-itself-by-version-commit-and-date.md) gives: 40 hex
   characters, and RFC 3339 in UTC to the second. They are not read from a real commit. The registry checks only the

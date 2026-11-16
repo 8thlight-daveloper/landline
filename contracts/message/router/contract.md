@@ -13,6 +13,12 @@ authenticated sender, a new id and sequence number, and the time.
 
 - The sender comes from the `from` argument, which the caller takes from the authenticated connection. A request has no
   sender field. `from` must be a registered agent, or `model.ErrUnknownSender`.
+- The name `operator` is a known sender and a known recipient even though no agent in the list holds it
+  ([0120](../../../docs/decisions/0120-an-operator-sends-and-attaches-and-its-messages-carry-no-user-authority.md)). A
+  `from` of `operator` is accepted with no agent of that name in the list, and a `To` of `operator` is accepted the same
+  way, with `Recipients` of exactly `operator`. The name is matched exactly, so `Operator` and `operator-1` are as
+  unknown as any other name that no agent holds. A message from `operator` to `operator` is `model.ErrSelfSend`, after
+  every rule that comes before the recipient. The router does not stamp a harness or a host. The caller does that.
 - A message has exactly one recipient. `To` is the exact name of a registered agent, or `model.ErrUnknownRecipient`. A
   message to oneself is `model.ErrSelfSend`. `all` has no meaning: it is an unknown recipient like any other name that
   no agent holds ([0070](../../../docs/decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md)).
@@ -65,6 +71,9 @@ None.
 
 ## Not covered
 
+- An agent named `operator` in the list passed in. The registry refuses that name, so a rebuild may treat it like any
+  other name.
+- What the caller does with a message to `operator`, which has no stream. The router only names the recipient.
 - The sender listed more than once, or an agent with an empty name, in the list passed in. The registry never creates
   either, and a rebuild may treat them like any other name.
 - Whether the sender is among the agents that were last heard from. The caller decides who is registered.
@@ -73,20 +82,26 @@ None.
 
 ## Wrong implementations tried
 
-| Wrong implementation                                                               | Caught by                                                                                               |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Trim the body                                                                      | `TestTheBodyIsKeptExactlyAsSent`                                                                        |
-| Accept a 65 character thread or a leading `.`                                      | `TestThreadBoundaries`                                                                                  |
-| Accept a newline in a thread or `in_reply_to`                                      | `TestAThreadWithALineBreakOrAUnicodeSeparatorIsRefused`, `TestInReplyToIsOneShortTokenWithNoLineBreaks` |
-| Hard-code the id, sequence, or round the time                                      | `TestTheEnvelopeCarriesTheGivenIdSequenceAndExactTime`                                                  |
-| Treat an empty recipient as a valid one                                            | `TestAnEmptyOrPaddedRecipientIsUnknown`                                                                 |
-| Treat `all` as a broadcast to everyone else                                        | `TestTheNameAllIsNotARecipientAtAll`                                                                    |
-| Treat `ALL` or `All` as special                                                    | `TestAllInAnyCaseIsAnUnknownRecipientToo`                                                               |
-| Return more than one recipient, or none                                            | `TestADecisionNamesExactlyOneRecipientAndNeverNil`                                                      |
-| Treat an unknown `all` as a self-send or success                                   | `TestAnUnknownRecipientNamedAllIsNeitherASelfSendNorASuccess`                                           |
-| Check the `all` recipient before earlier rules                                     | `TestAnAllRecipientStillFollowsTheFixedOrderOfRules`                                                    |
-| List a repeated agent name twice                                                   | `TestADuplicateNameInTheAgentListIsOneRecipient`                                                        |
-| Sort the caller's list in place                                                    | `TestRoutingNeverReordersTheCallersAgentList`                                                           |
-| Check self-send before the body or thread                                          | `TestASelfSendIsCheckedAfterEveryEarlierRule`                                                           |
-| Skip the first character of `in_reply_to` when checking it                         | `TestEveryCharacterOfInReplyToIsCheckedIncludingTheFirst`                                               |
-| Refuse `z` or `Z` in a thread or `in_reply_to`, or accept `{`, `[`, `` ` `` or `@` | `TestTokenAlphabetEdgesAtZAndUppercaseZ`                                                                |
+| Wrong implementation                                                                    | Caught by                                                                                                         |
+| --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Trim the body                                                                           | `TestTheBodyIsKeptExactlyAsSent`                                                                                  |
+| Accept a 65 character thread or a leading `.`                                           | `TestThreadBoundaries`                                                                                            |
+| Accept a newline in a thread or `in_reply_to`                                           | `TestAThreadWithALineBreakOrAUnicodeSeparatorIsRefused`, `TestInReplyToIsOneShortTokenWithNoLineBreaks`           |
+| Hard-code the id, sequence, or round the time                                           | `TestTheEnvelopeCarriesTheGivenIdSequenceAndExactTime`                                                            |
+| Treat an empty recipient as a valid one                                                 | `TestAnEmptyOrPaddedRecipientIsUnknown`                                                                           |
+| Treat `all` as a broadcast to everyone else                                             | `TestTheNameAllIsNotARecipientAtAll`                                                                              |
+| Treat `ALL` or `All` as special                                                         | `TestAllInAnyCaseIsAnUnknownRecipientToo`                                                                         |
+| Refuse `operator` as a sender or a recipient because no agent holds it                  | `TestTheOperatorIsAKnownSenderThatIsNotInTheAgentList`, `TestTheOperatorIsAKnownRecipientThatIsNotInTheAgentList` |
+| Accept `Operator`, `operator-1`, or a padded `operator` as the operator                 | `TestTheNamesOperatorAndAllAreMatchedExactly`                                                                     |
+| Let an unknown sender through when the recipient is `operator`                          | `TestAnUnregisteredSenderStaysUnknownWhenTheRecipientIsTheOperator`                                               |
+| Accept an operator message to the operator, or check that before the body or the thread | `TestAMessageFromTheOperatorToTheOperatorIsASelfSend`, `TestAnOperatorSelfSendFollowsTheFixedOrderOfRules`        |
+| Skip the rules of a send for the operator                                               | `TestTheOperatorFollowsEveryRuleOfASendToAnAgent`                                                                 |
+| Return no recipient, or the wrong one, for a message to the operator                    | `TestADecisionToTheOperatorNamesExactlyOneRecipient`                                                              |
+| Return more than one recipient, or none                                                 | `TestADecisionNamesExactlyOneRecipientAndNeverNil`                                                                |
+| Treat an unknown `all` as a self-send or success                                        | `TestAnUnknownRecipientNamedAllIsNeitherASelfSendNorASuccess`                                                     |
+| Check the `all` recipient before earlier rules                                          | `TestAnAllRecipientStillFollowsTheFixedOrderOfRules`                                                              |
+| List a repeated agent name twice                                                        | `TestADuplicateNameInTheAgentListIsOneRecipient`                                                                  |
+| Sort the caller's list in place                                                         | `TestRoutingNeverReordersTheCallersAgentList`                                                                     |
+| Check self-send before the body or thread                                               | `TestASelfSendIsCheckedAfterEveryEarlierRule`                                                                     |
+| Skip the first character of `in_reply_to` when checking it                              | `TestEveryCharacterOfInReplyToIsCheckedIncludingTheFirst`                                                         |
+| Refuse `z` or `Z` in a thread or `in_reply_to`, or accept `{`, `[`, `` ` `` or `@`      | `TestTokenAlphabetEdgesAtZAndUppercaseZ`                                                                          |
