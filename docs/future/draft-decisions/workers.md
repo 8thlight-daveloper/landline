@@ -1,21 +1,15 @@
----
-category: behavior
-status: proposed
-affects: [switchboard/server, client/http, cli/command, agent/viewer, agent/registry, message/router, mcp/server]
-builds-on: ['0020', '0070', '0080', '0110', '0120']
-partly-supersedes: ['0080']
-note: Drafted on 2026-11-15 to add a kind of agent that the switchboard remembers, which 0080 says it does not.
----
-
 # 0130. A worker is a held session that the switchboard wakes with one turn per message
 
-Builds on [0020](0020-messages-carry-no-user-authority.md),
-[0070](0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md),
-[0080](0080-the-hub-keeps-only-connected-agents.md),
-[0110](0110-three-binaries-landline-switchboard-and-landline-mcp.md), and
-[0120](0120-an-operator-sends-and-attaches-and-its-messages-carry-no-user-authority.md). It partly supersedes
-[0080](0080-the-hub-keeps-only-connected-agents.md), which says the switchboard keeps no state of its own: a worker is
-the one thing it saves besides the log.
+A draft record, not a decision. It was never approved by a person and nothing is built from it. See
+[workers](../workers.md) for the idea and the review findings.
+
+Builds on [0020](../../decisions/0020-messages-carry-no-user-authority.md),
+[0070](../../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md),
+[0080](../../decisions/0080-the-hub-keeps-only-connected-agents.md),
+[0110](../../decisions/0110-three-binaries-landline-switchboard-and-landline-mcp.md), and
+[0120](operator-sends-and-attaches.md). It partly supersedes
+[0080](../../decisions/0080-the-hub-keeps-only-connected-agents.md), which says the switchboard keeps no state of its
+own: a worker is the one thing it saves besides the log.
 
 ## Context
 
@@ -109,7 +103,7 @@ and the states stay in the switchboard.
   switchboard has them. It sets `LANDLINE_LABEL` to `worker <name>`, which no worker name can equal, and `LANDLINE_URL`
   to the switchboard's own address. It never passes `LANDLINE_SECRET`.
 - The runner refuses to start a turn when the prompt does not start with the full marker line of
-  [0020](0020-messages-carry-no-user-authority.md), as a wake adapter does.
+  [0020](../../decisions/0020-messages-carry-no-user-authority.md), as a wake adapter does.
 - The runner offers `Start` of a worker, a prompt, and an address, which answers a turn or an error, and a turn offers
   `Wait`, which answers the exit status, and `Stop`, which ends the process group as the lifecycle below says.
 
@@ -119,7 +113,7 @@ the switchboard's host. It has no `session` and no `folder`. The screen and the 
 connected agents.
 
 - While a turn runs, the harness's MCP process registers as an ordinary agent with the label `worker <name>`. After the
-  turn it exits and is forgotten by the grace of [0080](0080-the-hub-keeps-only-connected-agents.md).
+  turn it exits and is forgotten by the grace of [0080](../../decisions/0080-the-hub-keeps-only-connected-agents.md).
 - A send resolves in this order: an exact handle, an exact worker name, a connected label or prefix, then a present
   agent in its grace. A worker name matches only exactly. The switchboard gives the router the worker names as
   recipients, and a send to a worker starts a turn and does not use a stream.
@@ -132,7 +126,7 @@ with the rendered message as the prompt, so the prompt starts with the marker.
   on. The message is in the log for both, and the log's result is `started` or `failed`.
 - A worker runs one turn at a time. The check and the start happen under one lock, so concurrent sends start one turn,
   and the others answer `409` with `busy`. The switchboard holds no queue, as
-  [0070](0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) says.
+  [0070](../../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) says.
 - A worker starts at most 20 turns in a sliding hour, counted in memory for each worker. Every start counts, and a send
   that is refused for `busy` or the limit does not. The 21st answers `429`. A message from any agent or operator can
   start a turn, so the limit keeps a loop from spending the owner's account.
@@ -147,9 +141,8 @@ with the rendered message as the prompt, so the prompt starts with the marker.
 
 **The reply is the worker's own send.** A worker answers with `landline_send`, as an agent does. A sender that wants the
 answer reads it from its own mail. A message that started a turn from an operator has no reply path, as
-[0120](0120-an-operator-sends-and-attaches-and-its-messages-carry-no-user-authority.md) says, so the reply is in the
-log. A reply goes to the sender's handle, which is temporary, so a worker whose turn has ended cannot be started again
-by a reply to a handle that no longer exists.
+[0120](operator-sends-and-attaches.md) says, so the reply is in the log. A reply goes to the sender's handle, which is
+temporary, so a worker whose turn has ended cannot be started again by a reply to a handle that no longer exists.
 
 ## Consequences
 
@@ -183,7 +176,7 @@ by a reply to a handle that no longer exists.
 - **Keep sessions open in tmux and not hold ids.** It is closer to a person's own session. It needs startup dialogs
   answered, loses an initial prompt, and guesses idle from the screen. A later record takes it for attachable sessions.
 - **A queue for a running worker.** A message is never lost. It makes the switchboard an inbox, which
-  [0070](0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) rejected.
+  [0070](../../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) rejected.
 - **Let a worker record carry its own command.** It fits a new harness without code. It would let a stolen secret run
   any program, and a record is a poor place for that.
 - **A scoped token for the turn's MCP process, and a different configuration folder.** It would keep the secret out of

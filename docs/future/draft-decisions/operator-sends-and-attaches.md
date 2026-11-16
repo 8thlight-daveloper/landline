@@ -1,28 +1,20 @@
----
-category: behavior
-status: accepted
-approval: agent
-approver: {kind: agent, harness: codex, session: 01a1de23-3023-7172-899c-ba91a4161cc2}
-author: {kind: agent, harness: claude-code, session: 1cd97a22-f4bc-448d-afc8-d36dc3a68f34}
-affects: [switchboard/server, client/http, cli/command, agent/viewer, agent/registry, message/router, mcp/server]
-builds-on: ['0020', '0070', '0080', '0090', '0100', '0110']
-note: Drafted on 2026-11-15 to add to 0090, which stays as written for observers.
----
-
 # 0120. An operator sends and attaches, and its messages carry no user authority
 
-Builds on [0020](0020-messages-carry-no-user-authority.md),
-[0070](0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md),
-[0090](0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md),
-[0100](0100-a-build-names-itself-by-version-commit-and-date.md), and
-[0110](0110-three-binaries-landline-switchboard-and-landline-mcp.md).
+A draft record, not a decision. It was never approved by a person and nothing is built from it. The TUI stays read-only
+for now, so the draft waits. See [writing from the TUI](../writing-from-the-tui.md).
+
+Builds on [0020](../../decisions/0020-messages-carry-no-user-authority.md),
+[0070](../../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md),
+[0090](../../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md),
+[0100](../../decisions/0100-a-build-names-itself-by-version-commit-and-date.md), and
+[0110](../../decisions/0110-three-binaries-landline-switchboard-and-landline-mcp.md).
 
 ## Context
 
-[0090](0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) made the TUI read only and left sending
-for a later record, because a message from a person at a keyboard has a different sender than one from an agent. The TUI
-is meant to become the place where a person sees and directs their agents. Two actions come first: send a message to an
-agent, and reach the terminal an agent runs in.
+[0090](../../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) made the TUI read only
+and left sending for a later record, because a message from a person at a keyboard has a different sender than one from
+an agent. The TUI is meant to become the place where a person sees and directs their agents. Two actions come first:
+send a message to an agent, and reach the terminal an agent runs in.
 
 A message that an operator sends still arrives in the agent's session as a delivered message. If it read as the person's
 own input, any process that held an operator token could instruct every agent. The person's authority comes from sitting
@@ -41,17 +33,17 @@ with an operator token.
   without a request, by the same lazy expiry as an observer, and its token then answers `401`. A client registers again
   on a `401`.
 - The TUI keeps its observer for polling, as
-  [0090](0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) sets. It registers an operator the
-  first time a person sends, and registers again on a `401`.
+  [0090](../../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) sets. It registers an
+  operator the first time a person sends, and registers again on a `401`.
 
 **An operator message carries no user authority.** `POST /v1/operator/send` takes the body of an agent's send: `to`,
 `body`, `kind`, `thread`, and `in_reply_to`. It resolves the recipient and delivers, and it answers after the delivery
 report, as a send does.
 
 - The delivered text is rendered by the same function as any message, so its first line is the marker of
-  [0020](0020-messages-carry-no-user-authority.md), unchanged. The sender has the name `operator`, the harness
-  `operator`, the label of the operator's kind, and the switchboard's own host name as its host, so the stamp reads
-  `operator (operator on <switchboard host>)` and never has an empty host.
+  [0020](../../decisions/0020-messages-carry-no-user-authority.md), unchanged. The sender has the name `operator`, the
+  harness `operator`, the label of the operator's kind, and the switchboard's own host name as its host, so the stamp
+  reads `operator (operator on <switchboard host>)` and never has an empty host.
 - The sender comes from the token, and no request field can name another sender. The names `operator` and `all` are
   reserved: the registry refuses to register an agent with either as its name or its label, and the label update of an
   attached agent follows the same rule. A harness that reads `operator` on an agent is still the agent's own claim, and
@@ -114,7 +106,7 @@ they are set and registers two attributes, `tmux_socket` and `tmux_pane`.
 - `landline agents --json` gains `tmux_socket` and `tmux_pane` per row.
 
 **The TUI's own types gain the two fields and the screen packages stay free of the root module,** as
-[0110](0110-three-binaries-landline-switchboard-and-landline-mcp.md) sets.
+[0110](../../decisions/0110-three-binaries-landline-switchboard-and-landline-mcp.md) sets.
 
 ## Consequences
 
@@ -143,11 +135,11 @@ they are set and registers two attributes, `tmux_socket` and `tmux_pane`.
 ## Alternatives considered
 
 - **Give the observer token a send right.** One kind of token. It would end the read-only role that
-  [0090](0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) gives a viewer, and a leaked viewer
-  token would then send.
+  [0090](../../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) gives a viewer, and a
+  leaked viewer token would then send.
 - **Let an operator message carry the person's authority.** It would let a person direct an agent from the TUI. Any
-  process with the token could then direct every agent, and [0020](0020-messages-carry-no-user-authority.md) says the
-  opposite.
+  process with the token could then direct every agent, and
+  [0020](../../decisions/0020-messages-carry-no-user-authority.md) says the opposite.
 - **A different marker for operator messages.** It would tell the agent where the text came from. It changes the render
   function that every wake adapter checks, for a distinction that the reserved sender name already carries.
 - **Give operators a stream for replies.** It makes the TUI a conversation. It adds a second kind of stream and an inbox
