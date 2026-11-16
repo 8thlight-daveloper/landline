@@ -7,6 +7,7 @@ How the neutral terms in [architecture.yaml](../../architecture.yaml) map to Go 
 | Component      | One package under `internal/<noun>/<role>`. The directory carries the noun, the package the role          |
 | Domain model   | `internal/model`                                                                                          |
 | TUI            | `tui/`, its own Go module that builds `landline`, outside `components_root`. Component `agent/viewer`     |
+| Menu bar item  | `menubar/`, its own Go module that builds `landline-menubar`, macOS only. Component `menubar/viewer`      |
 | Entry points   | `cmd/landline-switchboard` and `cmd/landline-mcp`, thin `main` packages, and `tui/main.go` for `landline` |
 | Interface file | `api.go` in the contract package, with the interface and its data types                                   |
 | Contract tests | `<role>_test.go` in the contract package                                                                  |

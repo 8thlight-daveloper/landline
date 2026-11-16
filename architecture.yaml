@@ -8,7 +8,7 @@ components_root: internal
 model: internal/model
 contracts_root: contracts
 # The entry points are not components and may import any of them: cmd/landline-switchboard, cmd/landline-mcp, and
-# tui/main.go, which builds landline in its own module.
+# tui/main.go, which builds landline in its own module, and menubar/main.go, which builds landline-menubar in its own module.
 entry_point: cmd
 
 naming:
@@ -36,6 +36,7 @@ drivers:
   - cli/command
   - mcp/server
   - agent/viewer
+  - menubar/viewer
 
 # A component may depend only on components at an earlier position, and on
 # the model. Two components at one position may not depend on each other.
@@ -67,6 +68,12 @@ components:
   # The screen packages of the tui/ module, which is its own Go module outside components_root. They reach the switchboard
   # over HTTP and import no root package. Only tui/main.go imports the root module.
   - name: agent/viewer
+    position: 3
+    depends_on: []
+  # The packages of the menubar/ module, which is its own Go module outside components_root, built on macOS only
+  # (docs/decisions/0140). It reaches the switchboard over HTTP, runs landline for the server and setup commands, and
+  # imports no root package except through its entry point.
+  - name: menubar/viewer
     position: 3
     depends_on: []
 

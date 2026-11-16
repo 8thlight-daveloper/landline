@@ -14,12 +14,21 @@ A driver does input and output.
 | `cli/command`        | 3        | driver | The commands of `landline` except `agents`: setup, claude, server, register, send, log, join, and a session that holds the stream |
 | `mcp/server`         | 3        | driver | Serves the register, agents, and send tools over MCP, holds the delivery stream, and hands each delivery on                       |
 | `agent/viewer`       | 3        | driver | The screen packages of the `tui/` module. Show the agent list on a terminal, and only read                                        |
+| `menubar/viewer`     | 3        | driver | The packages of the `menubar/` module. Show the agents in a macOS menu bar item, and run `landline` for server and setup          |
 
 `agent/viewer` is the one component outside `internal/`. It is the set of screen packages under `tui/internal/`, in the
 `tui/` Go module. They hold their own small copies of the switchboard's JSON types and import no root package and no
 other component. They read the switchboard over HTTP with an observer token and read
 `$HOME/.config/landline/config.json` for its address and secret. They write the terminal and standard output, and no
 files.
+
+`menubar/viewer` is the set of packages of the `menubar/` Go module, outside `internal/`, built on macOS only
+([0140](../decisions/0140-a-macos-menu-bar-item-shows-agents-runs-the-switchboard-and-sets-up-harnesses.md)). Like
+`agent/viewer` it holds its own copies of the switchboard's JSON types and imports no root package and no other
+component. It reads the switchboard over HTTP with an observer token, including `GET /v1/build`, and reads
+`$HOME/.config/landline/config.json` for the address and secret. It runs `landline server up|down|restart` and
+`landline setup claude|codex [--remove]` as child processes, and asks the login shell once for its `PATH`. It writes the
+menu bar, the About panel, and the clipboard, and no files.
 
 The entry points are not components and are outside the dependency graph, so they may import any component.
 `cmd/landline-switchboard` serves the switchboard, and `cmd/landline-mcp` serves the MCP process and holds no
