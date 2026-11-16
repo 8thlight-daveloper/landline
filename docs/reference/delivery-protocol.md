@@ -11,16 +11,17 @@ route takes `Authorization: Bearer <switchboard secret>`.
 
 ## Routes
 
-| Route                             | Auth                    | Does                                                                                 |
-| --------------------------------- | ----------------------- | ------------------------------------------------------------------------------------ |
-| `POST /v1/register`               | secret                  | Registers an agent. It takes no delivery fields and carries the build values (below) |
-| `POST /v1/observers`              | secret                  | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}`       |
-| `POST /v1/attach`                 | agent token             | Records claims. A Codex proof sends its code as a challenge                          |
-| `GET /v1/stream`                  | agent token             | Opens the delivery stream (below)                                                    |
-| `POST /v1/deliveries/{id}/report` | agent token             | The MCP process reports one delivery. Body is `DeliveryReport`                       |
-| `POST /v1/send`                   | agent token             | Sends to one recipient and waits for the delivery report                             |
-| `GET /v1/agents`                  | agent or observer token | Lists agents, each with `connected`                                                  |
-| `GET /v1/log`                     | secret                  | Reads the log. Each entry has `result`                                               |
+| Route                             | Auth                     | Does                                                                                 |
+| --------------------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
+| `POST /v1/register`               | secret                   | Registers an agent. It takes no delivery fields and carries the build values (below) |
+| `POST /v1/observers`              | secret                   | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}`       |
+| `POST /v1/attach`                 | agent token              | Records claims. A Codex proof sends its code as a challenge                          |
+| `GET /v1/stream`                  | agent token              | Opens the delivery stream (below)                                                    |
+| `POST /v1/deliveries/{id}/report` | agent token              | The MCP process reports one delivery. Body is `DeliveryReport`                       |
+| `POST /v1/send`                   | agent token              | Sends to one recipient and waits for the delivery report                             |
+| `GET /v1/agents`                  | agent or observer token  | Lists agents, each with `connected`                                                  |
+| `GET /v1/log`                     | secret                   | Reads the log. Each entry has `result`                                               |
+| `GET /v1/build`                   | secret or observer token | Answers the switchboard's own build (below)                                          |
 
 Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 
@@ -142,6 +143,18 @@ agent, such as a terminal viewer.
   request, and the boundary is inclusive as for agents. Every request with its token, refused or not, resets that time.
   The switchboard checks this before every request, against its own clock, and the token then answers `401`. A
   switchboard restart forgets every observer. A client registers again with the switchboard secret on a `401`.
+
+## The build
+
+[0140](../decisions/0140-a-macos-menu-bar-item-shows-agents-runs-the-switchboard-and-sets-up-harnesses.md) adds a route
+that reports the build of the running switchboard.
+
+- `GET /v1/build` takes the switchboard secret or an observer token and answers `200` with
+  `{"version": "0.2.0", "commit": "<40 hex>", "date": "<RFC 3339>"}`. The values are the ones
+  [0100](../decisions/0100-a-build-names-itself-by-version-commit-and-date.md) stamps. A value the build lacks is an
+  empty string, and an unstamped build answers `dev` as its version.
+- An agent token gets `403`. A missing, malformed, or unknown credential gets `401`. Only `GET` answers.
+- The answer carries no secret and no token. A switchboard from before this route answers `404`.
 
 ## Timing flags
 

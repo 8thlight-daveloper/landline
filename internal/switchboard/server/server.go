@@ -44,6 +44,7 @@ type Config struct {
 	NewSuffix         func() string
 	NewCode           func() string
 	Notify            func(string)
+	Build             BuildResponse
 }
 
 type Server struct {
@@ -143,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/attach", s.attachClaims)
 	mux.HandleFunc("GET /v1/agents", s.list)
 	mux.HandleFunc("GET /v1/log", s.logRead)
+	mux.HandleFunc("GET /v1/build", s.build)
 	return s.expiring(mux)
 }
 

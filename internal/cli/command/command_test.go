@@ -249,3 +249,14 @@ func TestACommandWhoseTokenTheHubForgotSaysToRegisterAgain(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveCommandNamesEachHarnessRemoveAndRefusesOthers(t *testing.T) {
+	claude, _ := RemoveCommand("claude")
+	codex, _ := RemoveCommand("codex")
+	if strings.Join(claude, " ") != "claude mcp remove --scope user landline" || strings.Join(codex, " ") != "codex mcp remove landline" {
+		t.Errorf("%v %v", claude, codex)
+	}
+	if _, err := RemoveCommand("gemini"); err == nil {
+		t.Error("an unknown harness was accepted")
+	}
+}

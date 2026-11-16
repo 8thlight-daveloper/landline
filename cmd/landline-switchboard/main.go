@@ -73,6 +73,7 @@ func run(args []string) int {
 		Secret: secret, Host: host,
 		KeepaliveInterval: timing.Keepalive, DeliveryTimeout: timing.DeliveryTimeout, Grace: timing.Grace,
 		Notify: command.NotifyToStderr,
+		Build:  server.BuildResponse{Version: version, Commit: commit, Date: date},
 	}, log)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)

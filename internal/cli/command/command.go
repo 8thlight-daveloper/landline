@@ -38,7 +38,7 @@ const Usage = `usage: landline <command> [flags]
   Run with no command in a terminal, landline opens the agent screen. --interval D sets how often it asks for the list.
 
   agents    [--json] [--interval D]   list agents and whether each is connected. --json prints the screen's view
-  setup     claude|codex   add the Landline MCP server, landline-mcp, to a harness, once
+  setup     claude|codex [--remove]   add the Landline MCP server, landline-mcp, to a harness, once. --remove takes it out
   claude    [--label L] [-- args]   start Claude Code with the channel loaded
   server    up|down|restart|status|install|join|log   run and find the switchboard
 

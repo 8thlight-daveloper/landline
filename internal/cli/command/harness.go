@@ -1,7 +1,9 @@
 package command
 
 import (
+	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,19 +26,112 @@ func installSkill(home string) (string, error) {
 	return path, os.WriteFile(path, landlineSkill, 0o644)
 }
 
+const setupUsage = "usage: landline setup claude|codex [--remove] [--print]"
+
+func RemoveCommand(harness string) ([]string, error) {
+	switch harness {
+	case "claude":
+		return []string{"claude", "mcp", "remove", "--scope", "user", ChannelServerName}, nil
+	case "codex":
+		return []string{"codex", "mcp", "remove", ChannelServerName}, nil
+	}
+	return nil, fmt.Errorf("landline setup knows claude and codex, and not %q", harness)
+}
+
+func removeSkill(home string) (string, bool, error) {
+	dir := filepath.Join(home, ".claude", "skills", "landline")
+	path := filepath.Join(dir, "SKILL.md")
+	installed, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return path, true, removeEmptyDir(dir)
+	}
+	if err != nil {
+		return path, false, err
+	}
+	if !bytes.Equal(installed, landlineSkill) {
+		return path, false, nil
+	}
+	if err := os.Remove(path); err != nil {
+		return path, false, err
+	}
+	return path, true, removeEmptyDir(dir)
+}
+
+func removeEmptyDir(dir string) error {
+	err := os.Remove(dir)
+	if os.IsNotExist(err) || isDirectoryNotEmpty(err) {
+		return nil
+	}
+	return err
+}
+
+func isDirectoryNotEmpty(err error) bool {
+	return errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST)
+}
+
+func runSetupRemove(harness string, print bool, env Env) int {
+	argv, err := RemoveCommand(harness)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, setupUsage)
+		return 2
+	}
+	if print {
+		fmt.Fprintln(env.Stdout, strings.Join(argv, " "))
+		return 0
+	}
+	status := runHarnessRemove(argv, env)
+	if harness != "claude" {
+		return status
+	}
+	if env.Home == "" {
+		fmt.Fprintln(env.Stderr, "landline setup: there is no home folder to look for the skill in")
+		return 1
+	}
+	path, removed, err := removeSkill(env.Home)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, "landline setup: the skill was not removed:", err)
+		return 1
+	}
+	if !removed {
+		fmt.Fprintf(env.Stdout, "kept %s, which differs from the skill that setup installs\n", path)
+	}
+	return status
+}
+
+func runHarnessRemove(argv []string, env Env) int {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = env.Stdin, env.Stdout, env.Stderr
+	err := cmd.Run()
+	if err == nil {
+		return 0
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	fmt.Fprintf(env.Stderr, "landline setup: %s: %v\n", argv[0], err)
+	return 1
+}
+
 func runSetup(args []string, env Env) int {
 	print := false
+	remove := false
 	var harness string
 	for _, each := range args {
 		switch {
 		case each == "--print":
 			print = true
+		case each == "--remove":
+			remove = true
 		case harness == "" && !strings.HasPrefix(each, "-"):
 			harness = each
 		default:
-			fmt.Fprintln(env.Stderr, "usage: landline setup claude|codex [--print]")
+			fmt.Fprintln(env.Stderr, setupUsage)
 			return 2
 		}
+	}
+	if remove {
+		return runSetupRemove(harness, print, env)
 	}
 	binary, err := findBinary(MCPBinaryName)
 	if err != nil {
