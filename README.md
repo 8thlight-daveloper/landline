@@ -72,16 +72,6 @@ go install github.com/8thlight-daveloper/landline/cmd/landline-switchboard@lates
 go install github.com/8thlight-daveloper/landline/cmd/landline-mcp@latest
 ```
 
-### Upgrading from one program
-
-Version 0.1.0 had one `landline` binary that ran the hub, the MCP process, and the commands. A running installation
-breaks until you set it up again:
-
-- Run `landline setup claude` and `landline setup codex` again, so each harness names `landline-mcp`.
-- Run `landline server install` again, and remove the old launchd unit `dev.landline.hub` or the old systemd unit
-  `landline-hub.service` by hand.
-- Delete a `landline-tui` that is still installed.
-
 ## Quick start on one machine
 
 Start the switchboard once. It runs in the background, saves its address and a generated secret in
