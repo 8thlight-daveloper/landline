@@ -22,6 +22,7 @@ contracts/
   <noun>/<role>/         api.go, contract.md, <role>_test.go, wire_test.go, testdata/
 acceptance/              scenarios as Go code, and their runner
 tui/                     the landline module: main.go and internal/ packages, with its own go.mod
+menubar/                 the landline-menubar module, macOS only: main.go, internal/ packages, and tools/icons
 cmd/                     thin mains: landline-switchboard and landline-mcp
 tools/mutation/accepted/<noun>/<role>.txt
 ```

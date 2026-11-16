@@ -22,7 +22,8 @@ output is a terminal. Set `NO_COLOR` to get the plain version.
 | `landline-switchboard` | Holds the agent list and routes messages. Earlier records and some messages say "hub"         |
 | `landline-mcp`         | The MCP process a harness starts for one session. It registers the session and delivers to it |
 
-They share one `VERSION` and one build stamp, and they must come from the same build.
+They share one `VERSION` and one build stamp, and they must come from the same build. On macOS a fourth binary,
+`landline-menubar`, shows the agents in the menu bar (see [Menu bar item](#menu-bar-item-macos)).
 
 ## What it does
 
@@ -89,6 +90,18 @@ Then add Landline to each harness once. After that, every session registers itse
 landline setup claude     # claude mcp add --scope user landline -- /path/to/landline-mcp --channel
 landline setup codex      # codex mcp add landline -- /path/to/landline-mcp
 ```
+
+To take Landline out of a harness, add `--remove`:
+
+```sh
+landline setup claude --remove   # claude mcp remove --scope user landline
+landline setup codex --remove    # codex mcp remove landline
+```
+
+It exits with the harness command's status. For Claude Code it also deletes `~/.claude/skills/landline/SKILL.md` when
+the file is byte for byte the skill that `setup` installs, and the `landline` folder when that leaves it empty. A file
+you edited stays, and `setup` says so. `--print` shows the harness command and changes nothing. Removing the
+registration affects new sessions only: a running session keeps its MCP process until it exits.
 
 Start Claude Code with `landline claude`. It starts `claude` with channels loaded, so mail is pushed into the session,
 and it passes attributes through: `landline claude --label tutor -- --resume`. To keep using plain `claude`, add the
@@ -198,6 +211,41 @@ finds the switchboard the way the other commands do: `LANDLINE_URL` and `LANDLIN
 that `landline server up` or `landline server join` saved, then `http://127.0.0.1:8787` (`LANDLINE_PORT` changes the
 port). See [tui/README.md](tui/README.md).
 
+## Menu bar item (macOS)
+
+`landline-menubar` puts the Landline telephone jack in the macOS menu bar, with the number of connected agents beside
+it. The jack is dimmed when the switchboard does not answer. The menu lists the agents, connected first, and each row
+opens the fields the agent registered and a `Copy handle` item. It only reads, like the terminal screen, and registers
+as an observer of kind `menubar`. It polls every 5 seconds (`--interval D`, at least 500ms) and has no Dock icon.
+
+- `Switchboard` shows `Running at <address>` or `Not running`, and `Start`, `Stop`, and `Restart` run
+  `landline server up`, `down`, and `restart`. It finds `landline` next to its own binary, then on the path of your
+  login shell. When the address is not a loopback address the three items are disabled. The submenu also shows the
+  switchboard's build and says when its commit differs from the app's. `Restart` gives every agent a new handle.
+- `Harnesses` runs `landline setup claude|codex`, and the same with `--remove`. The menu does not check whether Landline
+  is registered, so both items are always there.
+- `About Landline` opens the standard About panel with the version and a link to the project.
+
+```sh
+just install
+landline-menubar
+landline-menubar menu --text
+landline-menubar version
+```
+
+`just build` and `just install` build it on macOS and skip it elsewhere. `just install` also installs
+`Landline Menubar.app` into `~/Applications`. Press Cmd+Space and type `Landline Menubar` to start it, or open it from
+Launchpad. `just install-app /Applications` installs the bundle into another folder, and `just install-app` alone
+rebuilds and replaces it. The bundle is signed ad hoc and has no Dock icon. An app started from Spotlight has no shell
+environment, so `landline` must be on your login shell's `PATH`. `~/.local/bin` is there only when your shell profile
+adds it. Add the app as a login item by hand, or start the binary from a terminal. It finds the switchboard the way
+`landline` does, from `LANDLINE_URL` and `LANDLINE_SECRET`, then `~/.config/landline/config.json`.
+`landline-menubar menu --text` prints the menu as text and exits, as
+[the menu text](docs/reference/menubar-menu-text.md) defines. See
+[0140](docs/decisions/0140-a-macos-menu-bar-item-shows-agents-runs-the-switchboard-and-sets-up-harnesses.md). The
+project's GitHub address is in the About panel, so a move of the repository changes it
+([stack notes](docs/stack/README.md#moving-the-repository)).
+
 ## Two hosts
 
 There is one switchboard, and every machine uses it. Keep it on localhost and reach it through an SSH tunnel, or let it
@@ -221,22 +269,23 @@ landline setup codex
 
 ## Commands
 
-| Command                                      | Does                                                                                                                                                |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `landline`                                   | Opens the agent screen in a terminal                                                                                                                |
-| `landline agents [--json]`                   | Lists agents, whether each is connected, and the attributes they claimed                                                                            |
-| `landline server up\|down\|status`           | Starts the switchboard in the background, stops it, or shows whether it runs                                                                        |
-| `landline server restart [flags]`            | Stops the switchboard that `up` started and starts it again with the flags given                                                                    |
-| `landline server install [--load]`           | Starts the switchboard at login: a launchd agent on macOS, a systemd user unit on Linux                                                             |
-| `landline server join <address>`             | Uses the switchboard on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                           |
-| `landline setup claude\|codex [--print]`     | Adds `landline-mcp` to that harness, once                                                                                                           |
-| `landline claude [flags] [-- args]`          | Starts Claude Code with the channel loaded. Flags: `--label`, `--model`, `--effort`                                                                 |
-| `landline send --as N --to X [flags] <body>` | Sends a message to one connected agent. `-` reads the body from standard input                                                                      |
-| `landline register --name N --harness H`     | Registers a name by hand, for scripts and tests. It receives only while `landline-mcp --as N --channel` runs                                        |
-| `landline log [--after SEQ]`                 | Prints the message log, with each message's text and its delivery result                                                                            |
-| `landline version`                           | Prints the version and the build. `landline-mcp version` and `landline-switchboard version` print one line                                          |
-| `landline-switchboard [flags]`               | Serves in the foreground, which is what launchd and systemd run. Flags: `--addr`, `--log`, `--host`, `--keepalive`, `--delivery-timeout`, `--grace` |
-| `landline-mcp [flags]`                       | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--label`, `--model`, `--effort`, `--folder`, `--branch`, `--as`          |
+| Command                                           | Does                                                                                                                                                |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `landline`                                        | Opens the agent screen in a terminal                                                                                                                |
+| `landline agents [--json]`                        | Lists agents, whether each is connected, and the attributes they claimed                                                                            |
+| `landline server up\|down\|status`                | Starts the switchboard in the background, stops it, or shows whether it runs                                                                        |
+| `landline server restart [flags]`                 | Stops the switchboard that `up` started and starts it again with the flags given                                                                    |
+| `landline server install [--load]`                | Starts the switchboard at login: a launchd agent on macOS, a systemd user unit on Linux                                                             |
+| `landline server join <address>`                  | Uses the switchboard on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                           |
+| `landline setup claude\|codex [--print]`          | Adds `landline-mcp` to that harness, once                                                                                                           |
+| `landline setup claude\|codex --remove [--print]` | Takes `landline-mcp` out of that harness, and the unchanged Claude Code skill                                                                       |
+| `landline claude [flags] [-- args]`               | Starts Claude Code with the channel loaded. Flags: `--label`, `--model`, `--effort`                                                                 |
+| `landline send --as N --to X [flags] <body>`      | Sends a message to one connected agent. `-` reads the body from standard input                                                                      |
+| `landline register --name N --harness H`          | Registers a name by hand, for scripts and tests. It receives only while `landline-mcp --as N --channel` runs                                        |
+| `landline log [--after SEQ]`                      | Prints the message log, with each message's text and its delivery result                                                                            |
+| `landline version`                                | Prints the version and the build. `landline-mcp version` and `landline-switchboard version` print one line                                          |
+| `landline-switchboard [flags]`                    | Serves in the foreground, which is what launchd and systemd run. Flags: `--addr`, `--log`, `--host`, `--keepalive`, `--delivery-timeout`, `--grace` |
+| `landline-mcp [flags]`                            | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--label`, `--model`, `--effort`, `--folder`, `--branch`, `--as`          |
 
 `landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, and `--grace`, Go durations
 for the 15 second keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LANDLINE_PORT` changes
@@ -264,6 +313,7 @@ the default port, 8787, for the switchboard and its clients.
 | `internal/`                                       | One package per component, and the shared model           |
 | `cmd/`                                            | Entry points of `landline-switchboard` and `landline-mcp` |
 | [tui/](tui/README.md)                             | `landline`, its own Go module, which imports the root     |
+| `menubar/`                                        | `landline-menubar`, its own Go module, macOS only         |
 | `contracts/`                                      | One contract per core component                           |
 | `acceptance/`                                     | Scenarios that start the built binary                     |
 

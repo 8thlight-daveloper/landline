@@ -30,9 +30,11 @@ and a date. `tools/stamp/stamp.sh` reads git and `just build` and `just install`
 
 ## Recipes
 
-`just build` and `just install` build all three binaries. They call the script in the recipe body and pass
-`-X main.version`, `-X main.commit`, and `-X main.date` to the linker for each of them. A tree without `.git` still
-builds, with no commit and no date.
+`just build` and `just install` build all three binaries, and `landline-menubar` as a fourth on macOS. They call the
+script in the recipe body and pass `-X main.version`, `-X main.commit`, and `-X main.date` to the linker for each of
+them. A tree without `.git` still builds, with no commit and no date. `just install-app` stamps the menu bar binary in
+the same way and puts it in `Landline Menubar.app`, with the version as `CFBundleShortVersionString` and the first 7
+characters of the commit as `CFBundleVersion`, or the version when there is no commit.
 
 ## TUI column
 

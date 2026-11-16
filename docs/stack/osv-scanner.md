@@ -40,19 +40,20 @@ a script. A finding makes the command exit nonzero. Keep that behavior so a chec
 
 ## This project
 
-Landline commits two lockfiles: `go.mod` at the root, which lists no third-party dependency, and `tui/go.mod` with
-`tui/go.sum`, which lists the dependencies of `landline`. The recursive scan covers both, so run it from the repository
-root:
+Landline commits three lockfiles: `go.mod` at the root, which lists no third-party dependency, `tui/go.mod` with
+`tui/go.sum`, which lists the dependencies of `landline`, and `menubar/go.mod` with `menubar/go.sum`, which lists those
+of `landline-menubar`. The recursive scan covers all three, so run it from the repository root:
 
 ```sh
 osv-scanner scan source --recursive .
 ```
 
-The scanner finds `tui/go.mod` by its file name. No configuration file names it, and the project has no OSV-Scanner
-configuration and no ignore entry. To scan only the TUI module:
+The scanner finds `tui/go.mod` and `menubar/go.mod` by their file names. No configuration file names them, and the
+project has no OSV-Scanner configuration and no ignore entry. To scan one module:
 
 ```sh
 osv-scanner scan source tui/go.mod
+osv-scanner scan source menubar/go.mod
 ```
 
 The scan sends package names and versions to OSV.dev. Landline's dependencies are public libraries, so that is allowed

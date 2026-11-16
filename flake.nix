@@ -56,6 +56,21 @@
             postInstall = "mv $out/bin/tui $out/bin/landline";
             meta.mainProgram = "landline";
           };
+          darwin = pkgs.stdenv.hostPlatform.isDarwin;
+          landline-menubar = pkgs.buildGoModule {
+            pname = "landline-menubar";
+            version = releaseVersion;
+            src = self;
+            modRoot = "menubar";
+            proxyVendor = true;
+            vendorHash = "sha256-Q799G0SMs23Iovwwk/6v2ScX2wFVAHbrN+YXGQ2O8pU=";
+            subPackages = [ "." ];
+            env.CGO_ENABLED = 1;
+            doCheck = false;
+            ldflags = stampFlags;
+            postInstall = "mv $out/bin/menubar $out/bin/landline-menubar";
+            meta.mainProgram = "landline-menubar";
+          };
         in
         {
           go = pkgs.go;
@@ -63,8 +78,9 @@
           default = pkgs.runCommand "landline-${releaseVersion}" { meta.mainProgram = "landline"; } ''
             mkdir -p $out/bin
             cp ${landline}/bin/landline ${landline-switchboard}/bin/landline-switchboard ${landline-mcp}/bin/landline-mcp $out/bin/
+            ${pkgs.lib.optionalString darwin "cp ${landline-menubar}/bin/landline-menubar $out/bin/"}
           '';
-        };
+        } // pkgs.lib.optionalAttrs darwin { inherit landline-menubar; };
     };
     in
     outputs // {
@@ -72,7 +88,7 @@
         (system: each: each // {
           landline-version = nixpkgs.legacyPackages.${system}.runCommand "landline-version-check" { } ''
             bundle=${outputs.packages.${system}.default}
-            for name in landline landline-switchboard landline-mcp; do
+            for name in landline landline-switchboard landline-mcp ${nixpkgs.lib.optionalString nixpkgs.legacyPackages.${system}.stdenv.hostPlatform.isDarwin "landline-menubar"}; do
               if [ -L "$bundle/bin/$name" ]; then
                 echo "$name in the bundle is a symlink, so its siblings are not beside it" >&2
                 exit 1
@@ -82,6 +98,7 @@
                 landline) want=${builtins.toJSON (expectedVersionLine "landline")} ;;
                 landline-switchboard) want=${builtins.toJSON (expectedVersionLine "landline-switchboard")} ;;
                 landline-mcp) want=${builtins.toJSON (expectedVersionLine "landline-mcp")} ;;
+                landline-menubar) want=${builtins.toJSON (expectedVersionLine "landline-menubar")} ;;
               esac
               if [ "$got" != "$want" ]; then
                 echo "$name version printed: $got" >&2
