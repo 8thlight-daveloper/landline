@@ -36,6 +36,32 @@ What a record for this must settle:
   [0080](../decisions/0080-the-hub-keeps-only-connected-agents.md) says.
 - **Harness support.** Claude Code has hooks. Codex and opencode are not checked.
 
+## Activity: what an agent is doing now
+
+A direction and not a decision. It waits on the events above, because activity has to come from the harness and not from
+the agent's own words.
+
+An agent has three levels of "what am I doing", and each has one source.
+
+| Level    | Example                                      | Changes              | Set by                       |
+| -------- | -------------------------------------------- | -------------------- | ---------------------------- |
+| Label    | `landline`                                   | Not within a session | The agent, as the project    |
+| Task     | `menu bar app for ADR 0140`                  | Minutes to hours     | The agent, in a short phrase |
+| Activity | running a tool, waiting for the person, idle | Seconds              | The harness, from hooks      |
+
+- **Label and task are the agent's to say.** A task is the outcome the agent is pursuing, in words it would use to a
+  teammate. It changes when the goal changes and not when a step ends: a phrase that would change when one test passes
+  is too low. The record for label and task states this in the tool text, so an agent does not have to guess.
+- **Activity is not agent prose.** An agent that updates a line every few seconds spends tool calls on it, forgets, and
+  leaves a stale line that misleads more than no line. Free text also reaches every viewer, so it is the likeliest place
+  for a secret or a client name. A hook reports a fixed set of states and tool names, which are metadata only.
+- **A state set, not sentences.** Candidates are `working`, `waiting for the person`, `idle`, and `ended`, with the tool
+  name while a tool runs. The TUI and the menu bar item would show it as a colored marker beside the agent, and an
+  agent's task stays beside it as text.
+- **What it needs.** Everything under "Events from hooks" above: how a hook authenticates, metadata only, a bounded ring
+  in memory, and which harnesses have hooks. The reporter token is a new kind of credential, so a person approves the
+  record. Activity is built after the events work and not before it.
+
 ## Dropped by this direction
 
 [0120](draft-decisions/operator-sends-and-attaches.md) proposed an operator token, `landline operator send`, and TUI
