@@ -2,9 +2,9 @@
 category: ux
 status: accepted
 approval: person
-affects: []
+affects: [switchboard/server, cli/command, menubar/viewer]
 builds-on: ['0020', '0080', '0090', '0100', '0110']
-note: Drafted on 2026-11-16 and approved by its owner the same day. It adds a fourth binary and a third-party dependency, and nothing is built from it yet.
+note: Drafted on 2026-11-16 and approved by its owner the same day. It adds a fourth binary and a third-party dependency.
 ---
 
 # 0140. A macOS menu bar item shows agents, runs the switchboard, and sets up harnesses
