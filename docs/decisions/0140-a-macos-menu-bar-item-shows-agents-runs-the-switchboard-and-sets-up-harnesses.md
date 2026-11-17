@@ -4,6 +4,7 @@ status: accepted
 approval: person
 affects: [switchboard/server, cli/command, menubar/viewer]
 builds-on: ['0020', '0080', '0090', '0100', '0110']
+partly-superseded-by: ['0150']
 note: Drafted on 2026-11-16 and approved by its owner the same day. It adds a fourth binary and a third-party dependency.
 ---
 
