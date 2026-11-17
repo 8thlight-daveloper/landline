@@ -56,8 +56,11 @@ An agent has three levels of "what am I doing", and each has one source.
   leaves a stale line that misleads more than no line. Free text also reaches every viewer, so it is the likeliest place
   for a secret or a client name. A hook reports a fixed set of states and tool names, which are metadata only.
 - **A state set, not sentences.** Candidates are `working`, `waiting for the person`, `idle`, and `ended`, with the tool
-  name while a tool runs. The TUI and the menu bar item would show it as a colored marker beside the agent, and an
-  agent's task stays beside it as text.
+  name while a tool runs. The shapes of [0150](../decisions/0150-agent-state-shows-as-an-icon.md) are a solid green
+  circle for connected and a hollow gray circle for disconnected. The activity feature chooses its own, and a candidate
+  set is a ring with a center dot in blue for working and a solid diamond in amber for waiting for the person. Green
+  means available, blue means busy, amber means the person is needed, and a hollow shape means gone. The TUI and the
+  menu bar item would show the shape beside the agent, and an agent's task stays beside it as text.
 - **What it needs.** Everything under "Events from hooks" above: how a hook authenticates, metadata only, a bounded ring
   in memory, and which harnesses have hooks. The reporter token is a new kind of credential, so a person approves the
   record. Activity is built after the events work and not before it.

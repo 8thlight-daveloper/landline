@@ -97,8 +97,8 @@ the text output stays meaningful on its own still holds.
   both, so the tests assert on row lines, and a separate test asserts the legend. An acceptance scenario for the first
   column and its `NO_COLOR` form is added if none covers it.
 - 0090 lists `state` among the columns of its first screen. The first column now carries it, and 0090 stays as written.
-- The record of [0160](0160-a-label-names-a-project-and-an-agent-states-its-task.md) adds a `TASK` column after `LABEL`.
-  Whichever record is built second places it in the drop order after `LABEL` and before the others.
+- The record of [0160](0160-an-agent-has-an-id-a-project-and-a-task.md) adds a `TASK` column after the project column.
+  Whichever record is built second places it in the drop order after the project column and before the others.
 - `menubar/` gains two small colored images, and the dependency list does not change. The tool in `menubar/tools/icons`
   draws only straight-edged shapes today, so it gains code to draw a circle and a ring on the pixel grid, byte for byte
   the same on every run. The app loads the 32 pixel file, which the library shows at 16 points, because the library
