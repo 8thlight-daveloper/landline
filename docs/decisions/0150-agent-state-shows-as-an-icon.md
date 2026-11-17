@@ -71,8 +71,8 @@ gap, and then the handle and the other columns. The shape is `●` in green or `
 non-template images because the colors matter. A menu's text does not change with the image, so the rule of 0140 that
 the text output stays meaningful on its own still holds.
 
-- A row's title in the text output is `<label or handle> [<state>]` with the state word of this record, for example
-  `alpha [connected]`.
+- A row's title in the text output starts with the shape and a space, `● alpha` or `○ bravo`, and has no bracketed
+  state. The shape is the state's one signal in the title, in the text and in the image alike.
 - An agent's submenu gains a first disabled item, `State: connected` or `State: disconnected`, so a screen reader that
   cannot read a menu image still reads the state.
 - The two images are made from a procedure in `menubar/tools/icons`, as the jack's images are, at 16 points with a 2x

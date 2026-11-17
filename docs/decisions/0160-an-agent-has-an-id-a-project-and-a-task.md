@@ -170,6 +170,10 @@ from that number, the project it sent, and where it got the project. The result 
 - The unregistered-agent reminder and the server instructions name `landline_status`, and a call to it before the
   process has registered gets the same reminder as the other tools.
 
+**A menu bar row is titled by its project and id.** The title is `<project> <id>`, for example `landline a3f9`, so the
+rows of one project differ by id. An agent without a project shows its id alone. The row's state is the shape that
+[0150](0150-agent-state-shows-as-an-icon.md) puts before the title, and the title carries no state word.
+
 **The task shows beside the project in the lists, and nowhere else.** `GET /v1/agents` returns `task` and `task_at` for
 an agent that set one. `landline agents` prints `task: <text>` in its attribute text after `project`, and so does the
 `landline_agents` tool, which already marks every attribute as the agents' own claim. The TUI gains a `TASK` column
