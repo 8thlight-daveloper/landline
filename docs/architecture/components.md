@@ -5,7 +5,7 @@ A driver does input and output.
 
 | Component            | Position | Kind   | Does                                                                                                                              |
 | -------------------- | -------- | ------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `agent/registry`     | 1        | core   | Registers agents and resolves a name to one of them                                                                               |
+| `agent/registry`     | 1        | core   | Registers agents and looks one up by exact id                                                                                     |
 | `message/router`     | 1        | core   | Checks a send request, stamps the sender, and chooses the recipients                                                              |
 | `log/store`          | 2        | driver | Appends envelopes to a file and reads them back                                                                                   |
 | `wake/codex`         | 2        | driver | Queues a turn into a Codex session with `codex queue`                                                                             |

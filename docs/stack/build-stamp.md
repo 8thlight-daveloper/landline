@@ -40,6 +40,6 @@ characters of the commit as `CFBundleVersion`, or the version when there is no c
 
 The agent list screen shows the short commit in a `COMMIT` column that comes last in the column order and has the lowest
 priority. It is dropped first, is shown whole or not at all (13 columns wide, the width of a short commit with
-`-dirty`), and so first appears at a terminal width of 162 columns. The date is not shown on the screen. The unit tests
+`-dirty`), and so first appears at a terminal width of 176 columns. The date is not shown on the screen. The unit tests
 in `tui/internal/screen` cover the commit cell and the column. An acceptance scenario does not, because acceptance
 drives only `landline agents --json` for the TUI.

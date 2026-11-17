@@ -18,7 +18,8 @@ and any identifier in.
 ## Flow of one message
 
 1. A client posts a send request. `switchboard/server` drops the agents past their grace, authenticates the request,
-   resolves the recipient with `agent/registry` against connected agents first, and hands the names to `message/router`.
+   looks the recipient up by exact id with `agent/registry`, and hands the ids to `message/router`. When the recipient
+   is a project of a connected agent, the switchboard adds the hint to the refusal itself.
 1. The router returns the stamped envelope and its recipients, or a refusal.
 1. `log/store` appends the envelope.
 1. If the recipient is not connected, the send fails and nothing is held. Otherwise the switchboard writes a delivery to

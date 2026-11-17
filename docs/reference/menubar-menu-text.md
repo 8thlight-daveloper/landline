@@ -59,13 +59,15 @@ Quit
 
 ## Agent rows
 
-A reachable switchboard lists its agents in the order of the TUI: connected first, then the agents with a label before
-those without, then by label, then by handle. A row is a submenu.
+A reachable switchboard lists its agents in the order of the TUI: connected first, then the agents with a project before
+those without, then by project, then by id. A row is a submenu.
 
 ```text
-<shape> <label, or the handle when there is no label>
+<shape> <project> <id>
   State: <state> (disabled)
-  Handle: <handle> (disabled)
+  ID: <id> (disabled)
+  Project: <project> (disabled)
+  Task: <task> (disabled)
   Harness: <harness> (disabled)
   Host: <host> (disabled)
   Model: <model> (disabled)
@@ -74,18 +76,24 @@ those without, then by label, then by handle. A row is a submenu.
   Branch: <branch> (disabled)
   Landline version: <landline version> (disabled)
   ---
-  Copy handle
+  Copy id
 ```
 
 - The title starts with the shape of the state and a space: `●` (U+25CF) for a connected agent and `○` (U+25CB) for an
-  agent that is listed and not connected. The title has no bracketed state and no state word.
-- The submenu's first item is `State: <state>`, disabled, before `Handle`. The state is the word the switchboard reports
-  and `landline agents --json` prints, `connected` or `disconnected`, so a screen reader that cannot read a menu image
-  still reads the state. There is no `active` or `idle`.
+  agent that is listed and not connected. The shape is followed by the project, a space, and the id, such as
+  `● landline a3f9`, so the rows of one project differ by id. An agent without a project shows its id alone, such as
+  `● b7c2`. The title has no bracketed state and no state word.
+- The submenu's first item is `State: <state>`, disabled, before `ID`. The state is the word the switchboard reports and
+  `landline agents --json` prints, `connected` or `disconnected`, so a screen reader that cannot read a menu image still
+  reads the state. There is no `active` or `idle`.
+- `ID` follows `State`. `Project` follows `ID`, and `Task` follows `Project`. `Project` is left out when the agent has
+  no project, and `Task` is left out when it has no task. A task is shown here and nowhere in the title.
+- On the screen the row shows the colored state image as its shape and the title carries no text shape. The text output
+  keeps the shape character before the title, as above.
 - Each row also carries an image of the state, a solid circle for connected and a ring for disconnected. `menu --text`
   cannot show an image. The builder's unit test of state to image covers it.
 - A field the agent did not register is left out. The title line shows no folder and no branch.
-- `Copy handle` is the only enabled item of the submenu.
+- `Copy id` is the only enabled item of the submenu. It copies the id and nothing else.
 - The count in the icon line is the number of connected agents. An agent that is not connected does not count.
 
 When the switchboard is unreachable there are no rows. The line `Switchboard unreachable (disabled)` takes their place.
@@ -142,7 +150,7 @@ so a smaller value exits `2` with the usage on standard error. A valid value cha
 ## What the text cannot show
 
 `menu --text` runs once and clicks nothing. The images on the agent rows, the spawn of `landline server` and
-`landline setup` commands, `About Landline`, `Copy handle`, the slow-request backoff, the template image, and the Dock
+`landline setup` commands, `About Landline`, `Copy id`, the slow-request backoff, the template image, and the Dock
 behavior are not reachable through it. The builder's own unit tests cover them.
 
 ## Where the app looks for the switchboard
@@ -153,33 +161,37 @@ behavior are not reachable through it. The builder's own unit tests cover them.
 ## Worked examples
 
 A reachable switchboard on `127.0.0.1:8787`, both sides built from commit `a1b2c3d4e5f60718293a4b5c6d7e8f9012345678`,
-two connected agents and one that is not, with `landline` next to the app:
+two connected agents of one project and one agent with no project that is not connected, with `landline` next to the
+app. The first agent has a task and the second has none:
 
 ```text
 icon: jack 2
-● amy-docs
+● amy-docs alpha
   State: connected (disabled)
-  Handle: alpha (disabled)
+  ID: alpha (disabled)
+  Project: amy-docs (disabled)
+  Task: menu bar app for ADR 0140 (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
   Folder: /work/docs (disabled)
   Branch: main (disabled)
   ---
-  Copy handle
-● charlie
+  Copy id
+● amy-docs bravo
   State: connected (disabled)
-  Handle: charlie (disabled)
+  ID: bravo (disabled)
+  Project: amy-docs (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
   ---
-  Copy handle
+  Copy id
 ○ delta
   State: disconnected (disabled)
-  Handle: delta (disabled)
+  ID: delta (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
   ---
-  Copy handle
+  Copy id
 ---
 Switchboard
   Running at http://127.0.0.1:8787 (disabled)
@@ -307,11 +319,14 @@ Refresh
 Quit
 ```
 
-An agent whose handle is `al<ESC>[31mpha<newline>br` shows as one line, with each control character as a space. Here
-`<ESC>` is the escape character and `<newline>` is a line feed:
+An agent whose id is `al<ESC>[31mpha<newline>br` and whose project and task hold control characters shows as one line
+each, with each control character as a space. Here `<ESC>` is the escape character and `<newline>` is a line feed. The
+project is `pr<ESC>[2Jo` and the task is `t<newline>ask`:
 
 ```text
-● al [31mpha br
+● pr [2Jo al [31mpha br
   State: connected (disabled)
-  Handle: al [31mpha br (disabled)
+  ID: al [31mpha br (disabled)
+  Project: pr [2Jo (disabled)
+  Task: t ask (disabled)
 ```

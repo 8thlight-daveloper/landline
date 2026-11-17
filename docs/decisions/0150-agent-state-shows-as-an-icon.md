@@ -42,8 +42,9 @@ item stops using `active` and `idle`. The marker of an agent row is the state wo
   same shapes.
 - The state colors are the terminal's and the system's own. Brand blue stays in the About panel and the app icon.
 
-**The TUI shows the shape in a first column and has no STATE column.** A row is the shape, the screen's normal column
-gap, and then the handle and the other columns. The shape is `●` in green or `○` in faint text.
+**The TUI shows the shape in a first column and has no STATE column.** A row is the shape, one space, and then the
+handle and the other columns, which keep the screen's normal gap between them. The shape is `●` in green or `○` in faint
+text.
 
 - The shape column is one cell wide and has no heading, so its header cell is a blank of that width. It is the first
   column, it is never dropped, and it keeps its place when the terminal is too narrow for the rest. When only the handle
@@ -72,7 +73,8 @@ non-template images because the colors matter. A menu's text does not change wit
 the text output stays meaningful on its own still holds.
 
 - A row's title in the text output starts with the shape and a space, `● alpha` or `○ bravo`, and has no bracketed
-  state. The shape is the state's one signal in the title, in the text and in the image alike.
+  state. The shape is the state's one signal in the title. On the screen the shape is the image alone, in the item's
+  image slot, and the title is the name without a second text shape, so a row shows one shape and not two.
 - An agent's submenu gains a first disabled item, `State: connected` or `State: disconnected`, so a screen reader that
   cannot read a menu image still reads the state.
 - The two images are made from a procedure in `menubar/tools/icons`, as the jack's images are, at 16 points with a 2x

@@ -27,8 +27,8 @@ They share one `VERSION` and one build stamp, and they must come from the same b
 
 ## What it does
 
-- **Registry.** Each agent registers a name, a harness, a host, and a session. Every agent can list the others and see
-  whether each is connected.
+- **Registry.** Each agent registers a harness, a host, and a session, and gets an id. It may also claim a project and a
+  task. Every agent can list the others and see whether each is connected.
 - **Messages.** Any agent sends to one connected agent. A message has a thread, and a kind of `chat`, `task`, `reply`,
   or `review`. The switchboard names the sender from the agent's token and keeps an append-only log.
 - **Push delivery.** The switchboard keeps no inbox. Each session's `landline-mcp` process holds a stream to the
@@ -83,8 +83,8 @@ landline server up
 landline server install --load     # optional: start it at every login
 ```
 
-Then add Landline to each harness once. After that, every session registers itself when it starts, with a handle such as
-`threnos-4k2`, and no `register`, `agent`, or `wire` step is needed:
+Then add Landline to each harness once. After that, every session registers itself when it starts, with an id such as
+`a3f9`, and no `register`, `agent`, or `wire` step is needed:
 
 ```sh
 landline setup claude     # claude mcp add --scope user landline -- /path/to/landline-mcp --channel
@@ -104,21 +104,39 @@ you edited stays, and `setup` says so. `--print` shows the harness command and c
 registration affects new sessions only: a running session keeps its MCP process until it exits.
 
 Start Claude Code with `landline claude`. It starts `claude` with channels loaded, so mail is pushed into the session,
-and it passes attributes through: `landline claude --label tutor -- --resume`. To keep using plain `claude`, add the
+and it passes attributes through: `landline claude --project tutor -- --resume`. To keep using plain `claude`, add the
 flag yourself, as [Channel delivery in Claude Code](#channel-delivery-in-claude-code) shows. Start Codex as you normally
 do.
 
-Each agent is told, in the server's instructions, to call `landline_register` with its model, effort, and a label. An
-agent that has not done so gets a reminder in the result of every other Landline tool. In Claude Code you can also type
-`/landline register tutor`, which `landline setup claude` makes available. For Codex, the agent also reads
-`CODEX_THREAD_ID` from its shell and passes it. Landline then sends a one-time code to that Codex session, and the agent
-answers it, which proves the session is the one it named. After that, a message to that Codex agent starts a turn in it.
+Each agent is told, in the server's instructions, to call `landline_register` with its model, effort, and project, and
+then to call `landline_status` with its task. An agent that has not registered gets a reminder in the result of every
+other Landline tool, including `landline_status`. In Claude Code you can also type `/landline register tutor`, which
+`landline setup claude` makes available. For Codex, the agent also reads `CODEX_THREAD_ID` from its shell and passes it.
+Landline then sends a one-time code to that Codex session, and the agent answers it, which proves the session is the one
+it named. After that, a message to that Codex agent starts a turn in it.
 
-Agents send to a handle, a label, or an unambiguous prefix. `landline agents` shows whether each agent is connected or
-disconnected, then its folder, branch, worktree, model, effort, harness version, and label, as the agent claimed them,
-and the version of `landline` that the agent's MCP process runs. The switchboard holds an agent while its stream is open
-and for 2 minutes after, so a stopped session leaves the list within 2 minutes. The MCP process reports that version
-itself, and it also reports the commit and the commit date of its build, shown as `commit: <first 7 characters>` and
+An agent has three words. Its **id** is the address of one registration: 4 lowercase hexadecimal characters such as
+`a3f9`, drawn at random by the switchboard, which says nothing else. Its **project** is the name of the group of agents
+that work on one project, for example `landline`. Agents with the same project are colleagues, and the project is the
+agent's own claim, so a match proves nothing about who holds it. Its **task** is the outcome the agent is working toward
+now, in its own words, at most 64 bytes, set with `landline_status` and cleared with an empty task
+([0160](docs/decisions/0160-an-agent-has-an-id-a-project-and-a-task.md)).
+
+When no project is given by `--project`, `LANDLINE_PROJECT`, or `landline_register`, `landline-mcp` derives one from the
+repository. In a git repository it is the base name of the folder that holds the main working tree, so a linked worktree
+or a subfolder gets the project's name. Outside a repository it is the base name of the working folder, and a base name
+that is empty, `.`, or `/` gives no project. A default such as `app` can match an unrelated repository.
+`landline_register` answers with a line such as
+`you are a3f9. project: landline (from your repository), shared with 2 other agents currently connected. task: none. Set one with landline_status when your goal is clear.`
+
+Agents send to an id and nothing else. A prefix of an id, or a project, does not resolve: the send fails with `404`.
+When the value is the project of a connected agent, the error adds `<value> is a project, not an agent. Send to one of:`
+and the ids of its connected holders, other than the sender. After a switchboard restart every agent has a new id, so
+find one with `landline agents`. `landline agents` shows whether each agent is connected or disconnected, then its
+project, task, folder, branch, worktree, model, effort, and harness version, as the agent claimed them, and the version
+of `landline` that the agent's MCP process runs. The switchboard holds an agent while its stream is open and for 2
+minutes after, so a stopped session leaves the list within 2 minutes. The MCP process reports that version itself, and
+it also reports the commit and the commit date of its build, shown as `commit: <first 7 characters>` and
 `built: <date>`. A commit that ends in `-dirty` came from a tree with tracked changes and has no date. A flag, an
 environment variable, or a tool argument cannot set them, so an agent cannot claim another. Together they show which
 sessions still run an old binary after an upgrade. `just build` and `just install` read the commit and date from git,
@@ -128,8 +146,8 @@ them for the installed binary.
 `landline server status`, `landline server log`, and `landline server down` look in on the switchboard and stop it.
 `landline server restart` stops it and starts it again, for example after `just install` replaces the binary. It does
 not remember the flags of the earlier start, so pass them again. The switchboard keeps no agents on disk, so after a
-restart each agent registers again on its next call and gets a new handle. Use a label for an address that stays. A
-session started before the upgrade keeps its old process and needs its own restart.
+restart each agent registers again on its next call and gets a new id. A session started before the upgrade keeps its
+old process and needs its own restart.
 
 #### Channel delivery in Claude Code
 
@@ -143,7 +161,7 @@ Landline therefore keeps two pieces apart.
 - `landline setup claude` registers the MCP server as `landline-mcp --channel`. The `--channel` flag is the server's
   claim that this session was started with channels, and only then does it declare the channel capability.
 - Starting the session with channels is yours to do. `landline claude` does it for you. It runs
-  `claude --dangerously-load-development-channels server:landline`, and it turns `--label`, `--model`, and `--effort`
+  `claude --dangerously-load-development-channels server:landline`, and it turns `--project`, `--model`, and `--effort`
   into the environment that the MCP process reads. Everything after `--` goes to `claude`.
 
 A session started in any other way can send messages and list agents, and cannot receive. A send to it fails with "not
@@ -156,9 +174,9 @@ launch:
 alias claude='claude --dangerously-load-development-channels server:landline'
 ```
 
-Put it in your shell's startup file. A script or a launcher can pass the same flag. Label and attributes then come from
-`landline_register` and the environment variables `LANDLINE_LABEL`, `LANDLINE_MODEL`, and `LANDLINE_EFFORT`, which you
-can set the same way.
+Put it in your shell's startup file. A script or a launcher can pass the same flag. Project and attributes then come
+from `landline_register` and the environment variables `LANDLINE_PROJECT`, `LANDLINE_MODEL`, and `LANDLINE_EFFORT`,
+which you can set the same way.
 
 A Landline send to a Claude Code session can report "delivered" and still never reach it. "Delivered" means that the MCP
 process wrote the channel event, and Claude Code gives it no sign of what happened next. Two causes are known.
@@ -178,17 +196,17 @@ asked for the tool list, plus a second, before it pushes mail, because Claude Co
 Organizations can disable channels. Landline never declares the channel permission capability, so a peer can never
 answer a tool approval prompt.
 
-#### Registering a name by hand
+#### Registering an id by hand
 
-Scripts and tests can still register a name with `landline register --name N --harness H`. It needs the switchboard
-address and secret, which `landline server up` saved. Then `landline send --as N` acts as that agent. A hand-registered
-name holds no stream, so it can send and cannot receive, unless a `landline-mcp --as N --channel` process runs for it. A
-session that registers itself writes a file for its handle too, so the same commands work with `--as <handle>` while
-that session runs.
+Scripts and tests can still register an id with `landline register --id N --harness H [--project P]`. It needs the
+switchboard address and secret, which `landline server up` saved. Then `landline send --as N` acts as that agent. A
+hand-registered id holds no stream, so it can send and cannot receive, unless a `landline-mcp --as N --channel` process
+runs for it. A session that registers itself writes a file for its id too, so the same commands work with `--as <id>`
+while that session runs.
 
 ## Terminal screen
 
-`landline`, run in a terminal with no arguments, opens a screen with every connected agent: handle, label, harness,
+`landline`, run in a terminal with no arguments, opens a screen with every connected agent: id, project, task, harness,
 state, landline version, folder, branch, model, and effort. It refreshes every 2 seconds (`--interval D`, at least
 500ms). `r` refreshes at once and `q` quits. It only reads. It registers with the switchboard as an observer, a
 read-only client that never appears in the agent list
@@ -200,11 +218,11 @@ landline agents
 landline agents --json
 ```
 
-`landline agents` prints one tab-separated line per agent, in the screen's order: handle, harness, host, state, and the
-attributes. `landline agents --json` prints the screen's view as JSON for scripts. Neither prints a secret, and neither
-takes `--as`, because both read the list with an observer token and so need the secret on the machine where they run.
-When standard input or standard output is not a terminal, `landline` with no command prints the usage on standard error
-and exits `2`.
+`landline agents` prints one tab-separated line per agent, in the screen's order: id, harness, host, state, and the
+attributes, which begin with `project:` and `task:`. `landline agents --json` prints the screen's view as JSON for
+scripts. Neither prints a secret, and neither takes `--as`, because both read the list with an observer token and so
+need the secret on the machine where they run. When standard input or standard output is not a terminal, `landline` with
+no command prints the usage on standard error and exits `2`.
 
 `landline` is built in the `tui/` module, which holds the terminal framework and imports the root module's code. It
 finds the switchboard the way the other commands do: `LANDLINE_URL` and `LANDLINE_SECRET`, then the address and secret
@@ -215,13 +233,13 @@ port). See [tui/README.md](tui/README.md).
 
 `landline-menubar` puts the Landline telephone jack in the macOS menu bar, with the number of connected agents beside
 it. The jack is dimmed when the switchboard does not answer. The menu lists the agents, connected first, and each row
-opens the fields the agent registered and a `Copy handle` item. It only reads, like the terminal screen, and registers
-as an observer of kind `menubar`. It polls every 5 seconds (`--interval D`, at least 500ms) and has no Dock icon.
+opens the fields the agent registered and a `Copy id` item. It only reads, like the terminal screen, and registers as an
+observer of kind `menubar`. It polls every 5 seconds (`--interval D`, at least 500ms) and has no Dock icon.
 
 - `Switchboard` shows `Running at <address>` or `Not running`, and `Start`, `Stop`, and `Restart` run
   `landline server up`, `down`, and `restart`. It finds `landline` next to its own binary, then on the path of your
   login shell. When the address is not a loopback address the three items are disabled. The submenu also shows the
-  switchboard's build and says when its commit differs from the app's. `Restart` gives every agent a new handle.
+  switchboard's build and says when its commit differs from the app's. `Restart` gives every agent a new id.
 - `Harnesses` runs `landline setup claude|codex`, and the same with `--remove`. The menu does not check whether Landline
   is registered, so both items are always there.
 - `About Landline` opens the standard About panel with the version and a link to the project.
@@ -279,13 +297,13 @@ landline setup codex
 | `landline server join <address>`                  | Uses the switchboard on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                           |
 | `landline setup claude\|codex [--print]`          | Adds `landline-mcp` to that harness, once                                                                                                           |
 | `landline setup claude\|codex --remove [--print]` | Takes `landline-mcp` out of that harness, and the unchanged Claude Code skill                                                                       |
-| `landline claude [flags] [-- args]`               | Starts Claude Code with the channel loaded. Flags: `--label`, `--model`, `--effort`                                                                 |
+| `landline claude [flags] [-- args]`               | Starts Claude Code with the channel loaded. Flags: `--project`, `--model`, `--effort`                                                               |
 | `landline send --as N --to X [flags] <body>`      | Sends a message to one connected agent. `-` reads the body from standard input                                                                      |
-| `landline register --name N --harness H`          | Registers a name by hand, for scripts and tests. It receives only while `landline-mcp --as N --channel` runs                                        |
+| `landline register --id N --harness H`            | Registers an id by hand, for scripts and tests. It receives only while `landline-mcp --as N --channel` runs                                         |
 | `landline log [--after SEQ]`                      | Prints the message log, with each message's text and its delivery result                                                                            |
 | `landline version`                                | Prints the version and the build. `landline-mcp version` and `landline-switchboard version` print one line                                          |
 | `landline-switchboard [flags]`                    | Serves in the foreground, which is what launchd and systemd run. Flags: `--addr`, `--log`, `--host`, `--keepalive`, `--delivery-timeout`, `--grace` |
-| `landline-mcp [flags]`                            | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--label`, `--model`, `--effort`, `--folder`, `--branch`, `--as`          |
+| `landline-mcp [flags]`                            | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--project`, `--model`, `--effort`, `--folder`, `--branch`, `--as`        |
 
 `landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, and `--grace`, Go durations
 for the 15 second keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LANDLINE_PORT` changes

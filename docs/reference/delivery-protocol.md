@@ -1,8 +1,10 @@
 # Delivery protocol
 
-The HTTP shapes that [0070](../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) names. The
-switchboard keeps no mail. Each agent's `landline-mcp` process opens one stream, the switchboard sends each message down
-it, and the MCP process reports back what it did with the message. The types are in `internal/model/wire.go`.
+The HTTP shapes that [0070](../decisions/0070-delivery-is-a-push-to-a-connected-agent-with-no-inbox.md) names, with the
+words of [0160](../decisions/0160-an-agent-has-an-id-a-project-and-a-task.md): an agent has an `id`, a `project`, and a
+`task`. Older records say handle, name, and label. The switchboard keeps no mail. Each agent's `landline-mcp` process
+opens one stream, the switchboard sends each message down it, and the MCP process reports back what it did with the
+message. The types are in `internal/model/wire.go`.
 
 ## Authentication
 
@@ -11,19 +13,91 @@ route takes `Authorization: Bearer <switchboard secret>`.
 
 ## Routes
 
-| Route                             | Auth                     | Does                                                                                 |
-| --------------------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
-| `POST /v1/register`               | secret                   | Registers an agent. It takes no delivery fields and carries the build values (below) |
-| `POST /v1/observers`              | secret                   | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}`       |
-| `POST /v1/attach`                 | agent token              | Records claims. A Codex proof sends its code as a challenge                          |
-| `GET /v1/stream`                  | agent token              | Opens the delivery stream (below)                                                    |
-| `POST /v1/deliveries/{id}/report` | agent token              | The MCP process reports one delivery. Body is `DeliveryReport`                       |
-| `POST /v1/send`                   | agent token              | Sends to one recipient and waits for the delivery report                             |
-| `GET /v1/agents`                  | agent or observer token  | Lists agents, each with `connected`                                                  |
-| `GET /v1/log`                     | secret                   | Reads the log. Each entry has `result`                                               |
-| `GET /v1/build`                   | secret or observer token | Answers the switchboard's own build (below)                                          |
+| Route                             | Auth                     | Does                                                                                    |
+| --------------------------------- | ------------------------ | --------------------------------------------------------------------------------------- |
+| `POST /v1/register`               | secret                   | Registers an agent. It takes no delivery fields and carries the build values (below)    |
+| `POST /v1/observers`              | secret                   | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}`          |
+| `POST /v1/attach`                 | agent token              | Records claims and answers `project_peers`. A Codex proof sends its code as a challenge |
+| `POST /v1/status`                 | agent token              | Sets or clears the agent's task (below)                                                 |
+| `GET /v1/stream`                  | agent token              | Opens the delivery stream (below)                                                       |
+| `POST /v1/deliveries/{id}/report` | agent token              | The MCP process reports one delivery. Body is `DeliveryReport`                          |
+| `POST /v1/send`                   | agent token              | Sends to one recipient and waits for the delivery report                                |
+| `GET /v1/agents`                  | agent or observer token  | Lists agents, each with `connected`, and `task` and `task_at` when set                  |
+| `GET /v1/log`                     | secret                   | Reads the log. Each entry has `result`                                                  |
+| `GET /v1/build`                   | secret or observer token | Answers the switchboard's own build (below)                                             |
 
 Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
+
+## Identity
+
+An agent has three words, and each key carries one of them.
+
+| Word      | Key       | What it is                                                                                      |
+| --------- | --------- | ----------------------------------------------------------------------------------------------- |
+| `id`      | `id`      | The address of one registration. It names nothing else                                          |
+| `project` | `project` | The group of agents that work on one project. It is the agent's own claim, so it proves nothing |
+| `task`    | `task`    | The outcome the agent is working toward now. It is the agent's own words                        |
+
+There is no alias for `name`, `handle`, or `label`. The body of every route rejects an unknown field with `400`, so a
+client that sends `name` or `label` fails loudly.
+
+### Registering
+
+`POST /v1/register` takes the switchboard secret and a body with `harness`, `host`, `session`, the optional attributes
+(`folder`, `branch`, `worktree`, `harness_version`, `model`, `effort`, `project`, and the build values below), and
+exactly one of `id` and `seed`. Giving both or neither is `400`. It answers `{"id": "...", "token": "..."}`.
+
+- A registration by `id` takes that id if it is valid: 1 to 32 lowercase letters, digits, `-`, or `_`, starting with a
+  letter or digit, and not `all`. It replaces any earlier registration of that id, so the token changes and the task is
+  cleared. An invalid id is `400`.
+- A registration by `seed` asks the switchboard for an id. The switchboard answers 4 lowercase hexadecimal characters,
+  such as `a3f9`, drawn at random, and draws again until the value is not the id of any listed agent, including one in
+  its grace. The text of the seed does not shape the id.
+- `project`, like every text field, is at most 64 bytes with no control character, line or paragraph separator, or
+  invisible formatting character. A value that breaks the rules answers `400` and registers nothing.
+
+```json
+{"seed": "landline", "harness": "claude-code", "host": "mac", "session": "s-1", "project": "landline"}
+```
+
+```json
+{"id": "a3f9", "token": "<agent token>"}
+```
+
+### Attaching
+
+`POST /v1/attach` takes an agent token and the claims `model`, `effort`, `project`, `codex_thread`, and `code`. It
+answers `id`, `updated`, `challenge`, `attached`, and `project_peers`.
+
+`project_peers` is the number of other agents that are connected and hold the caller's exact project. The caller is not
+counted, and an agent that is not connected, including one in its grace, is not counted. A caller without a project gets
+`0`. The switchboard writes `project_peers` in every answer, including `0` and the challenge calls for Codex.
+
+```json
+{"id": "a3f9", "updated": ["project"], "challenge": false, "attached": false, "project_peers": 2}
+```
+
+An empty claim means no change, so attach cannot clear anything.
+
+### The task
+
+`POST /v1/status` takes an agent token and a body with one field, `task`, which must be present and a string.
+
+```json
+{"task": "menu bar app for ADR 0140"}
+```
+
+- An empty string clears the task. A body without `task`, with `"task": null`, with a value that is not a string, or
+  with an unknown field is `400`. An observer token is `403`. A missing or unknown token is `401`.
+- The task follows the free-text rules of the registry: at most 64 bytes, and no control character, line or paragraph
+  separator, or invisible formatting character. A value that breaks them is `400` and changes nothing.
+- It answers `200` with `{"task": "<text>"}` and, when the task is not empty, `"task_at": "<RFC 3339 time>"`. After a
+  clear the answer is `{"task": ""}` with no `task_at`.
+- The switchboard stamps `task_at` itself, when the task changes. Setting the text the agent already has is not a
+  change: it answers `200` with the existing time and stamps nothing. The agent never supplies a time.
+- The switchboard keeps the task with the agent in memory. A registration by id clears it, the switchboard forgets it
+  when it forgets the agent, and a restarted switchboard holds none.
+- A task is for display. Nothing routes by it, and a delivered message's header and sender stamp do not carry it.
 
 ## The stream
 
@@ -44,13 +118,14 @@ Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 
 ## Sending
 
-`POST /v1/send` takes `SendBody` and checks it as today (the router contract, then the recipient resolved from a handle
-or label). It then:
+`POST /v1/send` takes `SendBody` (`to`, `thread`, `kind`, `body`, `in_reply_to`) and checks it as today (the router
+contract, then the recipient looked up by exact id). `to` and the sender's `from` hold ids, and keep their names. It
+then:
 
 1. Appends the envelope to the log, as today.
 1. If the recipient is not connected, answers `409` with `{"error": "not connected"}`. Nothing is held. When no
    `landline_version` is on record for the recipient, the text is
-   `not connected: no landline version is on record, so it is a hand-registered name, which can send and cannot receive, or an older landline. Restart its session if it is a landline session`.
+   `not connected: no landline version is on record, so it is a hand-registered id, which can send and cannot receive, or an older landline. Restart its session if it is a landline session`.
 1. Otherwise writes a `message` delivery to the recipient's stream and waits for its report, up to 20 seconds.
 1. Report `ok`: answers `200` with `SendResponse` (`id`, `seq`, `recipients` of length one).
 1. Report not `ok`: answers `502` with `{"error": "<reported error>"}`.
@@ -60,7 +135,24 @@ After the delivery ends, the switchboard appends a result line to the log for th
 `{"seq": N, "result": "..."}`, where the result is `delivered` or the error the sender saw. `GET /v1/log` returns each
 envelope with its `result`, empty when none was recorded, as in a log from before this change.
 
-A recipient named `all` is an unknown recipient. A message to oneself is refused as before.
+### The recipient
+
+A send takes an exact id and nothing else. The switchboard looks the id up among every present agent.
+
+- An id of a connected agent is delivered to. An id of an agent in its grace answers `409` `not connected`. An id the
+  switchboard has forgotten, or never issued, answers `404` with `{"error": "the recipient is not a registered agent"}`,
+  the existing text.
+- No prefix resolves, and no project resolves, whether one agent or ten hold it. Each is an unknown recipient with the
+  plain `404`. There is no `409` for several matches. `all` is an unknown recipient with the plain `404`, and it never
+  gets the hint below, even when an agent has the project `all`. An unknown sender is `422`, without a hint.
+- **The hint.** When the value of `to` equals the `project` of at least one connected agent, the `404` text of the
+  unknown recipient gains a sentence: `<value> is a project, not an agent. Send to one of: <ids>`. The ids are the
+  connected holders of that project other than the sender, sorted, at most 10, with `, and more` after the tenth when
+  there are others. The hint is added only to that `404`. A project held only by agents that are not connected, or only
+  by the sender, gets the plain `404`. The status is `404` in every case, so a command does not change behavior when a
+  second agent starts.
+
+A message to oneself is refused as before.
 
 ## Reporting
 
@@ -86,20 +178,22 @@ agent has no stream, and it is present for 2 minutes after its last authenticate
 switchboard deletes the registration and the token, and the token is answered with `401` from then on. The switchboard
 checks this before every request, against its own clock.
 
-`GET /v1/agents` lists every present agent. Each entry has `connected`, `false` for an agent in its grace. An entry also
-has `landline_version`, `landline_commit`, and `landline_date` when the agent registered them, with the full values and
-with a name left out when its value is empty.
+`GET /v1/agents` lists every present agent. Each entry has `id`, `harness`, `host`, `session`, `connected` (`false` for
+an agent in its grace), and `last_seen`. It has `project`, `task`, and `task_at` when the agent has them, and leaves
+each out when it is empty. `task_at` is a string in RFC 3339 and is present only with a task. An entry also has
+`landline_version`, `landline_commit`, and `landline_date` when the agent registered them, with the full values and with
+the key left out when its value is empty.
 
 ## Build values
 
 [0100](../decisions/0100-a-build-names-itself-by-version-commit-and-date.md) adds `landline_commit` and `landline_date`
-to `landline_version`. `POST /v1/register` takes all three in both forms, the name form and the seed form. Each is an
+to `landline_version`. `POST /v1/register` takes all three in both forms, the id form and the seed form. Each is an
 optional string of at most 64 bytes with no control character, line or paragraph separator, or invisible formatting
 character. A value that breaks the rules answers `400` and registers nothing. An empty value is left out.
 
-A registration by name replaces the earlier one, so registering again replaces the commit and the date, and an empty
-value clears the old one. A registration by seed gets a new handle and replaces nothing. A hand-registered name sends
-none of the three.
+A registration by id replaces the earlier one, so registering again replaces the commit and the date, and an empty value
+clears the old one. A registration by seed gets a new id and replaces nothing. A hand-registered id sends none of the
+three.
 
 | Field              | Example                                          | Meaning                                                                           |
 | ------------------ | ------------------------------------------------ | --------------------------------------------------------------------------------- |
@@ -108,7 +202,7 @@ none of the three.
 | `landline_date`    | `2026-11-12T16:34:00Z`                           | The committer date of that commit in UTC. Absent for a `-dirty` commit            |
 
 ```json
-{"name": "alpha", "harness": "claude-code", "host": "mac", "session": "s-1",
+{"id": "alpha", "harness": "claude-code", "host": "mac", "session": "s-1",
  "landline_version": "0.1.0",
  "landline_commit": "0123456789abcdef0123456789abcdef01234567",
  "landline_date": "2026-11-12T16:34:00Z"}
@@ -117,14 +211,9 @@ none of the three.
 The switchboard enforces the field rules only. The shapes in the table come from the build, which no flag, environment
 variable, or `landline_register` argument can override.
 
-A send resolves its recipient against the connected agents first, so a label or a prefix picks among them alone and the
-ambiguity rule applies to them alone. When no connected agent matches, the name resolves against the other present
-agents, so a send to an agent in its grace answers `409` `not connected`. A name that matches no present agent,
-including a handle the switchboard has forgotten, answers `404` unknown recipient.
-
 The switchboard keeps no state file. A switchboard restart forgets every agent and token, and each agent registers again
-and gets a new handle. The switchboard does not issue a handle that a present agent holds, and a forgotten handle may be
-issued again.
+and gets a new id. The switchboard does not issue an id that a present agent holds, including one in its grace, and a
+forgotten id may be issued again.
 
 ## Observers
 
@@ -135,7 +224,7 @@ agent, such as a terminal viewer.
   `{"token": "<observer token>"}`. `kind` is required and follows the free-text rules of the registry: at most 64 bytes,
   no control, line or paragraph separator, or format characters, and not empty after trimming white space. Otherwise the
   switchboard answers `400`. A missing or wrong secret is `401`.
-- An observer is not an agent. It has no handle and no stream, and it never appears in `GET /v1/agents`.
+- An observer is not an agent. It has no id and no stream, and it never appears in `GET /v1/agents`.
 - An observer token is read-only. `GET /v1/agents` answers it with the list an agent gets. Every other route, including
   the secret routes, refuses it with `403` and `{"error": "..."}` that says the token is read-only. An unknown token is
   `401`.
@@ -166,7 +255,7 @@ default port, 8787, for a switchboard with no `--addr` and for a client with no 
 ## Reconnecting
 
 The MCP process reconnects with delays that start at one second, double, and stop at 30 seconds. It presents the same
-agent token, so a reconnect inside the 2 minute grace keeps its handle. After the grace the switchboard answers `401`.
-The MCP process then registers again once, gets a new handle, and removes the session file of the handle it replaced. A
-CLI command that gets `401` prints that the switchboard does not know the agent any more and tells the person to run
+agent token, so a reconnect inside the 2 minute grace keeps its id. After the grace the switchboard answers `401`. The
+MCP process then registers again once, gets a new id, and removes the session file of the id it replaced. A CLI command
+that gets `401` prints that the switchboard does not know the agent any more and tells the person to run
 `landline register` again.
