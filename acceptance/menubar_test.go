@@ -100,7 +100,7 @@ func TestMenuTextWithNoSwitchboardListeningIsAStateAndNotAnError(t *testing.T) {
 	address := deadAddress(t)
 	rig := newMenubarRig(t, defaultFlags(t), address, landlineNextToBinary)
 	result := rig.run(t, "menu", "--text")
-	want := expectedMenu("jack dimmed", unreachableHead(), localSwitchboard(address, false, "Switchboard (build unknown)"), menubarBuildLine(menubarVersion, ""))
+	want := expectedMenu("jack dimmed", unreachableHead(), localSwitchboard(address, false, "Switchboard (build unknown)"), menubarBuildLine(releaseVersion(t), ""))
 	if result.code != 0 || result.stderr != "" || result.stdout != want {
 		t.Fatalf("%+v\nwant:\n%s", result, want)
 	}
@@ -267,7 +267,7 @@ func TestMenuTextSanitizesEveryFieldOfAHostileAgentTheWayTheScreenDoes(t *testin
 		"ID: "+cleaned(hostile("id")), "Project: "+cleaned(hostile("project")), "Task: "+cleaned(hostile("task")), "Harness: "+cleaned(hostile("harness")), "Host: "+cleaned(hostile("host")),
 		"Model: "+cleaned(hostile("model")), "Effort: "+cleaned(hostile("effort")), "Folder: "+cleaned(hostile("folder")),
 		"Branch: "+cleaned(hostile("branch")), "Landline version: "+cleaned(hostile("version")))
-	want := expectedMenu("jack 1", row, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(menubarVersion, ""))
+	want := expectedMenu("jack 1", row, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(releaseVersion(t), ""))
 	got := rig.menu(t)
 	if got != want {
 		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
@@ -284,7 +284,7 @@ func TestMenuTextKeepsEveryAgentOnItsOwnLinesWhateverTheLengthOfItsValues(t *tes
 	rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
 	got := rig.menu(t)
 	shape := agentRow("x", liveMarker, "ID: alpha", "Project: x", "Task: x", "Harness: claude-code", "Host: mac", "Model: x", "Folder: x", "Branch: x")
-	want := expectedMenu("jack 1", shape, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(menubarVersion, ""))
+	want := expectedMenu("jack 1", shape, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(releaseVersion(t), ""))
 	if len(menuLines(got)) != len(menuLines(want)) {
 		t.Fatalf("a long value changed the number of lines: %d, want %d", len(menuLines(got)), len(menuLines(want)))
 	}
@@ -394,8 +394,8 @@ func TestMenuTextReadsTheConfigFileWhenTheEnvironmentHasNoAddressAndNoSecretAndT
 	}
 }
 
-func unreachableMenu(url string) string {
-	return expectedMenu("jack dimmed", unreachableHead(), localSwitchboard(url, false, "Switchboard (build unknown)"), menubarBuildLine(menubarVersion, ""))
+func unreachableMenu(t *testing.T, url string) string {
+	return expectedMenu("jack dimmed", unreachableHead(), localSwitchboard(url, false, "Switchboard (build unknown)"), menubarBuildLine(releaseVersion(t), ""))
 }
 
 func TestMenuTextTreatsEveryFailureToGetTheAgentListAsTheUnreachableState(t *testing.T) {
@@ -418,8 +418,8 @@ func TestMenuTextTreatsEveryFailureToGetTheAgentListAsTheUnreachableState(t *tes
 		rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
 		rig.env = withEnv(rig.env, "LANDLINE_SECRET="+c.secret)
 		result := rig.run(t, "menu", "--text")
-		if result.code != 0 || result.stderr != "" || result.stdout != unreachableMenu(fake.url) {
-			t.Errorf("%s: %+v\nwant:\n%s", name, result, unreachableMenu(fake.url))
+		if result.code != 0 || result.stderr != "" || result.stdout != unreachableMenu(t, fake.url) {
+			t.Errorf("%s: %+v\nwant:\n%s", name, result, unreachableMenu(t, fake.url))
 		}
 		for _, leaked := range []string{secret, c.secret, "observer-token-"} {
 			if strings.Contains(result.stdout+result.stderr, leaked) {
@@ -435,8 +435,8 @@ func TestMenuTextWithNoSecretAtAllIsTheUnreachableState(t *testing.T) {
 	rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
 	rig.env = withEnv(rig.env, "LANDLINE_SECRET=")
 	result := rig.run(t, "menu", "--text")
-	if result.code != 0 || result.stderr != "" || result.stdout != unreachableMenu(fake.url) {
-		t.Errorf("%+v\nwant:\n%s", result, unreachableMenu(fake.url))
+	if result.code != 0 || result.stderr != "" || result.stdout != unreachableMenu(t, fake.url) {
+		t.Errorf("%+v\nwant:\n%s", result, unreachableMenu(t, fake.url))
 	}
 }
 
@@ -461,7 +461,7 @@ func TestMenuTextTreatsAFailureOfTheBuildRouteAloneAsAnUnknownBuildAndChangesNot
 		fake := newFakeSwitchboard(t, "127.0.0.1", agents, c.status, c.body)
 		fake.buildRaw = c.raw
 		rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
-		want := expectedMenu("jack 1", head, localSwitchboard(fake.url, true, "Switchboard (build unknown)"), menubarBuildLine(menubarVersion, ""))
+		want := expectedMenu("jack 1", head, localSwitchboard(fake.url, true, "Switchboard (build unknown)"), menubarBuildLine(releaseVersion(t), ""))
 		if got := rig.menu(t); got != want {
 			t.Errorf("%s:\n%s\nwant:\n%s", name, got, want)
 		}
@@ -806,7 +806,7 @@ func TestMenuTextShowsAnAgentWithATaskAndNoProjectAsItsIDAloneWithAStateIDAndTas
 	fake := newFakeSwitchboard(t, "127.0.0.1", agents, 200, fakeBuild(menubarVersion, "", ""))
 	got := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary).menu(t)
 	row := agentRow("alpha", liveMarker, "ID: alpha", "Task: docs only", "Harness: claude-code", "Host: mac")
-	want := expectedMenu("jack 1", row, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(menubarVersion, ""))
+	want := expectedMenu("jack 1", row, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(releaseVersion(t), ""))
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
