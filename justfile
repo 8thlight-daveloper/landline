@@ -121,6 +121,6 @@ test-tui:
 test-menubar:
     @if [ "$(uname -s)" = Darwin ]; then cd menubar && go test -race -count=1 ./...; else echo "skipping menubar: macOS only"; fi
 
-# Make the menu bar PNGs in menubar/internal/icon from assets/jack.svg.
+# Make the menu bar and agent state PNGs in menubar/internal/icon (the jack from assets/jack.svg).
 menubar-icons:
     cd menubar && go run ./tools/icons ../assets/jack.svg internal/icon
