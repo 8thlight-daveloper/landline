@@ -41,13 +41,17 @@ func TestSnapshotShowsAgentsAndTheStatusLine(t *testing.T) {
 	m, _ := send(newModel(), tea.WindowSizeMsg{Width: 200, Height: 20})
 	m, cmd := send(m, snapshotMsg{agents: sample, at: clock, took: 10 * time.Millisecond})
 	view := m.View()
-	for _, want := range []string{"HANDLE", "alpha", "lead", "connected", "bravo", "disconnected", "/work/app", "opus", "switchboard http://hub:1", "refreshed 10:30:05"} {
+	for _, want := range []string{"HANDLE", "alpha", "lead", "bravo", "/work/app", "opus", "switchboard http://hub:1", "refreshed 10:30:05"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("missing %q in\n%s", want, view)
 		}
 	}
 	if strings.Index(view, "alpha") > strings.Index(view, "bravo") {
 		t.Error("connected agent must come first")
+	}
+	rows := rowLines(strings.Split(view, "\n"))
+	if len(rows) != 2 || !strings.HasPrefix(rows[0], connectedShape+"  alpha") || !strings.HasPrefix(rows[1], disconnectedShape+"  bravo") {
+		t.Errorf("the rows are %q", rows)
 	}
 	if cmd == nil {
 		t.Error("a poll schedules the next one")
@@ -184,18 +188,18 @@ func TestFortyAgentsInA24RowWindowShowHeaderPrefixMoreAndStatus(t *testing.T) {
 	if !strings.Contains(lines[0], "HANDLE") {
 		t.Fatalf("header %q", lines[0])
 	}
-	for i := range 19 {
+	for i := range 18 {
 		if !strings.Contains(lines[1+i], fmt.Sprintf("agent%02d", i)) {
 			t.Fatalf("row %d is %q", i, lines[1+i])
 		}
 	}
-	if lines[20] != "+21 more" {
+	if lines[19] != "+22 more" {
 		t.Fatalf("got %q", lines[20])
 	}
-	if !strings.Contains(lines[22], "switchboard http://hub:1") || !strings.Contains(lines[23], "q quit") {
+	if lines[21] != legendText || !strings.Contains(lines[22], "switchboard http://hub:1") || !strings.Contains(lines[23], "q quit") {
 		t.Fatalf("footer %q", lines[21:])
 	}
-	if strings.Contains(m.View(), "agent19") {
+	if strings.Contains(m.View(), "agent18") {
 		t.Fatal("rows past the cut must not show")
 	}
 }
@@ -204,7 +208,7 @@ func TestHeightZeroOrUnknownIsUnlimited(t *testing.T) {
 	m, _ := send(newModel(), snapshotMsg{agents: agentsNamed(40), at: clock})
 	for name, model := range map[string]Model{"unknown": m, "zero": func() Model { n, _ := send(m, tea.WindowSizeMsg{Width: 120, Height: 0}); return n }()} {
 		view := model.View()
-		if !strings.Contains(view, "agent39") || strings.Contains(view, "more") || len(strings.Split(view, "\n")) != 44 {
+		if !strings.Contains(view, "agent39") || strings.Contains(view, "more") || len(strings.Split(view, "\n")) != 45 {
 			t.Fatalf("%s: %d lines", name, len(strings.Split(view, "\n")))
 		}
 	}
@@ -229,7 +233,7 @@ func TestEveryHeightKeepsTheStatusLineWithinTheWindow(t *testing.T) {
 
 func TestAListThatFitsShowsNoMoreLine(t *testing.T) {
 	m, _ := send(newModel(), snapshotMsg{agents: agentsNamed(5), at: clock})
-	m, _ = send(m, tea.WindowSizeMsg{Width: 100, Height: 9})
+	m, _ = send(m, tea.WindowSizeMsg{Width: 100, Height: 10})
 	if view := m.View(); strings.Contains(view, "more") || !strings.Contains(view, "agent04") {
 		t.Fatal(view)
 	}
@@ -248,7 +252,7 @@ func TestHostileValuesNeverReachTheScreen(t *testing.T) {
 			t.Fatalf("%q in %q", bad, view)
 		}
 	}
-	if n := len(strings.Split(view, "\n")); n != 1+1+3 {
+	if n := len(strings.Split(view, "\n")); n != 1+1+4 {
 		t.Fatalf("a cell broke the layout: %d lines in %q", n, view)
 	}
 	if !strings.Contains(view, "pwned") || !strings.Contains(view, "x y evil") {

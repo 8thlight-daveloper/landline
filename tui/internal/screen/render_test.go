@@ -25,7 +25,7 @@ func TestHandlesAreNeverTruncatedAtEightyColumns(t *testing.T) {
 	m, _ := send(newModel(), snapshotMsg{agents: longAgents(), at: clock})
 	m, _ = send(m, tea.WindowSizeMsg{Width: 80, Height: 20})
 	view := m.View()
-	for _, want := range []string{"amber-falcon-1", "amber-falcon-2", "connected"} {
+	for _, want := range []string{"amber-falcon-1", "amber-falcon-2"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q in\n%s", want, view)
 		}
@@ -49,15 +49,15 @@ func TestNarrowTerminalsNeverPanicOrOverflowWithLongHandles(t *testing.T) {
 	}
 }
 
-func TestWhenHandleAndStateCannotBothFitTheHandleStaysWholeAndTheStateGoes(t *testing.T) {
+func TestWhenTheHandleFillsTheWidthTheShapeStaysAndNoOtherColumnShows(t *testing.T) {
 	m, _ := send(newModel(), snapshotMsg{agents: longAgents(), at: clock})
-	m, _ = send(m, tea.WindowSizeMsg{Width: 28, Height: 20})
-	if view := m.View(); !strings.Contains(view, "amber-falcon-1") || !strings.Contains(view, "connected") {
-		t.Fatal(view)
-	}
-	m, _ = send(m, tea.WindowSizeMsg{Width: 20, Height: 20})
-	if view := m.View(); !strings.Contains(view, "amber-falcon-1") || strings.Contains(view, "connected") {
-		t.Fatal(view)
+	for _, width := range []int{24, 17} {
+		m, _ = send(m, tea.WindowSizeMsg{Width: width, Height: 20})
+		lines := strings.Split(m.View(), "\n")
+		rows := rowLines(lines)
+		if len(rows) != 2 || strings.TrimRight(rows[0], " ") != connectedShape+"  amber-falcon-1" || strings.Contains(lines[0], "LABEL") {
+			t.Fatalf("width %d:\n%s", width, strings.Join(lines, "\n"))
+		}
 	}
 }
 
@@ -66,10 +66,7 @@ func TestAHandleWiderThanTheScreenKeepsItsTail(t *testing.T) {
 	m, _ := send(newModel(), snapshotMsg{agents: agents, at: clock})
 	m, _ = send(m, tea.WindowSizeMsg{Width: 10, Height: 20})
 	view := m.View()
-	if !strings.Contains(view, "…lcon-5fe1") && !strings.Contains(view, "…con-5fe1") {
-		t.Fatal(view)
-	}
-	if strings.Contains(view, "amber") || strings.Contains(view, "connected") {
+	if strings.Contains(view, "amber") || rowLines(strings.Split(view, "\n"))[0] != connectedShape+"  …n-5fe1" {
 		t.Fatal(view)
 	}
 }
@@ -86,7 +83,7 @@ func TestAtLeastOneAgentRowShowsWhenTheHeightAllowsItAndTheMoreCountIsExact(t *t
 		rows := 0
 		more := -1
 		for _, l := range lines {
-			if strings.HasPrefix(l, "agent") {
+			if strings.HasPrefix(l, connectedShape+"  agent") {
 				rows++
 			}
 			if strings.HasPrefix(l, "+") {

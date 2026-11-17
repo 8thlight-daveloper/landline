@@ -106,15 +106,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	width := m.width
 	body := m.body(width)
-	footer := []string{"", m.status(width), "q quit  r refresh"}
+	options := m.footerOptions(width)
+	footer := options[0]
 	if m.height > 0 {
-		body, footer = fitHeight(body, footer, m.height)
+		body, footer = fitHeight(body, options, m.height)
 	}
 	lines := append(body, footer...)
 	for i, l := range lines {
 		lines[i] = ansi.Truncate(l, max(width, 0), "…")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) footerOptions(width int) [][]string {
+	status := m.status(width)
+	keys := "q quit  r refresh"
+	options := [][]string{{"", status, keys}, {status, keys}, {status}}
+	if m.view != nil && len(m.view.Agents) > 0 {
+		options = append([][]string{{"", legend(), status, keys}}, options...)
+	}
+	return options
 }
 
 func (m Model) body(width int) []string {
@@ -129,18 +140,16 @@ func (m Model) body(width int) []string {
 	return table(m.view.Agents, width, m.err != nil)
 }
 
-func fitHeight(body, footer []string, height int) ([]string, []string) {
-	status := footer[1:2]
+func fitHeight(body []string, options [][]string, height int) ([]string, []string) {
 	var room int
-	chosen := status
-	for _, option := range [][]string{footer, footer[1:], status} {
+	var footer []string
+	for _, option := range options {
 		room = height - len(option)
-		chosen = option
+		footer = option
 		if len(body) <= room || room >= 3 {
 			break
 		}
 	}
-	footer = chosen
 	if len(body) <= room {
 		return body, footer
 	}

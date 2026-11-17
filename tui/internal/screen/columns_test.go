@@ -35,15 +35,15 @@ func rendered(agents []hubclient.Agent, width int) string {
 
 func TestColumnsAreDroppedFromTheLowestPriorityFirst(t *testing.T) {
 	want := map[int]string{
-		30:  "HANDLE LABEL STATE",
-		50:  "HANDLE LABEL HARNESS STATE",
-		70:  "HANDLE LABEL HARNESS STATE LANDLINE",
-		90:  "HANDLE LABEL HARNESS STATE LANDLINE FOLDER",
-		120: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH",
-		160: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH MODEL EFFORT",
-		161: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH MODEL EFFORT",
-		162: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
-		240: "HANDLE LABEL HARNESS STATE LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
+		30:  "HANDLE LABEL",
+		45:  "HANDLE LABEL HARNESS",
+		60:  "HANDLE LABEL HARNESS LANDLINE",
+		90:  "HANDLE LABEL HARNESS LANDLINE FOLDER",
+		110: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH",
+		130: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL",
+		150: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT",
+		151: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
+		240: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
 	}
 	for width, titles := range want {
 		got := strings.Join(headerTitles(rendered(shortAgents(3), width)), " ")
@@ -54,7 +54,7 @@ func TestColumnsAreDroppedFromTheLowestPriorityFirst(t *testing.T) {
 }
 
 func TestTheColumnSetDoesNotDependOnTheRows(t *testing.T) {
-	for _, width := range []int{30, 50, 70, 90, 120, 160, 161, 162, 240} {
+	for _, width := range []int{30, 45, 60, 90, 110, 130, 150, 151, 240} {
 		few := headerTitles(rendered(shortAgents(3), width))
 		many := headerTitles(rendered(shortAgents(40), width))
 		if strings.Join(few, " ") != strings.Join(many, " ") {

@@ -56,9 +56,9 @@ func TestTheScreenShowsNoCommitForAnAgentThatSentNone(t *testing.T) {
 	}
 }
 
-func TestTheCommitColumnIsLastAndFirstAppearsAtWidthOneHundredSixtyTwo(t *testing.T) {
+func TestTheCommitColumnIsLastAndFirstAppearsAtWidthOneHundredFiftyOne(t *testing.T) {
 	agent := decodedAgent(t, `{"name":"agent00","harness":"claude","host":"mac","connected":true,"landline_commit":"`+fullCommit+`-dirty"}`)
-	for width, want := range map[int]bool{80: false, 160: false, 161: false, 162: true, 200: true} {
+	for width, want := range map[int]bool{80: false, 149: false, 150: false, 151: true, 200: true} {
 		view := rendered([]hubclient.Agent{agent}, width)
 		if got := strings.Contains(strings.Split(view, "\n")[0], "COMMIT"); got != want {
 			t.Errorf("width %d: COMMIT shown %v, want %v\n%s", width, got, want, view)

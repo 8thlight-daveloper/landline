@@ -18,11 +18,27 @@ type column struct {
 	fromLeft bool
 }
 
+const (
+	solidCircle  = "●"
+	hollowCircle = "○"
+)
+
+func shapeOf(r agentsview.Row) string {
+	if r.State == agentsview.Connected {
+		return solidCircle
+	}
+	return hollowCircle
+}
+
+func legend() string {
+	return connectedStyle.Render(solidCircle) + " connected  " + disconnectedStyle.Render(hollowCircle) + " disconnected"
+}
+
 var columns = []column{
+	{"", shapeOf, 1, 1, false},
 	{"HANDLE", func(r agentsview.Row) string { return r.Handle }, 0, 1, true},
 	{"LABEL", func(r agentsview.Row) string { return r.Label }, 16, 6, false},
 	{"HARNESS", func(r agentsview.Row) string { return r.Harness }, 12, 6, false},
-	{"STATE", func(r agentsview.Row) string { return r.State }, 0, 1, false},
 	{"LANDLINE", func(r agentsview.Row) string { return r.LandlineVersion }, 9, 5, false},
 	{"FOLDER", func(r agentsview.Row) string { return r.Folder }, 28, 10, true},
 	{"BRANCH", func(r agentsview.Row) string { return r.Branch }, 22, 8, false},
@@ -39,12 +55,12 @@ var (
 )
 
 const (
-	handleIndex = 0
-	stateIndex  = 3
+	shapeIndex  = 0
+	handleIndex = 1
 	staleMarker = "(stale)"
 )
 
-var priority = []int{0, 3, 1, 2, 4, 5, 6, 7, 8, 9}
+var priority = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 
 func naturalWidth(c column, rows []agentsview.Row) int {
 	w := ansi.StringWidth(c.title)
@@ -61,12 +77,12 @@ func visibleColumns(rows []agentsview.Row, width int) ([]column, []int) {
 		return nil, nil
 	}
 	handleWidth := naturalWidth(columns[handleIndex], rows)
-	stateWidth := ansi.StringWidth(agentsview.Disconnected)
-	if handleWidth+columnGap+stateWidth > width {
-		return []column{columns[handleIndex]}, []int{min(handleWidth, width)}
+	shapeWidth := columns[shapeIndex].capWidth
+	if shapeWidth+columnGap+handleWidth > width {
+		return []column{columns[shapeIndex], columns[handleIndex]}, []int{min(shapeWidth, width), max(width-shapeWidth-columnGap, 0)}
 	}
-	allowed := map[int]int{handleIndex: handleWidth, stateIndex: stateWidth}
-	used := handleWidth + columnGap + stateWidth
+	allowed := map[int]int{shapeIndex: shapeWidth, handleIndex: handleWidth}
+	used := shapeWidth + columnGap + handleWidth
 	for _, index := range priority[2:] {
 		c := columns[index]
 		remaining := width - used - columnGap
@@ -88,7 +104,7 @@ func visibleColumns(rows []agentsview.Row, width int) ([]column, []int) {
 			continue
 		}
 		size := limit
-		if index != handleIndex && index != stateIndex {
+		if index != handleIndex && index != shapeIndex {
 			size = max(min(naturalWidth(c, rows), limit), c.minWidth)
 		}
 		shown = append(shown, c)
@@ -142,13 +158,10 @@ func table(rows []agentsview.Row, width int, stale bool) []string {
 			cells[i] = c.cell(row)
 			styles[i] = plain
 		}
-		stateStyle := disconnectedStyle
-		if row.State == agentsview.Connected {
-			stateStyle = connectedStyle
-		}
-		for i, c := range columns {
-			if c.title == "STATE" {
-				styles[i] = stateStyle
+		if len(styles) > shapeIndex {
+			styles[shapeIndex] = disconnectedStyle
+			if row.State == agentsview.Connected {
+				styles[shapeIndex] = connectedStyle
 			}
 		}
 		lines = append(lines, line(cells, columns, widths, styles, width))

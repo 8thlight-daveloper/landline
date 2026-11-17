@@ -1,8 +1,9 @@
 # landline
 
 The `landline` program: a terminal screen for the agents registered with a Landline switchboard, and the commands a
-person runs. It is built in this Go module, as [decision 0090](../docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md)
-and [decision 0110](../docs/decisions/0110-three-binaries-landline-switchboard-and-landline-mcp.md) describe. The screen
+person runs. It is built in this Go module, as
+[decision 0090](../docs/decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) and
+[decision 0110](../docs/decisions/0110-three-binaries-landline-switchboard-and-landline-mcp.md) describe. The screen
 only reads.
 
 The module requires the root module, with a `replace` to the folder above it. Only `main.go` imports root packages. The
@@ -30,12 +31,15 @@ landline -h | --help
 - Every other command, such as `setup`, `claude`, `register`, `send`, `log`, `join`, and `server`, is handled by
   `internal/cli/command` in the root module. `landline version` prints the banner and the build.
 
-The status line reads `error: <message> | switchboard <address> | refreshed <time>`, with the error first and only when the last
-poll failed. `refreshing...` appears while a fetch runs, and `r` during a fetch says `already refreshing`. After a
-failed poll the screen keeps the previous list and marks its header `(stale)` until a poll succeeds. The table drops
-whole columns from the lowest priority first when the terminal is narrow (COMMIT, EFFORT, MODEL, BRANCH, FOLDER,
-LANDLINE, then HARNESS and LABEL), and `+N more` marks rows that do not fit the height. When HANDLE and STATE cannot
-both fit, only the handle shows, and its tail if it is still too wide.
+The status line reads `error: <message> | switchboard <address> | refreshed <time>`, with the error first and only when
+the last poll failed. `refreshing...` appears while a fetch runs, and `r` during a fetch says `already refreshing`.
+After a failed poll the screen keeps the previous list and marks its header `(stale)` until a poll succeeds. The table
+drops whole columns from the lowest priority first when the terminal is narrow (COMMIT, EFFORT, MODEL, BRANCH, FOLDER,
+LANDLINE, then HARNESS and LABEL), and `+N more` marks rows that do not fit the height. The first column is one cell
+with no heading. It shows `●` in green for a connected agent and `○` in faint text for a disconnected one, and it is
+never dropped. When the handle does not fit beside it, the handle shows its tail, cut as far as the width needs. A
+legend line, `● connected  ○ disconnected`, sits above the status line while rows show. It is not counted by `+N more`,
+and a short window drops it first, then the blank line above it, then the key line.
 
 Text that does not come from an agent field is cleaned before it reaches the terminal, the same way agent fields are:
 control, line separator, paragraph separator, and format runes become a space, and invalid UTF-8 becomes U+FFFD. That
@@ -82,12 +86,13 @@ The same way the other commands do. `LANDLINE_URL` and `LANDLINE_SECRET` win. Ot
 
 The address is checked as `landline server join` checks it: `http` or `https`, a host, no user information, no query,
 and no path beyond `/`. It also refuses a fragment and any control or format rune, which the main module does not check.
-A bad address exits `1` with `the switchboard address must look like http://host:port, with no credentials, query, or fragment`.
-The message never repeats the address, so a password in it is never printed. The JSON `hub` field and the status line
-never hold user information.
+A bad address exits `1` with
+`the switchboard address must look like http://host:port, with no credentials, query, or fragment`. The message never
+repeats the address, so a password in it is never printed. The JSON `hub` field and the status line never hold user
+information.
 
-The client does not follow redirects. A `3xx` from the switchboard is the error `the switchboard answered with a redirect`, with no
-`Location` text, and the bearer token is never sent to another host.
+The client does not follow redirects. A `3xx` from the switchboard is the error
+`the switchboard answered with a redirect`, with no `Location` text, and the bearer token is never sent to another host.
 
 It registers as an observer with the secret, polls with the observer token, and registers again once on a `401`. The
 secret and the token are never printed.
