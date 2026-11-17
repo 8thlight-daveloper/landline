@@ -22,14 +22,14 @@ func TestSetupCommandAddsTheServerToEachHarnessWithTheBinaryPath(t *testing.T) {
 
 func TestTheClaudeLauncherLoadsTheChannelAndPassesAttributesInTheEnvironment(t *testing.T) {
 	t.Parallel()
-	launch, err := ClaudeLaunch([]string{"--label", "tutor", "--model", "claude-opus-5-5", "--", "--resume", "abc"})
+	launch, err := ClaudeLaunch([]string{"--project", "tutor", "--model", "claude-opus-5-5", "--", "--resume", "abc"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(launch.Argv, []string{"claude", "--dangerously-load-development-channels", "server:landline", "--resume", "abc"}) {
 		t.Fatalf("%v", launch.Argv)
 	}
-	if !reflect.DeepEqual(launch.Env, []string{"LANDLINE_LABEL=tutor", "LANDLINE_MODEL=claude-opus-5-5"}) {
+	if !reflect.DeepEqual(launch.Env, []string{"LANDLINE_PROJECT=tutor", "LANDLINE_MODEL=claude-opus-5-5"}) {
 		t.Fatalf("%v", launch.Env)
 	}
 	bare, err := ClaudeLaunch(nil)
@@ -40,12 +40,12 @@ func TestTheClaudeLauncherLoadsTheChannelAndPassesAttributesInTheEnvironment(t *
 
 func TestTheClaudeLauncherRefusesUnknownFlagsAndMissingValuesAndNeverPutsSecretsInTheEnvironment(t *testing.T) {
 	t.Parallel()
-	for _, bad := range [][]string{{"--resume"}, {"--label"}, {"--label", " "}, {"--model"}} {
+	for _, bad := range [][]string{{"--resume"}, {"--project"}, {"--project", " "}, {"--model"}} {
 		if _, err := ClaudeLaunch(bad); err == nil {
 			t.Errorf("%v was accepted", bad)
 		}
 	}
-	launch, _ := ClaudeLaunch([]string{"--label", "x"})
+	launch, _ := ClaudeLaunch([]string{"--project", "x"})
 	for _, entry := range launch.Env {
 		if len(entry) >= 17 && entry[:17] == "LANDLINE_SECRET=" {
 			t.Fatalf("the secret was put in the environment: %v", launch.Env)

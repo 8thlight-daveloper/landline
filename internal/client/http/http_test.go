@@ -264,3 +264,18 @@ func TestReportSurfacesAnUnknownDelivery(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestStatusPostsTheTaskToTheStatusRouteAndReadsTheAnswer(t *testing.T) {
+	t.Parallel()
+	var got map[string]any
+	var method, path string
+	c := serve(t, func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		method, path = r.Method, r.URL.Path
+		json.NewDecoder(r.Body).Decode(&got)
+		json.NewEncoder(w).Encode(model.StatusResponse{Task: "ship", TaskAt: time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)})
+	})
+	out, err := c.Status(model.StatusRequest{Task: "ship"})
+	if err != nil || method != "POST" || path != "/v1/status" || got["task"] != "ship" || len(got) != 1 || out.Task != "ship" || out.TaskAt.IsZero() {
+		t.Fatalf("%v %s %s %v %+v", err, method, path, got, out)
+	}
+}

@@ -47,7 +47,7 @@ func run(args []string) int {
 	channel, as := false, ""
 	overrides := command.Identity{LandlineVersion: version, LandlineCommit: commit, LandlineDate: date}
 	targets := map[string]*string{
-		"--as": &as, "--label": &overrides.Label, "--model": &overrides.Model, "--effort": &overrides.Effort,
+		"--as": &as, "--project": &overrides.Project, "--model": &overrides.Model, "--effort": &overrides.Effort,
 		"--folder": &overrides.Folder, "--branch": &overrides.Branch,
 	}
 	for i := 0; i < len(args); i++ {
@@ -83,6 +83,8 @@ func run(args []string) int {
 	session := command.NewSession(env, func() command.Identity { return command.DetectIdentity(env, dir, gitRunner) }, overrides)
 	defer session.Close()
 	options.OnClient = session.SetClient
+	options.Project = session.Project
+	options.ID = session.ID
 	options.OnReady = func() {
 		if _, err := session.Agents(); err != nil {
 			command.NotifyToStderr(name + ": " + err.Error())

@@ -62,9 +62,9 @@ func (Router) Route(known []model.Agent, from string, request model.SendRequest,
 	}, nil
 }
 
-func isRegistered(known []model.Agent, name string) bool {
+func isRegistered(known []model.Agent, id string) bool {
 	for _, agent := range known {
-		if agent.Name == name {
+		if agent.ID == id {
 			return true
 		}
 	}

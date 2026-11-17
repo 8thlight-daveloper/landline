@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,7 +41,7 @@ type Config struct {
 	Now               func() time.Time
 	NewID             func() string
 	NewToken          func() string
-	NewSuffix         func() string
+	NewAgentID        func() string
 	NewCode           func() string
 	Notify            func(string)
 	Build             BuildResponse
@@ -107,8 +107,8 @@ func New(cfg Config, store Store) (*Server, error) {
 	if cfg.NewCode == nil {
 		cfg.NewCode = func() string { return strings.ToUpper(randomHex(3))[:6] }
 	}
-	if cfg.NewSuffix == nil {
-		cfg.NewSuffix = func() string { return randomHex(2)[:3] }
+	if cfg.NewAgentID == nil {
+		cfg.NewAgentID = func() string { return randomHex(2) }
 	}
 	if cfg.NewToken == nil {
 		cfg.NewToken = func() string { return randomHex(24) }
@@ -142,6 +142,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/stream", s.openStream)
 	mux.HandleFunc("POST /v1/deliveries/{id}/report", s.report)
 	mux.HandleFunc("POST /v1/attach", s.attachClaims)
+	mux.HandleFunc("POST /v1/status", s.setStatus)
 	mux.HandleFunc("GET /v1/agents", s.list)
 	mux.HandleFunc("GET /v1/log", s.logRead)
 	mux.HandleFunc("GET /v1/build", s.build)
@@ -161,11 +162,11 @@ func (s *Server) expireLocked() {
 	now := s.cfg.Now()
 	kept := make([]model.Agent, 0, len(s.agents))
 	for _, agent := range s.agents {
-		if s.streams[agent.Name] != nil || now.Sub(agent.LastSeen) <= s.cfg.Grace {
+		if s.streams[agent.ID] != nil || now.Sub(agent.LastSeen) <= s.cfg.Grace {
 			kept = append(kept, agent)
 			continue
 		}
-		s.forgetLocked(agent.Name)
+		s.forgetLocked(agent.ID)
 	}
 	s.agents = kept
 	for token, seen := range s.observers {
@@ -337,22 +338,22 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	if (body.Name == "") == (body.Seed == "") {
-		fail(w, http.StatusBadRequest, "give either a name or a seed, and not both")
+	if (body.ID == "") == (body.Seed == "") {
+		fail(w, http.StatusBadRequest, "give either an id or a seed, and not both")
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expireLocked()
-	name := body.Name
+	id := body.ID
 	if body.Seed != "" {
-		name = s.newHandle(body.Seed)
+		id = s.newID()
 	}
 	entry := model.Agent{
-		Name: name, Harness: body.Harness, Host: body.Host, Session: body.Session,
+		ID: id, Harness: body.Harness, Host: body.Host, Session: body.Session,
 		Folder: body.Folder, Branch: body.Branch, Worktree: body.Worktree, HarnessVersion: body.HarnessVersion, LandlineVersion: body.LandlineVersion,
 		LandlineCommit: body.LandlineCommit, LandlineDate: body.LandlineDate,
-		Model: body.Model, Effort: body.Effort, Label: body.Label,
+		Model: body.Model, Effort: body.Effort, Project: body.Project,
 	}
 	updated, err := s.reg.Register(s.agents, entry, s.cfg.Now())
 	if err != nil {
@@ -361,29 +362,20 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.agents = updated
 	for token, owner := range s.tokens {
-		if owner == name {
+		if owner == id {
 			delete(s.tokens, token)
 		}
 	}
 	token := s.cfg.NewToken()
-	s.tokens[token] = name
-	write(w, http.StatusOK, model.RegisterResponse{Name: name, Token: token})
+	s.tokens[token] = id
+	write(w, http.StatusOK, model.RegisterResponse{ID: id, Token: token})
 }
 
-var handleBase = regexp.MustCompile(`[^a-z0-9_-]+`)
-
-func (s *Server) newHandle(seed string) string {
-	base := strings.Trim(handleBase.ReplaceAllString(strings.ToLower(seed), "-"), "-_")
-	if base == "" {
-		base = "agent"
-	}
-	if len(base) > 24 {
-		base = strings.TrimRight(base[:24], "-_")
-	}
+func (s *Server) newID() string {
 	for {
-		handle := base + "-" + s.cfg.NewSuffix()
-		if _, taken := s.reg.Find(s.agents, handle); !taken && handle != model.Broadcast {
-			return handle
+		id := s.cfg.NewAgentID()
+		if _, taken := s.reg.Find(s.agents, id); !taken {
+			return id
 		}
 	}
 }
@@ -391,19 +383,31 @@ func (s *Server) newHandle(seed string) string {
 func (s *Server) connectedLocked() []model.Agent {
 	out := []model.Agent{}
 	for _, a := range s.agents {
-		if s.streams[a.Name] != nil {
+		if s.streams[a.ID] != nil {
 			out = append(out, a)
 		}
 	}
 	return out
 }
 
-func (s *Server) resolveLocked(query string) (model.Agent, []model.Agent) {
-	match, candidates := s.reg.Resolve(s.agents, s.connectedLocked(), query)
-	if match.Name == "" && len(candidates) == 0 {
-		return s.reg.Resolve(s.agents, s.agents, query)
+const hintLimit = 10
+
+func (s *Server) projectHintLocked(value, sender string) string {
+	holders := []string{}
+	for _, agent := range s.connectedLocked() {
+		if agent.Project == value && agent.ID != sender {
+			holders = append(holders, agent.ID)
+		}
 	}
-	return match, candidates
+	if len(holders) == 0 {
+		return ""
+	}
+	slices.Sort(holders)
+	listed := strings.Join(holders[:min(len(holders), hintLimit)], ", ")
+	if len(holders) > hintLimit {
+		listed += ", and more"
+	}
+	return value + " is a project, not an agent. Send to one of: " + listed
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
@@ -417,25 +421,16 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.expireLocked()
-	if body.To != model.Broadcast {
-		match, candidates := s.resolveLocked(body.To)
-		if len(candidates) > 1 {
-			names := make([]string, len(candidates))
-			for i, each := range candidates {
-				names[i] = each.Name
-			}
-			s.mu.Unlock()
-			fail(w, http.StatusConflict, "more than one agent matches "+body.To+": "+strings.Join(names, ", ")+". Use a handle")
-			return
-		}
-		if match.Name != "" {
-			body.To = match.Name
-		}
-	}
 	decision, err := s.rt.Route(s.agents, from, model.SendRequest(body), s.cfg.NewID(), s.seq+1, s.cfg.Now())
 	if err != nil {
+		problem := err.Error()
+		if errors.Is(err, model.ErrUnknownRecipient) && body.To != model.Broadcast {
+			if hint := s.projectHintLocked(body.To, from); hint != "" {
+				problem += ". " + hint
+			}
+		}
 		s.mu.Unlock()
-		fail(w, statusOf(err), err.Error())
+		fail(w, statusOf(err), problem)
 		return
 	}
 	if err := s.store.Append(decision.Envelope); err != nil {
@@ -503,7 +498,7 @@ func plainProblem(problem string) string {
 
 const notConnected = "not connected"
 
-const unversionedHint = ": no landline version is on record, so it is a hand-registered name, which can send and cannot receive, or an older landline. Restart its session if it is a landline session"
+const unversionedHint = ": no landline version is on record, so it is a hand-registered id, which can send and cannot receive, or an older landline. Restart its session if it is a landline session"
 
 func (s *Server) notConnectedLocked(name string) string {
 	if agent, found := s.reg.Find(s.agents, name); found && agent.LandlineVersion == "" {
@@ -687,9 +682,9 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	out := []model.AgentInfo{}
 	for _, a := range listed {
 		out = append(out, model.AgentInfo{
-			Name: a.Name, Harness: a.Harness, Host: a.Host, Session: a.Session, Connected: connected[a.Name], LastSeen: a.LastSeen,
+			ID: a.ID, Harness: a.Harness, Host: a.Host, Session: a.Session, Connected: connected[a.ID], LastSeen: a.LastSeen,
 			Folder: a.Folder, Branch: a.Branch, Worktree: a.Worktree, HarnessVersion: a.HarnessVersion, LandlineVersion: a.LandlineVersion,
-			LandlineCommit: a.LandlineCommit, LandlineDate: a.LandlineDate, Model: a.Model, Effort: a.Effort, Label: a.Label,
+			LandlineCommit: a.LandlineCommit, LandlineDate: a.LandlineDate, Model: a.Model, Effort: a.Effort, Project: a.Project, Task: a.Task, TaskAt: a.TaskAt,
 		})
 	}
 	write(w, http.StatusOK, out)

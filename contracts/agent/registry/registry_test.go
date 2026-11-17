@@ -13,13 +13,13 @@ import (
 var t0 = time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 
 func agent(name string) model.Agent {
-	return model.Agent{Name: name, Harness: "codex", Host: "mac", Session: "s-" + name}
+	return model.Agent{ID: name, Harness: "codex", Host: "mac", Session: "s-" + name}
 }
 
 func names(agents []model.Agent) []string {
 	out := []string{}
 	for _, a := range agents {
-		out = append(out, a.Name)
+		out = append(out, a.ID)
 	}
 	return out
 }
@@ -30,12 +30,12 @@ func TestRegisterAddsAnAgentAndStampsLastSeen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Name != "alpha" || !got[0].LastSeen.Equal(t0) || got[0].Harness != "codex" {
+	if len(got) != 1 || got[0].ID != "alpha" || !got[0].LastSeen.Equal(t0) || got[0].Harness != "codex" {
 		t.Fatalf("got %+v", got)
 	}
 }
 
-func TestRegisterKeepsAgentsSortedByName(t *testing.T) {
+func TestRegisterKeepsAgentsSortedByID(t *testing.T) {
 	t.Parallel()
 	r := newImpl()
 	var agents []model.Agent
@@ -66,7 +66,7 @@ func TestRegisteringAgainReplacesTheEntry(t *testing.T) {
 	}
 }
 
-func TestRegisterRefusesABadNameOrAMissingHarness(t *testing.T) {
+func TestRegisterRefusesABadIDOrAMissingHarness(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"", "Alpha", "has space", "all", "way-too-long-a-name-for-the-hub-to-accept-ok", "-lead"} {
 		if _, err := newImpl().Register(nil, agent(name), t0); !errors.Is(err, model.ErrBadName) {
@@ -93,11 +93,11 @@ func TestRegisterLeavesItsInputUnchanged(t *testing.T) {
 	}
 }
 
-func TestFindReturnsTheNamedAgent(t *testing.T) {
+func TestFindReturnsTheAgentWithThatID(t *testing.T) {
 	t.Parallel()
 	r := newImpl()
 	agents, _ := r.Register(nil, agent("alpha"), t0)
-	if got, ok := r.Find(agents, "alpha"); !ok || got.Name != "alpha" {
+	if got, ok := r.Find(agents, "alpha"); !ok || got.ID != "alpha" {
 		t.Fatalf("got %+v, %v", got, ok)
 	}
 	if _, ok := r.Find(agents, "bravo"); ok {
@@ -115,7 +115,7 @@ func TestEveryCallIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestANameThatSortsBeforeAllIsStillAValidName(t *testing.T) {
+func TestAnIDThatSortsBeforeAllIsStillAValidID(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"aaa", "a", "alarm", "alk"} {
 		if _, err := newImpl().Register(nil, agent(name), t0); err != nil {
@@ -132,7 +132,7 @@ func TestFindPicksTheRightAgentAmongSeveral(t *testing.T) {
 		agents, _ = r.Register(agents, agent(name), t0)
 	}
 	for _, name := range []string{"alpha", "bravo", "charlie"} {
-		if got, ok := r.Find(agents, name); !ok || got.Name != name {
+		if got, ok := r.Find(agents, name); !ok || got.ID != name {
 			t.Errorf("%s: got %+v %v", name, got, ok)
 		}
 	}
@@ -158,12 +158,12 @@ func TestReplacingAnEntryLeavesTheCallersListUnchanged(t *testing.T) {
 	if !reflect.DeepEqual(agents, before) {
 		t.Fatalf("the input changed: %+v then %+v", before, agents)
 	}
-	if got[0].Session != "s-new" || got[1].Name != "bravo" {
+	if got[0].Session != "s-new" || got[1].ID != "bravo" {
 		t.Fatalf("got %+v", got)
 	}
 }
 
-func TestANameOfExactlyThirtyTwoCharactersIsValidAndThirtyThreeIsNot(t *testing.T) {
+func TestAnIDOfExactlyThirtyTwoCharactersIsValidAndThirtyThreeIsNot(t *testing.T) {
 	t.Parallel()
 	valid := "a" + strings.Repeat("b", 31)
 	if _, err := newImpl().Register(nil, agent(valid), t0); err != nil {
@@ -250,9 +250,9 @@ func TestTheFieldLimitCountsBytesNotCharacters(t *testing.T) {
 func TestRegisterDoesNotReorderTheCallersList(t *testing.T) {
 	t.Parallel()
 	unsorted := []model.Agent{
-		{Name: "charlie", Harness: "h", LastSeen: t0},
-		{Name: "alpha", Harness: "h", LastSeen: t0},
-		{Name: "bravo", Harness: "h", LastSeen: t0},
+		{ID: "charlie", Harness: "h", LastSeen: t0},
+		{ID: "alpha", Harness: "h", LastSeen: t0},
+		{ID: "bravo", Harness: "h", LastSeen: t0},
 	}
 	before := append([]model.Agent(nil), unsorted...)
 	newImpl().Register(unsorted, agent("delta"), t0)
@@ -261,7 +261,7 @@ func TestRegisterDoesNotReorderTheCallersList(t *testing.T) {
 	}
 }
 
-func TestFindMatchesTheNameExactly(t *testing.T) {
+func TestFindMatchesTheIDExactly(t *testing.T) {
 	t.Parallel()
 	r := newImpl()
 	agents, _ := r.Register(nil, agent("alpha"), t0)
@@ -283,7 +283,7 @@ func TestRegisterStampsTheGivenTimeExactlyAndIgnoresACallerSuppliedLastSeen(t *t
 	}
 }
 
-func TestNamesAreLowercaseOnlyAndOnlyTheExactNameAllIsReserved(t *testing.T) {
+func TestIDsAreLowercaseOnlyAndOnlyTheExactIDAllIsReserved(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"aLpha", "alphA", "ALPHA", "a-B"} {
 		if _, err := newImpl().Register(nil, agent(name), t0); !errors.Is(err, model.ErrBadName) {
@@ -299,7 +299,7 @@ func TestNamesAreLowercaseOnlyAndOnlyTheExactNameAllIsReserved(t *testing.T) {
 
 func TestRegisterStoresEveryFieldAsGiven(t *testing.T) {
 	t.Parallel()
-	entry := model.Agent{Name: "alpha", Harness: "Codex CLI", Host: " mac book ", Session: " s 1 "}
+	entry := model.Agent{ID: "alpha", Harness: "Codex CLI", Host: " mac book ", Session: " s 1 "}
 	got, err := newImpl().Register(nil, entry, t0)
 	if err != nil {
 		t.Fatal(err)
@@ -326,13 +326,13 @@ func TestAHarnessOfOnlyWhiteSpaceOfAnyKindIsRefusedAsNoHarnessBeforeTheFieldRule
 	}
 }
 
-func TestFaultsAreCheckedNameThenHarnessThenFields(t *testing.T) {
+func TestFaultsAreCheckedIDThenHarnessThenFields(t *testing.T) {
 	t.Parallel()
-	both := agent("BAD NAME")
+	both := agent("BAD ID")
 	both.Harness = ""
 	both.Host = "bad\nhost"
 	if _, err := newImpl().Register(nil, both, t0); !errors.Is(err, model.ErrBadName) {
-		t.Fatalf("name and harness: %v", err)
+		t.Fatalf("id and harness: %v", err)
 	}
 	noHarness := agent("alpha")
 	noHarness.Harness = ""
@@ -342,7 +342,7 @@ func TestFaultsAreCheckedNameThenHarnessThenFields(t *testing.T) {
 	}
 }
 
-func TestNamesMayStartWithADigitAndHoldHyphensAndUnderscores(t *testing.T) {
+func TestIDsMayStartWithADigitAndHoldHyphensAndUnderscores(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"9lives", "0", "a-b", "a_b", "all-x", "all_x", "1-2_3"} {
 		if _, err := newImpl().Register(nil, agent(name), t0); err != nil {
@@ -377,14 +377,16 @@ func setField(entry *model.Agent, field, value string) {
 		entry.Model = value
 	case "Effort":
 		entry.Effort = value
-	case "Label":
-		entry.Label = value
+	case "Project":
+		entry.Project = value
+	case "Task":
+		entry.Task = value
 	}
 }
 
 func TestEveryFieldAcceptsExactlySixtyFourBytesAndRefusesTheUnicodeLineBreaks(t *testing.T) {
 	t.Parallel()
-	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "LandlineCommit", "LandlineDate", "Model", "Effort", "Label"} {
+	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "LandlineCommit", "LandlineDate", "Model", "Effort", "Project", "Task"} {
 		entry := agent("alpha")
 		setField(&entry, field, strings.Repeat("h", 64))
 		if _, err := newImpl().Register(nil, entry, t0); err != nil {
@@ -445,7 +447,7 @@ func TestEveryAttributeIsStoredAsGivenAndMayBeEmpty(t *testing.T) {
 	entry.Folder, entry.Branch, entry.Worktree, entry.HarnessVersion = "threnos", "fix/login", "wt-2", "2.1.296"
 	entry.LandlineVersion = "0.2.0"
 	entry.LandlineCommit, entry.LandlineDate = fullCommit, buildDate
-	entry.Model, entry.Effort, entry.Label = "claude-opus-5-5", "medium", "  main reviewer  "
+	entry.Model, entry.Effort, entry.Project = "claude-opus-5-5", "medium", "  main reviewer  "
 	got, err := newImpl().Register(nil, entry, t0)
 	if err != nil {
 		t.Fatal(err)
@@ -456,167 +458,8 @@ func TestEveryAttributeIsStoredAsGivenAndMayBeEmpty(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", got[0], want)
 	}
 	bare, err := newImpl().Register(nil, agent("bravo"), t0)
-	if err != nil || bare[0].Label != "" || bare[0].Model != "" {
+	if err != nil || bare[0].Project != "" || bare[0].Model != "" {
 		t.Fatalf("empty attributes: %+v, %v", bare, err)
-	}
-}
-
-func resolveList() []model.Agent {
-	mk := func(name, label string) model.Agent { return model.Agent{Name: name, Harness: "h", Label: label} }
-	return []model.Agent{mk("alpha-1k2", "tutor"), mk("alpha-9z9", "reviewer"), mk("bravo-3x3", "tutor"), mk("charlie-7q7", "")}
-}
-
-func TestResolveFindsAnExactHandleWhetherOrNotTheAgentIsLive(t *testing.T) {
-	t.Parallel()
-	all := resolveList()
-	got, candidates := newImpl().Resolve(all, nil, "charlie-7q7")
-	if got.Name != "charlie-7q7" || candidates != nil {
-		t.Fatalf("got %+v %v", got, candidates)
-	}
-}
-
-func TestResolveByLabelNeedsExactlyOneLiveMatchAndOtherwiseReturnsTheCandidatesSorted(t *testing.T) {
-	t.Parallel()
-	all := resolveList()
-	got, candidates := newImpl().Resolve(all, all, "reviewer")
-	if got.Name != "alpha-9z9" || candidates != nil {
-		t.Fatalf("one match: %+v %v", got, candidates)
-	}
-	got, candidates = newImpl().Resolve(all, []model.Agent{all[2], all[0]}, "tutor")
-	if got.Name != "" || !reflect.DeepEqual(names(candidates), []string{"alpha-1k2", "bravo-3x3"}) {
-		t.Fatalf("two matches: %+v %v", got, names(candidates))
-	}
-	got, candidates = newImpl().Resolve(all, []model.Agent{all[0]}, "tutor")
-	if got.Name != "alpha-1k2" || candidates != nil {
-		t.Fatalf("one live match among two: %+v %v", got, names(candidates))
-	}
-}
-
-func TestResolveByPrefixOfAHandleOrALabelNeedsExactlyOneLiveMatch(t *testing.T) {
-	t.Parallel()
-	all := resolveList()
-	if got, _ := newImpl().Resolve(all, all, "bra"); got.Name != "bravo-3x3" {
-		t.Fatalf("handle prefix: %+v", got)
-	}
-	if got, _ := newImpl().Resolve(all, all, "rev"); got.Name != "alpha-9z9" {
-		t.Fatalf("label prefix: %+v", got)
-	}
-	got, candidates := newImpl().Resolve(all, all, "alpha")
-	if got.Name != "" || !reflect.DeepEqual(names(candidates), []string{"alpha-1k2", "alpha-9z9"}) {
-		t.Fatalf("ambiguous prefix: %+v %v", got, names(candidates))
-	}
-}
-
-func TestResolveFindsNothingForAnEmptyUnknownOrCaseDifferentQuery(t *testing.T) {
-	t.Parallel()
-	all := resolveList()
-	for _, query := range []string{"", "zulu", "TUTOR", "Bravo", "tutors", "alpha-1k2x"} {
-		if got, candidates := newImpl().Resolve(all, all, query); got.Name != "" || len(candidates) != 0 {
-			t.Errorf("%q: %+v %v", query, got, names(candidates))
-		}
-	}
-}
-
-func TestResolvePrefersAnExactHandleOverALabelAndALabelOverAPrefix(t *testing.T) {
-	t.Parallel()
-	all := []model.Agent{
-		{Name: "tutor", Harness: "h"},
-		{Name: "bravo-1", Harness: "h", Label: "tutor"},
-		{Name: "tutorial-2", Harness: "h"},
-	}
-	if got, _ := newImpl().Resolve(all, all, "tutor"); got.Name != "tutor" {
-		t.Fatalf("handle first: %+v", got)
-	}
-	all = all[1:]
-	if got, _ := newImpl().Resolve(all, all, "tutor"); got.Name != "bravo-1" {
-		t.Fatalf("label before prefix: %+v", got)
-	}
-}
-
-func TestResolveNeverChangesItsInputs(t *testing.T) {
-	t.Parallel()
-	all := resolveList()
-	live := []model.Agent{all[3], all[1], all[0]}
-	beforeAll, beforeLive := append([]model.Agent(nil), all...), append([]model.Agent(nil), live...)
-	newImpl().Resolve(all, live, "alpha")
-	newImpl().Resolve(all, live, "tutor")
-	if !reflect.DeepEqual(all, beforeAll) || !reflect.DeepEqual(live, beforeLive) {
-		t.Fatalf("an input changed: %v %v", names(all), names(live))
-	}
-}
-
-func TestResolveDoesNotMatchTheMiddleOrEndOfAHandleOrALabel(t *testing.T) {
-	t.Parallel()
-	all := resolveList()
-	if got, _ := newImpl().Resolve(all, all, "alpha-1k2"); got.Name != "alpha-1k2" {
-		t.Fatalf("the whole handle: %+v", got)
-	}
-	for _, query := range []string{"lpha", "ravo", "1k2", "k2", "utor", "tor", "viewer", "-"} {
-		if got, candidates := newImpl().Resolve(all, all, query); got.Name != "" || len(candidates) != 0 {
-			t.Errorf("%q: %+v %v", query, got, names(candidates))
-		}
-	}
-}
-
-func TestResolveDoesNotTrimTheQuery(t *testing.T) {
-	t.Parallel()
-	all := resolveList()
-	if got, _ := newImpl().Resolve(all, all, "alpha-1k2"); got.Name != "alpha-1k2" {
-		t.Fatalf("the untrimmed handle: %+v", got)
-	}
-	for _, query := range []string{" alpha-1k2", "alpha-1k2 ", "\talpha-1k2", " reviewer", "reviewer\n", " bra", "bra ", " ", "\u00a0reviewer"} {
-		if got, candidates := newImpl().Resolve(all, all, query); got.Name != "" || len(candidates) != 0 {
-			t.Errorf("%q: %+v %v", query, got, names(candidates))
-		}
-	}
-}
-
-func TestResolveMatchesHandlesAndLabelsOnlyInTheCaseTheyWereGiven(t *testing.T) {
-	t.Parallel()
-	all := []model.Agent{
-		{Name: "alpha", Harness: "h", Label: "Tutor"},
-		{Name: "bravo", Harness: "h", Label: "Reviewer"},
-	}
-	for _, query := range []string{"ALPHA", "Alpha", "aLPHA", "tutor", "TUTOR", "reviewer", "REV", "rev", "BRA", "tu"} {
-		if got, candidates := newImpl().Resolve(all, all, query); got.Name != "" || len(candidates) != 0 {
-			t.Errorf("%q: %+v %v", query, got, names(candidates))
-		}
-	}
-	for query, want := range map[string]string{"alpha": "alpha", "Tutor": "alpha", "Rev": "bravo", "Tu": "alpha"} {
-		if got, _ := newImpl().Resolve(all, all, query); got.Name != want {
-			t.Errorf("%q: %+v, want %s", query, got, want)
-		}
-	}
-}
-
-func TestResolveALabelTieIsNotBrokenByAPrefixMatch(t *testing.T) {
-	t.Parallel()
-	all := []model.Agent{
-		{Name: "alpha", Harness: "h", Label: "tutor"},
-		{Name: "bravo", Harness: "h", Label: "tutor"},
-		{Name: "tutor-x", Harness: "h"},
-		{Name: "tutor-y", Harness: "h", Label: "tutor"},
-	}
-	got, candidates := newImpl().Resolve(all, all, "tutor")
-	if got.Name != "" || !reflect.DeepEqual(names(candidates), []string{"alpha", "bravo", "tutor-y"}) {
-		t.Fatalf("got %+v %v", got, names(candidates))
-	}
-}
-
-func TestResolveListsAnAgentOnceWhenItsHandleAndItsLabelBothStartWithTheQuery(t *testing.T) {
-	t.Parallel()
-	all := []model.Agent{
-		{Name: "tutor-1", Harness: "h", Label: "tutor"},
-		{Name: "tutor-2", Harness: "h", Label: "tutor-two"},
-		{Name: "zulu", Harness: "h"},
-	}
-	got, candidates := newImpl().Resolve(all, all, "tut")
-	if got.Name != "" || !reflect.DeepEqual(names(candidates), []string{"tutor-1", "tutor-2"}) {
-		t.Fatalf("got %+v %v", got, names(candidates))
-	}
-	single := all[:1]
-	if got, candidates := newImpl().Resolve(single, single, "tut"); got.Name != "tutor-1" || candidates != nil {
-		t.Fatalf("one agent matching twice is one match: %+v %v", got, names(candidates))
 	}
 }
 
@@ -634,7 +477,7 @@ func TestAHarnessOfOnlyAnInvisibleCharacterThatIsNotWhiteSpaceIsABadFieldNotNoHa
 func TestEveryFieldRefusesInvisibleFormattingCharacters(t *testing.T) {
 	t.Parallel()
 	formatting := []string{"\u00ad", "\u0600", "\u061c", "\u180e", "\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202d", "\u202e", "\u2060", "\u2066", "\u2069", "\ufeff", "\U000e0001", "\U000e0041"}
-	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "LandlineCommit", "LandlineDate", "Model", "Effort", "Label"} {
+	for _, field := range []string{"Harness", "Host", "Session", "Folder", "Branch", "Worktree", "HarnessVersion", "LandlineVersion", "LandlineCommit", "LandlineDate", "Model", "Effort", "Project", "Task"} {
 		for _, char := range formatting {
 			for _, text := range []string{"a" + char + "b", char + "codex", "codex" + char} {
 				entry := agent("alpha")
@@ -772,11 +615,11 @@ func TestACommitOfFortySixBytesWithTheDirtyMarkIsAccepted(t *testing.T) {
 	}
 }
 
-func TestABadCommitDoesNotHideABadNameOrAMissingHarness(t *testing.T) {
+func TestABadCommitDoesNotHideABadIDOrAMissingHarness(t *testing.T) {
 	t.Parallel()
-	badName := agent("Alpha")
-	badName.LandlineCommit = strings.Repeat("c", 65)
-	if _, err := newImpl().Register(nil, badName, t0); !errors.Is(err, model.ErrBadName) {
+	badID := agent("Alpha")
+	badID.LandlineCommit = strings.Repeat("c", 65)
+	if _, err := newImpl().Register(nil, badID, t0); !errors.Is(err, model.ErrBadName) {
 		t.Errorf("got %v, want ErrBadName", err)
 	}
 	noHarness := agent("alpha")
@@ -786,15 +629,167 @@ func TestABadCommitDoesNotHideABadNameOrAMissingHarness(t *testing.T) {
 	}
 }
 
-func TestResolveAndFindIgnoreTheCommitAndTheDate(t *testing.T) {
+var taskTime = time.Date(2026, 11, 16, 9, 30, 15, 0, time.UTC)
+
+func TestATaskAndItsTimeAreStoredAndFoundUnchanged(t *testing.T) {
 	t.Parallel()
 	entry := agent("alpha")
+	entry.Project, entry.Task, entry.TaskAt = "landline", "  menu bar app for ADR 0140  ", taskTime
+	agents, err := newImpl().Register(nil, entry, t0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, ok := newImpl().Find(agents, "alpha")
+	if !ok || found.Task != entry.Task || !found.TaskAt.Equal(taskTime) || found.Project != "landline" {
+		t.Fatalf("found %+v, %v", found, ok)
+	}
+	if !found.LastSeen.Equal(t0.Add(time.Hour)) {
+		t.Fatalf("the task time changed the last seen time: %+v", found)
+	}
+}
+
+func TestRegisteringAnIDAgainReplacesTheWholeEntryAndSoClearsTheTaskAndItsTime(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	first := agent("alpha")
+	first.Project, first.Task, first.TaskAt = "landline", "ship ADR 0160", taskTime
+	agents, err := r.Register(nil, first, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err = r.Register(agents, agent("alpha"), t0.Add(time.Second))
+	if err != nil || len(agents) != 1 {
+		t.Fatalf("%+v, %v", agents, err)
+	}
+	if got := agents[0]; got.Task != "" || !got.TaskAt.IsZero() || got.Project != "" {
+		t.Fatalf("the old entry leaked into the new one: %+v", got)
+	}
+	other := agent("bravo")
+	other.Task, other.TaskAt = "keep me", taskTime
+	agents, _ = r.Register(agents, other, t0)
+	agents, _ = r.Register(agents, agent("alpha"), t0)
+	if got, _ := r.Find(agents, "bravo"); got.Task != "keep me" || !got.TaskAt.Equal(taskTime) {
+		t.Fatalf("registering another id changed bravo: %+v", got)
+	}
+}
+
+func TestATaskOfExactlySixtyFourBytesIsAcceptedAndASixtyFifthByteIsRefusedWhateverTheCharacters(t *testing.T) {
+	t.Parallel()
+	for _, task := range []string{strings.Repeat("t", 64), strings.Repeat("\u00e9", 32), "", " "} {
+		entry := agent("alpha")
+		entry.Task = task
+		if _, err := newImpl().Register(nil, entry, t0); err != nil {
+			t.Errorf("%q: %v", task, err)
+		}
+	}
+	for _, task := range []string{strings.Repeat("t", 65), strings.Repeat("\u00e9", 33), strings.Repeat("\u4e2d", 22)} {
+		entry := agent("alpha")
+		entry.Task = task
+		if _, err := newImpl().Register(nil, entry, t0); !errors.Is(err, model.ErrBadField) {
+			t.Errorf("%d bytes: %v", len(task), err)
+		}
+	}
+}
+
+func TestATaskRefusesControlLineSeparatorAndInvisibleFormattingCharactersAndTheListIsUnchanged(t *testing.T) {
+	t.Parallel()
+	existing, _ := newImpl().Register(nil, agent("bravo"), t0)
+	before := append([]model.Agent(nil), existing...)
+	for _, task := range []string{"a\nb", "a\rb", "a\tb", "a\x00b", "a\x7fb", "a\u0085b", "a\u2028b", "a\u2029b", "a\u202eb", "a\u200bb", "a\u2066b", "\ufeffa", "a\U000e0041"} {
+		entry := agent("alpha")
+		entry.Task = task
+		got, err := newImpl().Register(existing, entry, t0)
+		if !errors.Is(err, model.ErrBadField) || got != nil {
+			t.Errorf("%q: %+v, %v", task, got, err)
+		}
+		if !reflect.DeepEqual(existing, before) {
+			t.Fatalf("the list changed: %+v", existing)
+		}
+	}
+}
+
+func TestABadTaskDoesNotHideABadIDOrAMissingHarness(t *testing.T) {
+	t.Parallel()
+	badID := agent("Alpha")
+	badID.Task = "bad\ntask"
+	if _, err := newImpl().Register(nil, badID, t0); !errors.Is(err, model.ErrBadName) {
+		t.Errorf("got %v, want ErrBadName", err)
+	}
+	noHarness := agent("alpha")
+	noHarness.Harness, noHarness.Task = "", strings.Repeat("t", 65)
+	if _, err := newImpl().Register(nil, noHarness, t0); !errors.Is(err, model.ErrNoHarness) {
+		t.Errorf("got %v, want ErrNoHarness", err)
+	}
+}
+
+func TestAnIDOfFourLowercaseHexCharactersIsValid(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{"a3f9", "0000", "ffff", "09af", "b7c2"} {
+		if _, err := newImpl().Register(nil, agent(id), t0); err != nil {
+			t.Errorf("%q: %v", id, err)
+		}
+	}
+	for _, id := range []string{"A3F9", "a3 f9", "a3f9\n", "a3f9\x00", "\u00e0f9"} {
+		if _, err := newImpl().Register(nil, agent(id), t0); !errors.Is(err, model.ErrBadName) {
+			t.Errorf("%q: %v", id, err)
+		}
+	}
+}
+
+func TestARegistrationWhoseIDIsAlreadyListedReplacesItAndDoesNotAddASecondEntry(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	agents, _ := r.Register(nil, agent("a3f9"), t0)
+	agents, _ = r.Register(agents, agent("b7c2"), t0)
+	agents, err := r.Register(agents, agent("a3f9"), t0.Add(time.Second))
+	if err != nil || !reflect.DeepEqual(names(agents), []string{"a3f9", "b7c2"}) {
+		t.Fatalf("%v, %v", names(agents), err)
+	}
+}
+
+func TestFindMatchesOnlyAnExactIDNotAProjectAPrefixAnEmptyIDOrAnyOtherField(t *testing.T) {
+	t.Parallel()
+	entry := agent("a3f9")
+	entry.Project, entry.Task, entry.Folder = "landline", "ship ADR 0160", "landline-checkout"
 	entry.LandlineCommit, entry.LandlineDate = fullCommit, buildDate
 	agents, _ := newImpl().Register(nil, entry, t0)
-	if got, rest := newImpl().Resolve(agents, agents, fullCommit); got.Name != "" || rest != nil {
-		t.Fatalf("a commit matched: %+v %+v", got, rest)
+	other := agent("a3f9x")
+	agents, _ = newImpl().Register(agents, other, t0)
+	for _, query := range []string{"landline", "land", "a3", "a3f", "f9", "A3F9", " a3f9", "a3f9 ", "", "ship ADR 0160", "landline-checkout", fullCommit, buildDate, "codex", "mac", "s-a3f9"} {
+		if got, ok := newImpl().Find(agents, query); ok {
+			t.Errorf("%q matched %+v", query, got)
+		}
 	}
-	if got, ok := newImpl().Find(agents, buildDate); ok {
-		t.Fatalf("a date matched: %+v", got)
+	if got, ok := newImpl().Find(agents, "a3f9"); !ok || got.ID != "a3f9" || got.Project != "landline" {
+		t.Fatalf("exact id: %+v, %v", got, ok)
+	}
+	if got, ok := newImpl().Find(agents, "a3f9x"); !ok || got.ID != "a3f9x" {
+		t.Fatalf("the longer id: %+v, %v", got, ok)
+	}
+}
+
+func TestFindLooksAmongEveryAgentItIsGivenAndChangesNothing(t *testing.T) {
+	t.Parallel()
+	agents := []model.Agent{{ID: "charlie", Harness: "h"}, {ID: "alpha", Harness: "h"}, {ID: "bravo", Harness: "h"}}
+	before := append([]model.Agent(nil), agents...)
+	for _, id := range []string{"alpha", "bravo", "charlie"} {
+		if got, ok := newImpl().Find(agents, id); !ok || got.ID != id {
+			t.Errorf("%s: %+v %v", id, got, ok)
+		}
+	}
+	if !reflect.DeepEqual(agents, before) {
+		t.Fatalf("Find changed its input: %+v", agents)
+	}
+}
+
+func TestTheErrorForABadIDSaysAgentIDAndNotAgentName(t *testing.T) {
+	t.Parallel()
+	_, err := newImpl().Register(nil, agent("Bad ID"), t0)
+	if !errors.Is(err, model.ErrBadName) {
+		t.Fatalf("got %v", err)
+	}
+	text := err.Error()
+	if !strings.HasPrefix(text, "agent id ") || strings.Contains(text, "name") {
+		t.Fatalf("the error text is %q", text)
 	}
 }

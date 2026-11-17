@@ -48,8 +48,8 @@ func TestDetectIdentityTakesTheFolderBranchWorktreeAndEffort(t *testing.T) {
 
 func TestWithPrefersTheOverridesFieldByField(t *testing.T) {
 	t.Parallel()
-	got := Identity{Seed: "a", Folder: "a", Branch: "b", Model: "m"}.With(Identity{Branch: "x", Label: "lead"})
-	if got.Seed != "a" || got.Branch != "x" || got.Model != "m" || got.Label != "lead" {
+	got := Identity{Seed: "a", Folder: "a", Branch: "b", Model: "m"}.With(Identity{Branch: "x", Project: "lead"})
+	if got.Seed != "a" || got.Branch != "x" || got.Model != "m" || got.Project != "lead" {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -86,10 +86,10 @@ func (r *recordingHub) handler() http.Handler {
 		r.tokens++
 		n := r.tokens
 		r.mu.Unlock()
-		json.NewEncoder(w).Encode(model.RegisterResponse{Name: body.Seed + "-" + string(rune('a'+n-1)), Token: "tok" + string(rune('0'+n))})
+		json.NewEncoder(w).Encode(model.RegisterResponse{ID: body.Seed + "-" + string(rune('a'+n-1)), Token: "tok" + string(rune('0'+n))})
 	})
 	mux.HandleFunc("/v1/attach", func(w http.ResponseWriter, req *http.Request) {
-		json.NewEncoder(w).Encode(model.AttachResponse{Name: "x"})
+		json.NewEncoder(w).Encode(model.AttachResponse{ID: "x"})
 	})
 	mux.HandleFunc("/v1/send", func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
@@ -151,7 +151,7 @@ func newSession(t *testing.T, hub *httptest.Server, secret string) (*Session, En
 		return map[string]string{"LANDLINE_URL": hub.URL, "LANDLINE_SECRET": secret, "CLAUDE_CODE_SESSION_ID": "cc-1"}[k]
 	}}
 	detect := func() Identity { return Identity{Seed: "threnos", Folder: "threnos", Branch: "main"} }
-	return NewSession(env, detect, Identity{Label: "lead", LandlineVersion: "0.2.0"}), env
+	return NewSession(env, detect, Identity{Project: "lead", LandlineVersion: "0.2.0"}), env
 }
 
 func TestTheSessionRegistersOnFirstUseWithTheSeedTheAttributesAndTheClientInfo(t *testing.T) {
@@ -168,12 +168,12 @@ func TestTheSessionRegistersOnFirstUseWithTheSeedTheAttributesAndTheClientInfo(t
 		t.Fatal(err)
 	}
 	got := hub.register[0]
-	if got.Seed != "threnos" || got.Name != "" || got.Harness != "claude-code" || got.HarnessVersion != "2.1.296" || got.Host != "mac" ||
-		got.Session != "cc-1" || got.Folder != "threnos" || got.Branch != "main" || got.Label != "lead" || got.LandlineVersion != "0.2.0" {
+	if got.Seed != "threnos" || got.ID != "" || got.Harness != "claude-code" || got.HarnessVersion != "2.1.296" || got.Host != "mac" ||
+		got.Session != "cc-1" || got.Folder != "threnos" || got.Branch != "main" || got.Project != "lead" || got.LandlineVersion != "0.2.0" {
 		t.Fatalf("%+v", got)
 	}
-	if s.Handle() != "threnos-a" {
-		t.Fatalf("handle %q", s.Handle())
+	if s.ID() != "threnos-a" {
+		t.Fatalf("id %q", s.ID())
 	}
 	path := filepath.Join(env.ConfigDir, "session-threnos-a.json")
 	info, err := os.Stat(path)
@@ -199,8 +199,8 @@ func TestAnExpiredTokenIsRenewedOnceAndTheCallRetried(t *testing.T) {
 	if _, err := s.Send(model.SendBody{To: "x", Body: "b"}); err != nil {
 		t.Fatalf("%v", err)
 	}
-	if len(hub.register) != 2 || s.Handle() != "threnos-b" {
-		t.Fatalf("registrations %d handle %q", len(hub.register), s.Handle())
+	if len(hub.register) != 2 || s.ID() != "threnos-b" {
+		t.Fatalf("registrations %d id %q", len(hub.register), s.ID())
 	}
 	hub.mu.Lock()
 	hub.rejected = 5
@@ -323,12 +323,12 @@ func TestDeliveriesAndReportToAHubThatIsNotRunningSayWhatToDo(t *testing.T) {
 	}
 }
 
-func TestTheEnvironmentSuppliesTheLabelModelAndEffort(t *testing.T) {
+func TestTheEnvironmentSuppliesTheProjectModelAndEffort(t *testing.T) {
 	t.Parallel()
 	got := EnvironmentIdentity(Env{Getenv: func(k string) string {
-		return map[string]string{"LANDLINE_LABEL": "tutor", "LANDLINE_MODEL": "gpt-6.1-sol", "LANDLINE_EFFORT": "medium", "LANDLINE_FOLDER": "f"}[k]
+		return map[string]string{"LANDLINE_PROJECT": "tutor", "LANDLINE_MODEL": "gpt-6.1-sol", "LANDLINE_EFFORT": "medium", "LANDLINE_FOLDER": "f"}[k]
 	}})
-	if got.Label != "tutor" || got.Model != "gpt-6.1-sol" || got.Effort != "medium" || got.Folder != "f" {
+	if got.Project != "tutor" || got.Model != "gpt-6.1-sol" || got.Effort != "medium" || got.Folder != "f" {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -339,7 +339,7 @@ func TestAClaimMadeThroughAttachSurvivesARegistrationAfterTheHubForgetsTheAgent(
 	srv := httptest.NewServer(hub.handler())
 	defer srv.Close()
 	s, _ := newSession(t, srv, "0123456789abcdef")
-	if _, err := s.Attach(model.AttachRequest{Model: "claude-opus-5-5", Effort: "high", Label: "tutor"}); err != nil {
+	if _, err := s.Attach(model.AttachRequest{Model: "claude-opus-5-5", Effort: "high", Project: "tutor"}); err != nil {
 		t.Fatal(err)
 	}
 	hub.mu.Lock()
@@ -351,7 +351,7 @@ func TestAClaimMadeThroughAttachSurvivesARegistrationAfterTheHubForgetsTheAgent(
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 	last := hub.register[len(hub.register)-1]
-	if len(hub.register) != 2 || last.Model != "claude-opus-5-5" || last.Effort != "high" || last.Label != "tutor" {
+	if len(hub.register) != 2 || last.Model != "claude-opus-5-5" || last.Effort != "high" || last.Project != "tutor" {
 		t.Fatalf("%d registrations, the last %+v", len(hub.register), last)
 	}
 }
@@ -410,5 +410,57 @@ func TestTheSessionSaysThereIsNoSwitchboardSecret(t *testing.T) {
 	_, err := s.Send(model.SendBody{To: "x", Body: "b"})
 	if err == nil || !strings.Contains(err.Error(), "there is no switchboard secret. Run: landline server up, or landline join <switchboard address>") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestTheDefaultProjectComesFromTheRepositoryOrTheFolder(t *testing.T) {
+	t.Parallel()
+	gitAnswering := func(common string, err error) GitRunner {
+		return func(dir string, args ...string) (string, error) {
+			if len(args) == 2 && args[1] == "--git-common-dir" {
+				return common, err
+			}
+			return "", errors.New("not asked")
+		}
+	}
+	for name, c := range map[string]struct {
+		dir, common string
+		err         error
+		want        string
+	}{
+		"main tree, relative":         {"/w/foo", ".git", nil, "foo"},
+		"subfolder, relative":         {"/w/foo/sub", "../.git", nil, "foo"},
+		"linked worktree, absolute":   {"/w/wt", "/w/foo/.git", nil, "foo"},
+		"bare repository":             {"/w/foo.git", "/w/foo.git", nil, "foo"},
+		"separate git folder":         {"/w/elsewhere", "/w/store.git", nil, "store"},
+		"not a repository":            {"/w/plain-folder", "", errors.New("fatal"), "plain-folder"},
+		"root, not a repository":      {"/", "", errors.New("fatal"), ""},
+		"empty folder, no repository": {"", "", errors.New("fatal"), ""},
+	} {
+		if got := DetectIdentity(Env{Getenv: func(string) string { return "" }}, c.dir, gitAnswering(c.common, c.err)).Project; got != c.want {
+			t.Errorf("%s: %q, want %q", name, got, c.want)
+		}
+	}
+}
+
+func TestTheSessionRemembersWhetherTheProjectWasGivenOrDerived(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer((&recordingHub{}).handler())
+	defer srv.Close()
+	env := Env{ConfigDir: t.TempDir(), Host: "mac", Getenv: func(k string) string {
+		return map[string]string{"LANDLINE_URL": srv.URL, "LANDLINE_SECRET": "0123456789abcdef"}[k]
+	}}
+	s := NewSession(env, func() Identity { return Identity{Seed: "x", Project: "derived"} }, Identity{})
+	if _, err := s.Attach(model.AttachRequest{Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if project, given := s.Project(); project != "derived" || given {
+		t.Fatalf("%q %v", project, given)
+	}
+	if _, err := s.Attach(model.AttachRequest{Project: "chosen"}); err != nil {
+		t.Fatal(err)
+	}
+	if project, given := s.Project(); project != "chosen" || !given {
+		t.Fatalf("%q %v", project, given)
 	}
 }

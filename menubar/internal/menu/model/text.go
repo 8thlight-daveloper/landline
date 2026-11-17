@@ -1,11 +1,17 @@
 package model
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/8thlight-daveloper/landline/menubar/internal/agentsview"
+)
 
 const (
-	separatorText = "---"
-	disabledText  = " (disabled)"
-	indent        = "  "
+	connectedShape    = "\u25cf"
+	disconnectedShape = "\u25cb"
+	separatorText     = "---"
+	disabledText      = " (disabled)"
+	indent            = "  "
 )
 
 func (m Menu) Text() string {
@@ -30,11 +36,21 @@ func appendItems(lines []string, items []Item, prefix string) []string {
 		case item.Separator:
 			lines = append(lines, prefix+separatorText)
 		case item.Disabled:
-			lines = append(lines, prefix+item.Title+disabledText)
+			lines = append(lines, prefix+itemTitle(item)+disabledText)
 		default:
-			lines = append(lines, prefix+item.Title)
+			lines = append(lines, prefix+itemTitle(item))
 		}
 		lines = appendItems(lines, item.Children, prefix+indent)
 	}
 	return lines
+}
+
+func itemTitle(item Item) string {
+	switch item.State {
+	case agentsview.Connected:
+		return connectedShape + " " + item.Title
+	case agentsview.Disconnected:
+		return disconnectedShape + " " + item.Title
+	}
+	return item.Title
 }

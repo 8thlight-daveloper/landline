@@ -27,7 +27,7 @@ func (k Kind) Valid() bool {
 }
 
 type Agent struct {
-	Name            string    `json:"name"`
+	ID              string    `json:"id"`
 	Harness         string    `json:"harness"`
 	Host            string    `json:"host"`
 	Session         string    `json:"session"`
@@ -41,7 +41,9 @@ type Agent struct {
 	LandlineDate    string    `json:"landline_date,omitempty"`
 	Model           string    `json:"model,omitempty"`
 	Effort          string    `json:"effort,omitempty"`
-	Label           string    `json:"label,omitempty"`
+	Project         string    `json:"project,omitempty"`
+	Task            string    `json:"task,omitempty"`
+	TaskAt          time.Time `json:"task_at,omitzero"`
 }
 
 type Envelope struct {

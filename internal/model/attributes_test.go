@@ -3,6 +3,7 @@ package model
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -12,8 +13,8 @@ const (
 
 func TestAttributesShowTheShortCommitAndTheDateAfterTheLandlineVersion(t *testing.T) {
 	t.Parallel()
-	info := AgentInfo{Label: "lead", LandlineVersion: "0.1.0", LandlineCommit: testCommit, LandlineDate: testDate}
-	want := "label: lead  landline: 0.1.0  commit: 0123456  built: " + testDate
+	info := AgentInfo{Project: "lead", LandlineVersion: "0.1.0", LandlineCommit: testCommit, LandlineDate: testDate}
+	want := "project: lead  landline: 0.1.0  commit: 0123456  built: " + testDate
 	if got := info.Attributes(); got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -79,6 +80,47 @@ func TestAttributesNeverLetACommitOrADateBreakTheLine(t *testing.T) {
 	t.Parallel()
 	got := AgentInfo{LandlineCommit: "ab\ncdefgh", LandlineDate: "x\u2028y"}.Attributes()
 	if strings.ContainsAny(got, "\n\r\u2028") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestAttributesShowTheProjectThenTheTaskThenTheFolderAndTheRest(t *testing.T) {
+	t.Parallel()
+	info := AgentInfo{
+		ID: "a3f9", Project: "landline", Task: "menu bar app for ADR 0140", Folder: "landline-wt", Branch: "main", Worktree: "wt-2",
+		Model: "opus", Effort: "high", HarnessVersion: "2.1.296", LandlineVersion: "0.1.0", LandlineCommit: testCommit, LandlineDate: testDate,
+	}
+	want := "project: landline  task: menu bar app for ADR 0140  folder: landline-wt  branch: main  worktree: wt-2  model: opus  effort: high  version: 2.1.296  landline: 0.1.0  commit: 0123456  built: " + testDate
+	if got := info.Attributes(); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestAttributesLeaveOutAnEmptyTaskAndAnEmptyProject(t *testing.T) {
+	t.Parallel()
+	if got := (AgentInfo{Task: "ship it"}).Attributes(); got != "task: ship it" {
+		t.Fatalf("task alone: %q", got)
+	}
+	if got := (AgentInfo{Project: "landline", Folder: "f"}).Attributes(); got != "project: landline  folder: f" {
+		t.Fatalf("project and folder: %q", got)
+	}
+	if got := (AgentInfo{ID: "a3f9", Harness: "codex"}).Attributes(); got != "" {
+		t.Fatalf("neither: %q", got)
+	}
+}
+
+func TestAttributesNeverSayLabelOrNameOrHandleAndNeverShowTheIDOrTheTaskTime(t *testing.T) {
+	t.Parallel()
+	got := AgentInfo{ID: "a3f9", Project: "p", Task: "t", TaskAt: time.Date(2026, 11, 16, 9, 30, 15, 0, time.UTC)}.Attributes()
+	if got != "project: p  task: t" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestAttributesNeverLetAProjectOrATaskBreakTheLine(t *testing.T) {
+	t.Parallel()
+	got := AgentInfo{Project: "a\nb c", Task: "x\r\ny‮z\x00"}.Attributes()
+	if strings.ContainsAny(got, "\n\r ‮\x00") || !strings.HasPrefix(got, "project: a b c  task: x  y z") {
 		t.Fatalf("got %q", got)
 	}
 }

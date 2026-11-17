@@ -9,7 +9,7 @@ import (
 func TestLandlineAgentsTextAndJSONKeepTheWordsConnectedAndDisconnectedAndShowNoShapeOrOtherWord(t *testing.T) {
 	w := start(t)
 	w.register("bravo")
-	live := w.selfRegisteredWithLabel("a-x", "")
+	live := w.selfRegisteredWithProject("a-x", "")
 	text := runBin(t, w.bin, w.env, "agents")
 	if text.code != 0 || text.stderr != "" {
 		t.Fatalf("%+v", text)
@@ -39,7 +39,7 @@ func TestLandlineAgentsTextAndJSONKeepTheWordsConnectedAndDisconnectedAndShowNoS
 	}
 	got := map[string]any{}
 	for _, entry := range snapshot.Agents {
-		got[entry["handle"].(string)] = entry["state"]
+		got[entry["id"].(string)] = entry["state"]
 	}
 	if got["bravo"] != "disconnected" || got[live] != "connected" || len(got) != 2 {
 		t.Errorf("the JSON states are %v", got)

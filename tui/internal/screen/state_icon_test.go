@@ -46,13 +46,13 @@ func TestEachShapeIsCountedAsOneCell(t *testing.T) {
 
 func TestTheFirstColumnIsABlankHeaderCellThenTheGapThenTheHandleAndTheRowsStartWithTheirShape(t *testing.T) {
 	lines := viewAt(sample, 200, 20)
-	if !strings.HasPrefix(lines[0], "   HANDLE") {
-		t.Errorf("the header is %q, want a blank cell, the gap of 2, then HANDLE", lines[0])
+	if !strings.HasPrefix(lines[0], "  ID") {
+		t.Errorf("the header is %q, want a blank one-cell cell, one space, then ID", lines[0])
 	}
 	if strings.Contains(lines[0], "STATE") {
 		t.Errorf("the header still has STATE: %q", lines[0])
 	}
-	if !strings.HasPrefix(lines[1], connectedShape+"  alpha") || !strings.HasPrefix(lines[2], disconnectedShape+"  bravo") {
+	if !strings.HasPrefix(lines[1], connectedShape+" alpha") || !strings.HasPrefix(lines[2], disconnectedShape+" bravo") {
 		t.Errorf("the rows are %q and %q", lines[1], lines[2])
 	}
 }
@@ -80,28 +80,33 @@ func TestRowsNeverSayConnectedOrDisconnectedAndOnlyTheLegendDoes(t *testing.T) {
 
 func TestTheColumnsDropInTheOldOrderWithNoStateColumnAtTheNewBreakpoints(t *testing.T) {
 	want := map[int]string{
-		28:  "HANDLE LABEL",
-		42:  "HANDLE LABEL HARNESS",
-		53:  "HANDLE LABEL HARNESS LANDLINE",
-		83:  "HANDLE LABEL HARNESS LANDLINE FOLDER",
-		107: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH",
-		127: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL",
-		136: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT",
-		150: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT",
-		151: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
-		240: "HANDLE LABEL HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
+		27:  "ID PROJECT",
+		36:  "ID PROJECT",
+		37:  "ID PROJECT TASK",
+		53:  "ID PROJECT TASK",
+		60:  "ID PROJECT TASK",
+		61:  "ID PROJECT TASK HARNESS",
+		67:  "ID PROJECT TASK HARNESS",
+		78:  "ID PROJECT TASK HARNESS LANDLINE",
+		108: "ID PROJECT TASK HARNESS LANDLINE FOLDER",
+		132: "ID PROJECT TASK HARNESS LANDLINE FOLDER BRANCH",
+		152: "ID PROJECT TASK HARNESS LANDLINE FOLDER BRANCH MODEL",
+		161: "ID PROJECT TASK HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT",
+		175: "ID PROJECT TASK HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT",
+		176: "ID PROJECT TASK HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
+		240: "ID PROJECT TASK HARNESS LANDLINE FOLDER BRANCH MODEL EFFORT COMMIT",
 	}
 	for width, titles := range want {
-		got := strings.Join(headerTitles(rendered(shortAgents(3), width)), " ")
-		if got != titles {
+		got := headerTitles(rendered(shortAgents(3), width))
+		if !sameColumns(got, strings.Fields(titles)) {
 			t.Errorf("width %d: got %q want %q", width, got, titles)
 		}
 	}
 }
 
 func TestTheShapeStaysAndTheHandleIsCutAtEveryNarrowWidth(t *testing.T) {
-	agents := []hubclient.Agent{{Name: "amber-falcon-5fe1", Harness: "claude", Host: "mac", Connected: true}}
-	for width := 1; width <= 4; width++ {
+	agents := []hubclient.Agent{{ID: "amber-falcon-5fe1", Harness: "claude", Host: "mac", Connected: true}}
+	for width := 1; width <= 3; width++ {
 		lines := viewAt(agents, width, 20)
 		rows := rowLines(lines)
 		if len(rows) != 1 {
@@ -109,7 +114,7 @@ func TestTheShapeStaysAndTheHandleIsCutAtEveryNarrowWidth(t *testing.T) {
 		}
 		for _, r := range rows[0] {
 			if unicode.IsLetter(r) || unicode.IsDigit(r) {
-				t.Errorf("width %d: part of the handle shows in %q", width, rows[0])
+				t.Errorf("width %d: part of the id shows in %q", width, rows[0])
 			}
 		}
 		for _, l := range lines {
@@ -121,7 +126,7 @@ func TestTheShapeStaysAndTheHandleIsCutAtEveryNarrowWidth(t *testing.T) {
 	for width := 5; width <= 12; width++ {
 		rows := rowLines(viewAt(agents, width, 20))
 		tailMissing := width >= 8 && !strings.HasSuffix(strings.TrimRight(rows[0], " "), "5fe1")
-		if len(rows) != 1 || !strings.HasPrefix(rows[0], connectedShape+"  ") || tailMissing {
+		if len(rows) != 1 || !strings.HasPrefix(rows[0], connectedShape+" ") || tailMissing {
 			t.Errorf("width %d: the row is %v", width, rows)
 		}
 		if len(rows) == 1 && ansi.StringWidth(rows[0]) > width {
@@ -140,8 +145,8 @@ func TestTheLegendIsTheLastBodyLineAboveTheStatusAndBelowTheSpacer(t *testing.T)
 
 func TestTheLegendNamesBothStatesWhicheverAreInTheRows(t *testing.T) {
 	for name, agents := range map[string][]hubclient.Agent{
-		"only connected":    {{Name: "alpha", Harness: "claude", Host: "mac", Connected: true}},
-		"only disconnected": {{Name: "bravo", Harness: "claude", Host: "mac"}},
+		"only connected":    {{ID: "alpha", Harness: "claude", Host: "mac", Connected: true}},
+		"only disconnected": {{ID: "bravo", Harness: "claude", Host: "mac"}},
 	} {
 		lines := viewAt(agents, 100, 100)
 		if lines[len(lines)-3] != legendText {
@@ -166,7 +171,7 @@ func TestTheLegendShowsOnlyWhenTheTableShowsRows(t *testing.T) {
 }
 
 func TestAShortWindowDropsTheLegendThenTheSpacerThenTheKeyLineAndKeepsTheStatusLongest(t *testing.T) {
-	one := []hubclient.Agent{{Name: "alpha", Harness: "claude", Host: "mac", Connected: true}}
+	one := []hubclient.Agent{{ID: "alpha", Harness: "claude", Host: "mac", Connected: true}}
 	status := "switchboard http://hub:1"
 	cases := map[int]struct {
 		lines  int
@@ -208,7 +213,7 @@ func TestTheLegendIsNotARowAndTheMoreCountDoesNotCountIt(t *testing.T) {
 	if len(lines) != 8 {
 		t.Fatalf("%d lines:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if !strings.HasPrefix(lines[0], "   HANDLE") || !strings.HasPrefix(lines[1], connectedShape+"  agent00") || !strings.HasPrefix(lines[2], connectedShape+"  agent01") {
+	if !strings.HasPrefix(lines[0], "  ID") || !strings.HasPrefix(lines[1], connectedShape+" agent00") || !strings.HasPrefix(lines[2], connectedShape+" agent01") {
 		t.Errorf("the table is %q", lines[:3])
 	}
 	if lines[3] != "+28 more" {
@@ -263,7 +268,7 @@ func TestUnderTheAnsiProfileTheConnectedShapeIsGreenAndTheDisconnectedShapeIsFai
 
 func capFixture() []hubclient.Agent {
 	return []hubclient.Agent{{
-		Name: "agent00", Harness: strings.Repeat("h", 12), Host: "mac", Connected: true, Label: strings.Repeat("l", 16),
+		ID: "agent00", Harness: strings.Repeat("h", 12), Host: "mac", Connected: true, Project: strings.Repeat("l", 16), Task: strings.Repeat("t", 24),
 		LandlineVersion: strings.Repeat("v", 9), Folder: strings.Repeat("f", 28), Branch: strings.Repeat("b", 22),
 		Model: strings.Repeat("m", 18), Effort: strings.Repeat("e", 7), LandlineCommit: "0123456789abcdef0123456789abcdef01234567",
 	}}
@@ -274,8 +279,8 @@ func TestEachColumnShowsItsFullValueAtItsBreakpointAndIsCutOneCellBelow(t *testi
 		width int
 		value string
 	}{
-		{28, strings.Repeat("l", 16)}, {42, strings.Repeat("h", 12)}, {53, strings.Repeat("v", 9)}, {83, strings.Repeat("f", 28)},
-		{107, strings.Repeat("b", 22)}, {127, strings.Repeat("m", 18)}, {136, strings.Repeat("e", 7)},
+		{27, strings.Repeat("l", 16)}, {53, strings.Repeat("t", 24)}, {67, strings.Repeat("h", 12)}, {78, strings.Repeat("v", 9)},
+		{108, strings.Repeat("f", 28)}, {132, strings.Repeat("b", 22)}, {152, strings.Repeat("m", 18)}, {161, strings.Repeat("e", 7)},
 	}
 	for _, c := range cases {
 		at := strings.Join(rowLines(viewAt(capFixture(), c.width, 20)), "\n")
@@ -289,31 +294,31 @@ func TestEachColumnShowsItsFullValueAtItsBreakpointAndIsCutOneCellBelow(t *testi
 	}
 }
 
-func TestTheCommitColumnIsAbsentAtOneHundredFiftyAndPresentAtOneHundredFiftyOne(t *testing.T) {
-	if titles := headerTitles(viewAt(capFixture(), 150, 20)[0] + "\n"); strings.Contains(strings.Join(titles, " "), "COMMIT") {
-		t.Errorf("COMMIT shows at 150: %v", titles)
+func TestTheCommitColumnIsAbsentAtOneHundredSeventyFiveAndPresentAtOneHundredSeventySix(t *testing.T) {
+	if titles := headerTitles(viewAt(capFixture(), 175, 20)[0] + "\n"); strings.Contains(strings.Join(titles, " "), "COMMIT") {
+		t.Errorf("COMMIT shows at 175: %v", titles)
 	}
-	if titles := headerTitles(viewAt(capFixture(), 151, 20)[0] + "\n"); !strings.Contains(strings.Join(titles, " "), "COMMIT") {
-		t.Errorf("COMMIT is missing at 151: %v", titles)
+	if titles := headerTitles(viewAt(capFixture(), 176, 20)[0] + "\n"); !strings.Contains(strings.Join(titles, " "), "COMMIT") {
+		t.Errorf("COMMIT is missing at 176: %v", titles)
 	}
 }
 
-func TestTheLabelColumnAppearsCutFromWidthEighteenAndNotBefore(t *testing.T) {
-	label := "a-label-longer-than-sixteen"
-	agents := []hubclient.Agent{{Name: "agent00", Harness: "claude", Host: "mac", Connected: true, Label: label}}
-	for width := 10; width <= 17; width++ {
-		if titles := headerTitles(strings.Join(viewAt(agents, width, 20), "\n")); strings.Join(titles, " ") != "HANDLE" {
-			t.Errorf("width %d shows %v, want the handle alone", width, titles)
+func TestTheProjectColumnAppearsCutFromWidthSeventeenAndNotBefore(t *testing.T) {
+	project := "a-project-longer-than-sixteen"
+	agents := []hubclient.Agent{{ID: "agent00", Harness: "claude", Host: "mac", Connected: true, Project: project}}
+	for width := 10; width <= 16; width++ {
+		if titles := headerTitles(strings.Join(viewAt(agents, width, 20), "\n")); strings.Join(titles, " ") != "ID" {
+			t.Errorf("width %d shows %v, want the id alone", width, titles)
 		}
 	}
-	for width := 18; width <= 27; width++ {
+	for width := 17; width <= 27; width++ {
 		lines := viewAt(agents, width, 20)
-		if titles := strings.Join(headerTitles(strings.Join(lines, "\n")), " "); titles != "HANDLE LABEL" {
+		if titles := headerTitles(strings.Join(lines, "\n")); !sameColumns(titles, []string{"ID", "PROJECT"}) {
 			t.Errorf("width %d shows %q", width, titles)
 		}
-		want := ansi.Truncate(label, width-12, "…")
+		want := ansi.Truncate(project, width-11, "…")
 		if !strings.Contains(rowLines(lines)[0], want) {
-			t.Errorf("width %d: the row %q lacks the label cut to %q", width, rowLines(lines)[0], want)
+			t.Errorf("width %d: the row %q lacks the project cut to %q", width, rowLines(lines)[0], want)
 		}
 	}
 }

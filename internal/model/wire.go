@@ -6,7 +6,7 @@ import (
 )
 
 type RegisterRequest struct {
-	Name            string `json:"name"`
+	ID              string `json:"id"`
 	Seed            string `json:"seed,omitempty"`
 	Harness         string `json:"harness"`
 	Host            string `json:"host"`
@@ -20,27 +20,37 @@ type RegisterRequest struct {
 	LandlineDate    string `json:"landline_date,omitempty"`
 	Model           string `json:"model,omitempty"`
 	Effort          string `json:"effort,omitempty"`
-	Label           string `json:"label,omitempty"`
+	Project         string `json:"project,omitempty"`
 }
 
 type RegisterResponse struct {
-	Name  string `json:"name"`
+	ID    string `json:"id"`
 	Token string `json:"token"`
 }
 
 type AttachRequest struct {
 	Model       string `json:"model,omitempty"`
 	Effort      string `json:"effort,omitempty"`
-	Label       string `json:"label,omitempty"`
+	Project     string `json:"project,omitempty"`
 	CodexThread string `json:"codex_thread,omitempty"`
 	Code        string `json:"code,omitempty"`
 }
 
 type AttachResponse struct {
-	Name      string   `json:"name"`
-	Updated   []string `json:"updated"`
-	Challenge bool     `json:"challenge"`
-	Attached  bool     `json:"attached"`
+	ID           string   `json:"id"`
+	Updated      []string `json:"updated"`
+	Challenge    bool     `json:"challenge"`
+	Attached     bool     `json:"attached"`
+	ProjectPeers int      `json:"project_peers"`
+}
+
+type StatusRequest struct {
+	Task string `json:"task"`
+}
+
+type StatusResponse struct {
+	Task   string    `json:"task"`
+	TaskAt time.Time `json:"task_at,omitzero"`
 }
 
 type SendBody struct {
@@ -72,7 +82,7 @@ type WireEnvelope struct {
 }
 
 type AgentInfo struct {
-	Name            string    `json:"name"`
+	ID              string    `json:"id"`
 	Harness         string    `json:"harness"`
 	Host            string    `json:"host"`
 	Session         string    `json:"session"`
@@ -87,7 +97,9 @@ type AgentInfo struct {
 	LandlineDate    string    `json:"landline_date,omitempty"`
 	Model           string    `json:"model,omitempty"`
 	Effort          string    `json:"effort,omitempty"`
-	Label           string    `json:"label,omitempty"`
+	Project         string    `json:"project,omitempty"`
+	Task            string    `json:"task,omitempty"`
+	TaskAt          time.Time `json:"task_at,omitzero"`
 }
 
 type ErrorResponse struct {
@@ -117,7 +129,7 @@ type DeliveryReport struct {
 func (a AgentInfo) Attributes() string {
 	parts := []string{}
 	for _, each := range []struct{ name, value string }{
-		{"label", a.Label}, {"folder", a.Folder}, {"branch", a.Branch}, {"worktree", a.Worktree},
+		{"project", a.Project}, {"task", a.Task}, {"folder", a.Folder}, {"branch", a.Branch}, {"worktree", a.Worktree},
 		{"model", a.Model}, {"effort", a.Effort}, {"version", a.HarnessVersion}, {"landline", a.LandlineVersion},
 		{"commit", shortCommit(a.LandlineCommit)}, {"built", a.LandlineDate},
 	} {

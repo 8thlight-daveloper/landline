@@ -64,7 +64,7 @@ func (w *world) observerAgents(token string) []map[string]any {
 
 func entryNamed(listed []map[string]any, name string) map[string]any {
 	for _, entry := range listed {
-		if entry["name"] == name {
+		if entry["id"] == name {
 			return entry
 		}
 	}
@@ -83,15 +83,15 @@ func absent(t *testing.T, entry map[string]any, keys ...string) {
 func TestACleanStampedBuildRegistersItsExactCommitAndDateInTheWireListAndTheCliAndToolTextShowTheShortCommitAndTheDateInOrder(t *testing.T) {
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
-	_, handle := w.selfRegistered("demo-folder", "claude-code")
-	entry := w.agentJSON(handle)
+	_, agentID := w.selfRegistered("demo-folder", "claude-code")
+	entry := w.agentJSON(agentID)
 	if entry["landline_commit"] != stampCommit || entry["landline_date"] != stampDate || entry["landline_version"] != "0.1.0" {
 		t.Fatalf("wire entry: %v", entry)
 	}
 	if !commitForm.MatchString(entry["landline_commit"].(string)) || !dateForm.MatchString(entry["landline_date"].(string)) {
 		t.Fatalf("shapes: %v", entry)
 	}
-	line := w.agentLine(handle)
+	line := w.agentLine(agentID)
 	want := "landline: 0.1.0  commit: " + stampShort + "  built: " + stampDate
 	if !strings.Contains(line, want) {
 		t.Fatalf("the CLI line lacks %q:\n%s", want, line)
@@ -116,13 +116,13 @@ func TestACleanStampedBuildRegistersItsExactCommitAndDateInTheWireListAndTheCliA
 func TestADirtyStampedBuildRegistersTheDirtyCommitAndNoDateAndShowsTheShortDirtyForm(t *testing.T) {
 	bin := buildStamped(t, "0.1.0", stampCommit+"-dirty", "")
 	w := startHub(t, bin, t.TempDir(), "")
-	_, handle := w.selfRegistered("demo-folder", "claude-code")
-	entry := w.agentJSON(handle)
+	_, agentID := w.selfRegistered("demo-folder", "claude-code")
+	entry := w.agentJSON(agentID)
 	if entry["landline_commit"] != stampCommit+"-dirty" || !commitForm.MatchString(entry["landline_commit"].(string)) {
 		t.Fatalf("wire entry: %v", entry)
 	}
 	absent(t, entry, "landline_date")
-	line := w.agentLine(handle)
+	line := w.agentLine(agentID)
 	if !strings.Contains(line, "landline: 0.1.0  commit: "+stampShort+"-dirty") || strings.Contains(line, "built:") || strings.Contains(line, stampCommit) {
 		t.Fatalf("the CLI line:\n%s", line)
 	}
@@ -141,13 +141,13 @@ func TestAPlainBuildShowsDevAndNoCommitOrDateAnywhere(t *testing.T) {
 		}
 	}
 	w := startHub(t, bin, t.TempDir(), "")
-	_, handle := w.selfRegistered("demo-folder", "claude-code")
-	entry := w.agentJSON(handle)
+	_, agentID := w.selfRegistered("demo-folder", "claude-code")
+	entry := w.agentJSON(agentID)
 	if entry["landline_version"] != "dev" {
 		t.Fatalf("wire entry: %v", entry)
 	}
 	absent(t, entry, "landline_commit", "landline_date")
-	if line := w.agentLine(handle); !strings.Contains(line, "landline: dev") || strings.Contains(line, "commit:") || strings.Contains(line, "built:") {
+	if line := w.agentLine(agentID); !strings.Contains(line, "landline: dev") || strings.Contains(line, "commit:") || strings.Contains(line, "built:") {
 		t.Fatalf("the CLI line:\n%s", line)
 	}
 	reader := w.startMCP(t.TempDir())
@@ -213,13 +213,13 @@ func TestNoFlagEnvironmentVariableOrRegisterArgumentOverridesTheBuildCommitOrDat
 	forged = append(forged, "LANDLINE_COMMIT=forged", "LANDLINE_DATE=forged", "LANDLINE_LANDLINE_COMMIT=forged", "LANDLINE_LANDLINE_DATE=forged", "LANDLINE_VERSION=forged")
 	dir := filepath.Join(t.TempDir(), "demo-folder")
 	os.MkdirAll(dir, 0o755)
-	p := w.startMCPWith(forged, dir, "--label", "lead")
+	p := w.startMCPWith(forged, dir, "--project", "lead")
 	p.handshake("claude-code", "1.0.0")
-	p.request("tools/call", `{"name":"landline_register","arguments":{"label":"lead","landline_commit":"forged","landline_date":"forged","commit":"forged","date":"forged"}}`)
+	p.request("tools/call", `{"name":"landline_register","arguments":{"project":"lead","landline_commit":"forged","landline_date":"forged","commit":"forged","date":"forged"}}`)
 	p.tool("landline_agents", `{}`)
 	eventually(t, "the agent to be listed", func() bool {
 		for _, entry := range w.agentsJSON() {
-			if entry["label"] == "lead" {
+			if entry["project"] == "lead" {
 				return true
 			}
 		}
@@ -227,7 +227,7 @@ func TestNoFlagEnvironmentVariableOrRegisterArgumentOverridesTheBuildCommitOrDat
 	})
 	var entry map[string]any
 	for _, each := range w.agentsJSON() {
-		if each["label"] == "lead" {
+		if each["project"] == "lead" {
 			entry = each
 		}
 	}
@@ -241,19 +241,19 @@ func TestNoFlagEnvironmentVariableOrRegisterArgumentOverridesTheBuildCommitOrDat
 	os.MkdirAll(plainDir, 0o755)
 	q := plain.startMCPWith(leaked, plainDir)
 	q.handshake("claude-code", "1.0.0")
-	q.request("tools/call", `{"name":"landline_register","arguments":{"label":"plain","landline_commit":"forged","landline_date":"forged","commit":"forged","date":"forged"}}`)
+	q.request("tools/call", `{"name":"landline_register","arguments":{"project":"plain","landline_commit":"forged","landline_date":"forged","commit":"forged","date":"forged"}}`)
 	q.tool("landline_agents", `{}`)
-	var plainHandle string
+	var plainID string
 	eventually(t, "the plain agent to be listed", func() bool {
 		for _, entry := range plain.agentsJSON() {
 			if entry["folder"] == "plain-folder" {
-				plainHandle, _ = entry["name"].(string)
+				plainID, _ = entry["id"].(string)
 				return true
 			}
 		}
 		return false
 	})
-	absent(t, plain.agentJSON(plainHandle), "landline_commit", "landline_date")
+	absent(t, plain.agentJSON(plainID), "landline_commit", "landline_date")
 	for name, args := range map[string][]string{
 		"--landline-commit": {"--landline-commit", "forged"},
 		"--commit":          {"--commit", "forged"},
@@ -274,7 +274,7 @@ func TestNoFlagEnvironmentVariableOrRegisterArgumentOverridesTheBuildCommitOrDat
 
 func TestABadCommitOrDateOverRawHTTPAnswers400AndLeavesTheListUnchangedAndAGoodOneIsAccepted(t *testing.T) {
 	w := start(t)
-	good := map[string]string{"name": "alpha", "harness": "codex", "host": "mac", "landline_commit": stampCommit, "landline_date": stampDate}
+	good := map[string]string{"id": "alpha", "harness": "codex", "host": "mac", "landline_commit": stampCommit, "landline_date": stampDate}
 	if status, body := w.post("/v1/register", secret, good); status != http.StatusOK {
 		t.Fatalf("a good registration: %d %s", status, body)
 	}
@@ -287,8 +287,8 @@ func TestABadCommitOrDateOverRawHTTPAnswers400AndLeavesTheListUnchangedAndAGoodO
 	for _, field := range []string{"landline_commit", "landline_date"} {
 		for _, value := range bad {
 			for _, form := range []map[string]string{
-				{"name": "alpha", "harness": "codex", "host": "mac", field: value},
-				{"name": "bravo", "harness": "codex", "host": "mac", field: value},
+				{"id": "alpha", "harness": "codex", "host": "mac", field: value},
+				{"id": "bravo", "harness": "codex", "host": "mac", field: value},
 				{"seed": "charlie", "harness": "codex", "host": "mac", field: value},
 			} {
 				if status, body := w.post("/v1/register", secret, form); status != http.StatusBadRequest {
@@ -301,7 +301,7 @@ func TestABadCommitOrDateOverRawHTTPAnswers400AndLeavesTheListUnchangedAndAGoodO
 		}
 	}
 	for _, field := range []string{"landline_commit", "landline_date"} {
-		edge := map[string]string{"name": "delta", "harness": "codex", "host": "mac", field: strings.Repeat("e", 64)}
+		edge := map[string]string{"id": "delta", "harness": "codex", "host": "mac", field: strings.Repeat("e", 64)}
 		if status, body := w.post("/v1/register", secret, edge); status != http.StatusOK {
 			t.Errorf("a %s of exactly 64 bytes: %d %s", field, status, body)
 		}
@@ -348,7 +348,7 @@ func TestAnMCPProcessBuiltWithABadCommitOrDateGetsTheHubsErrorFromTheLandlineReg
 			os.MkdirAll(dir, 0o755)
 			p := w.startMCP(dir)
 			p.handshake("claude-code", "1.0.0")
-			reply, _ := json.Marshal(p.request("tools/call", `{"name":"landline_register","arguments":{"label":"lead"}}`))
+			reply, _ := json.Marshal(p.request("tools/call", `{"name":"landline_register","arguments":{"project":"lead"}}`))
 			if !strings.Contains(string(reply), "printable characters") || strings.Contains(string(reply), "you are ") {
 				t.Fatalf("the register call did not return the hub's error: %s", reply)
 			}
@@ -364,7 +364,7 @@ func TestARegistrationByNameReplacesTheCommitAndTheDateAndAnEmptyValueClearsThem
 	observer := w.registerObserver("tui")
 	register := func(fields map[string]string) {
 		t.Helper()
-		body := map[string]string{"name": "alpha", "harness": "codex", "host": "mac"}
+		body := map[string]string{"id": "alpha", "harness": "codex", "host": "mac"}
 		for key, value := range fields {
 			body[key] = value
 		}
@@ -399,7 +399,7 @@ func TestARegistrationByNameReplacesTheCommitAndTheDateAndAnEmptyValueClearsThem
 	}
 	workers := 0
 	for _, each := range w.observerAgents(observer) {
-		if name, _ := each["name"].(string); strings.HasPrefix(name, "worker-") {
+		if id, _ := each["id"].(string); fourHex.MatchString(id) {
 			workers++
 			if each["landline_commit"] != stampCommit || each["landline_date"] != stampDate {
 				t.Errorf("seed entry: %v", each)
@@ -407,7 +407,7 @@ func TestARegistrationByNameReplacesTheCommitAndTheDateAndAnEmptyValueClearsThem
 		}
 	}
 	if workers != 2 {
-		t.Fatalf("two seed registrations left %d agents", workers)
+		t.Fatalf("two seed registrations left %d agents with an id of 4 hex characters", workers)
 	}
 }
 
@@ -436,7 +436,7 @@ func TestLandlineAgentsJSONCarriesTheExactCommitAndDateAndOmitsThemForAnAgentWit
 	}
 	var row, hand map[string]any
 	for _, each := range snapshot.Agents {
-		switch each["handle"] {
+		switch each["id"] {
 		case stamped:
 			row = each
 		case "alpha":
@@ -455,14 +455,14 @@ func TestLandlineAgentsJSONCarriesTheExactCommitAndDateAndOmitsThemForAnAgentWit
 func TestLandlineAgentsJSONCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
 	bin := buildStamped(t, "0.1.0", stampCommit+"-dirty", "")
 	w := startHub(t, bin, t.TempDir(), "")
-	_, handle := w.selfRegistered("stamped-folder", "claude-code")
+	_, agentID := w.selfRegistered("stamped-folder", "claude-code")
 	result := runBin(t, bin, w.env, "agents", "--json")
 	var snapshot struct{ Agents []map[string]any }
 	if result.code != 0 || json.Unmarshal([]byte(result.stdout), &snapshot) != nil {
 		t.Fatalf("exit %d: %s", result.code, result.stdout)
 	}
 	for _, each := range snapshot.Agents {
-		if each["handle"] == handle {
+		if each["id"] == agentID {
 			if each[stampTUIKey] != stampCommit+"-dirty" {
 				t.Fatalf("row: %v", each)
 			}
@@ -470,13 +470,13 @@ func TestLandlineAgentsJSONCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("no row for %s in %v", handle, snapshot.Agents)
+	t.Fatalf("no row for %s in %v", agentID, snapshot.Agents)
 }
 
 func TestLandlineAgentsTextShowsTheShortCommitAndTheDateInTheAttributeFieldOfTheRow(t *testing.T) {
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
-	_, handle := w.selfRegistered("stamped-folder", "claude-code")
+	_, agentID := w.selfRegistered("stamped-folder", "claude-code")
 	w.register("alpha")
 	result := runBin(t, bin, w.env, "agents")
 	if result.code != 0 || result.stderr != "" {
@@ -484,7 +484,7 @@ func TestLandlineAgentsTextShowsTheShortCommitAndTheDateInTheAttributeFieldOfThe
 	}
 	var fields []string
 	for _, line := range strings.Split(result.stdout, "\n") {
-		if strings.HasPrefix(line, handle+"\t") {
+		if strings.HasPrefix(line, agentID+"\t") {
 			fields = strings.Split(line, "\t")
 		}
 		if strings.HasPrefix(line, "alpha\t") && (strings.Contains(line, "commit:") || strings.Contains(line, "built:")) {
@@ -492,7 +492,7 @@ func TestLandlineAgentsTextShowsTheShortCommitAndTheDateInTheAttributeFieldOfThe
 		}
 	}
 	if len(fields) != 5 || fields[1] != "claude-code" || fields[3] != "connected" {
-		t.Fatalf("the row for %s: %q", handle, fields)
+		t.Fatalf("the row for %s: %q", agentID, fields)
 	}
 	if !strings.Contains(fields[4], "landline: 0.1.0  commit: "+stampShort+"  built: "+stampDate) || strings.Contains(result.stdout, stampCommit) {
 		t.Fatalf("the attribute field: %q", fields[4])

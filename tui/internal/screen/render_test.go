@@ -14,7 +14,7 @@ func longAgents() []hubclient.Agent {
 	out := []hubclient.Agent{}
 	for _, name := range []string{"amber-falcon-1", "amber-falcon-2"} {
 		out = append(out, hubclient.Agent{
-			Name: name, Harness: "claude", Host: "mac", Connected: true, Label: "review-" + long,
+			ID: name, Harness: "claude", Host: "mac", Connected: true, Project: "review-" + long,
 			LandlineVersion: "0.9.12", Folder: "/work/" + long, Branch: "feature/" + long, Model: "model-" + long, Effort: "high",
 		})
 	}
@@ -51,22 +51,22 @@ func TestNarrowTerminalsNeverPanicOrOverflowWithLongHandles(t *testing.T) {
 
 func TestWhenTheHandleFillsTheWidthTheShapeStaysAndNoOtherColumnShows(t *testing.T) {
 	m, _ := send(newModel(), snapshotMsg{agents: longAgents(), at: clock})
-	for _, width := range []int{24, 17} {
+	for _, width := range []int{23, 17} {
 		m, _ = send(m, tea.WindowSizeMsg{Width: width, Height: 20})
 		lines := strings.Split(m.View(), "\n")
 		rows := rowLines(lines)
-		if len(rows) != 2 || strings.TrimRight(rows[0], " ") != connectedShape+"  amber-falcon-1" || strings.Contains(lines[0], "LABEL") {
+		if len(rows) != 2 || strings.TrimRight(rows[0], " ") != connectedShape+" amber-falcon-1" || strings.Contains(lines[0], "PROJECT") {
 			t.Fatalf("width %d:\n%s", width, strings.Join(lines, "\n"))
 		}
 	}
 }
 
 func TestAHandleWiderThanTheScreenKeepsItsTail(t *testing.T) {
-	agents := []hubclient.Agent{{Name: "amber-falcon-5fe1", Harness: "claude", Host: "mac", Connected: true}}
+	agents := []hubclient.Agent{{ID: "amber-falcon-5fe1", Harness: "claude", Host: "mac", Connected: true}}
 	m, _ := send(newModel(), snapshotMsg{agents: agents, at: clock})
 	m, _ = send(m, tea.WindowSizeMsg{Width: 10, Height: 20})
 	view := m.View()
-	if strings.Contains(view, "amber") || rowLines(strings.Split(view, "\n"))[0] != connectedShape+"  …n-5fe1" {
+	if strings.Contains(view, "amber") || rowLines(strings.Split(view, "\n"))[0] != connectedShape+" …on-5fe1" {
 		t.Fatal(view)
 	}
 }
@@ -83,7 +83,7 @@ func TestAtLeastOneAgentRowShowsWhenTheHeightAllowsItAndTheMoreCountIsExact(t *t
 		rows := 0
 		more := -1
 		for _, l := range lines {
-			if strings.HasPrefix(l, connectedShape+"  agent") {
+			if strings.HasPrefix(l, connectedShape+" agent") {
 				rows++
 			}
 			if strings.HasPrefix(l, "+") {

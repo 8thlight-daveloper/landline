@@ -36,7 +36,7 @@ func exportedRows(t *testing.T, agents ...hubclient.Agent) []map[string]any {
 }
 
 func TestTheExportCarriesTheFullCommitAndTheDateUnderTheHubNames(t *testing.T) {
-	agent := decodedAgent(t, `{"name":"alpha","harness":"claude","host":"mac","connected":true,"landline_version":"0.1.0","landline_commit":"`+fullCommit+`","landline_date":"`+buildDate+`"}`)
+	agent := decodedAgent(t, `{"id":"alpha","harness":"claude","host":"mac","connected":true,"landline_version":"0.1.0","landline_commit":"`+fullCommit+`","landline_date":"`+buildDate+`"}`)
 	rows := exportedRows(t, agent)
 	if len(rows) != 1 || rows[0]["landline_commit"] != fullCommit || rows[0]["landline_date"] != buildDate || rows[0]["landline_version"] != "0.1.0" {
 		t.Fatalf("got %+v", rows)
@@ -44,7 +44,7 @@ func TestTheExportCarriesTheFullCommitAndTheDateUnderTheHubNames(t *testing.T) {
 }
 
 func TestTheExportCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
-	agent := decodedAgent(t, `{"name":"alpha","harness":"claude","host":"mac","landline_commit":"`+fullCommit+`-dirty"}`)
+	agent := decodedAgent(t, `{"id":"alpha","harness":"claude","host":"mac","landline_commit":"`+fullCommit+`-dirty"}`)
 	rows := exportedRows(t, agent)
 	if rows[0]["landline_commit"] != fullCommit+"-dirty" {
 		t.Fatalf("got %+v", rows[0])
@@ -55,7 +55,7 @@ func TestTheExportCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
 }
 
 func TestTheExportLeavesOutAnAbsentCommitAndDate(t *testing.T) {
-	rows := exportedRows(t, decodedAgent(t, `{"name":"alpha","harness":"claude","host":"mac"}`))
+	rows := exportedRows(t, decodedAgent(t, `{"id":"alpha","harness":"claude","host":"mac"}`))
 	for _, key := range []string{"landline_commit", "landline_date"} {
 		if _, present := rows[0][key]; present {
 			t.Errorf("%s is present: %+v", key, rows[0])
@@ -64,7 +64,7 @@ func TestTheExportLeavesOutAnAbsentCommitAndDate(t *testing.T) {
 }
 
 func TestTheExportStripsControlCharactersFromTheCommitAndTheDate(t *testing.T) {
-	agent := decodedAgent(t, `{"name":"alpha","harness":"claude","host":"mac","landline_commit":"ab\u001b[31mcd","landline_date":"x\u202ey"}`)
+	agent := decodedAgent(t, `{"id":"alpha","harness":"claude","host":"mac","landline_commit":"ab\u001b[31mcd","landline_date":"x\u202ey"}`)
 	raw, _ := json.Marshal(Build("http://hub", at, []hubclient.Agent{agent}))
 	if strings.Contains(string(raw), `\u001b`) || strings.Contains(string(raw), "\xe2\x80\xae") || strings.Contains(string(raw), `\u202e`) {
 		t.Fatalf("got %s", raw)

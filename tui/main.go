@@ -132,7 +132,7 @@ func agents(client *hubclient.Client, asJSON bool, stdout, stderr io.Writer) int
 func agentLines(view agentsview.View) string {
 	var out strings.Builder
 	for _, row := range view.Agents {
-		line := fmt.Sprintf("%s\t%s\t%s\t%s", command.Printable(row.Handle), command.Printable(row.Harness), command.Printable(row.Host), row.State)
+		line := fmt.Sprintf("%s\t%s\t%s\t%s", command.Printable(row.ID), command.Printable(row.Harness), command.Printable(row.Host), row.State)
 		if attributes := rootAgent(row).Attributes(); attributes != "" {
 			line += "\t" + command.Printable(attributes)
 		}
@@ -143,11 +143,16 @@ func agentLines(view agentsview.View) string {
 
 func rootAgent(row agentsview.Row) model.AgentInfo {
 	return model.AgentInfo{
-		Label: row.Label, Folder: row.Folder, Branch: row.Branch, Worktree: row.Worktree,
+		Project: row.Project, Task: row.Task, TaskAt: parsedTaskAt(row.TaskAt), Folder: row.Folder, Branch: row.Branch, Worktree: row.Worktree,
 		HarnessVersion: row.HarnessVersion, LandlineVersion: row.LandlineVersion,
 		LandlineCommit: row.LandlineCommit, LandlineDate: row.LandlineDate,
 		Model: row.Model, Effort: row.Effort,
 	}
+}
+
+func parsedTaskAt(text string) time.Time {
+	at, _ := time.Parse(time.RFC3339, text)
+	return at
 }
 
 func interactive(interval time.Duration, client *hubclient.Client, stderr io.Writer) int {

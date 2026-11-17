@@ -87,6 +87,11 @@ func (c *Client) Attach(req model.AttachRequest) (model.AttachResponse, error) {
 	return out, c.do("POST", "/v1/attach", req, &out)
 }
 
+func (c *Client) Status(req model.StatusRequest) (model.StatusResponse, error) {
+	var out model.StatusResponse
+	return out, c.do("POST", "/v1/status", req, &out)
+}
+
 func (c *Client) Send(body model.SendBody) (model.SendResponse, error) {
 	var out model.SendResponse
 	return out, c.do("POST", "/v1/send", body, &out)

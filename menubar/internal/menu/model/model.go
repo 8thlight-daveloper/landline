@@ -18,9 +18,6 @@ const (
 	unreachableLine = "Switchboard unreachable"
 	unknownBuild    = "Switchboard (build unknown)"
 	differsSuffix   = " (differs from this app)"
-
-	connectedShape    = "\u25cf"
-	disconnectedShape = "\u25cb"
 )
 
 type ActionKind int
@@ -110,7 +107,7 @@ func iconFor(in Input) Icon {
 
 func agentItem(row agentsview.Row) Item {
 	fields := []struct{ name, value string }{
-		{"Handle", row.Handle}, {"Harness", row.Harness}, {"Host", row.Host}, {"Model", row.Model},
+		{"ID", row.ID}, {"Project", row.Project}, {"Task", row.Task}, {"Harness", row.Harness}, {"Host", row.Host}, {"Model", row.Model},
 		{"Effort", row.Effort}, {"Folder", row.Folder}, {"Branch", row.Branch}, {"Landline version", row.LandlineVersion},
 	}
 	children := []Item{disabled("State: " + row.State)}
@@ -119,17 +116,10 @@ func agentItem(row agentsview.Row) Item {
 			children = append(children, disabled(field.name+": "+field.value))
 		}
 	}
-	children = append(children, separator(), action("Copy handle", Action{Kind: Copy, Text: row.Handle}))
-	item := parent(shape(row)+" "+row.Title(), children)
+	children = append(children, separator(), action("Copy id", Action{Kind: Copy, Text: row.ID}))
+	item := parent(row.Title(), children)
 	item.State = row.State
 	return item
-}
-
-func shape(row agentsview.Row) string {
-	if row.Connected() {
-		return connectedShape
-	}
-	return disconnectedShape
 }
 
 func switchboardItems(in Input) []Item {

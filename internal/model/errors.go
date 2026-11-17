@@ -3,7 +3,7 @@ package model
 import "errors"
 
 var (
-	ErrBadName          = errors.New("agent name must be 1 to 32 lowercase letters, digits, - or _, and not \"all\"")
+	ErrBadName          = errors.New("agent id must be 1 to 32 lowercase letters, digits, - or _, and not \"all\"")
 	ErrNoHarness        = errors.New("an agent must name its harness")
 	ErrUnknownSender    = errors.New("the sender is not a registered agent")
 	ErrUnknownRecipient = errors.New("the recipient is not a registered agent")

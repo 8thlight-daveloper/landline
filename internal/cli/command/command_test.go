@@ -37,8 +37,8 @@ func fakeHub(t *testing.T, seen *[]string) *httptest.Server {
 	mux.HandleFunc("/v1/register", func(w http.ResponseWriter, r *http.Request) {
 		var req model.RegisterRequest
 		json.NewDecoder(r.Body).Decode(&req)
-		*seen = append(*seen, "register "+req.Name+" "+req.Host+" "+r.Header.Get("Authorization"))
-		json.NewEncoder(w).Encode(model.RegisterResponse{Name: req.Name, Token: "tok-" + req.Name})
+		*seen = append(*seen, "register "+req.ID+" "+req.Host+" "+r.Header.Get("Authorization"))
+		json.NewEncoder(w).Encode(model.RegisterResponse{ID: req.ID, Token: "tok-" + req.ID})
 	})
 	mux.HandleFunc("/v1/send", func(w http.ResponseWriter, r *http.Request) {
 		var req model.SendBody
@@ -47,7 +47,7 @@ func fakeHub(t *testing.T, seen *[]string) *httptest.Server {
 		json.NewEncoder(w).Encode(model.SendResponse{ID: "m-1", Seq: 3, Recipients: []string{req.To}})
 	})
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "bravo", Harness: "codex", Host: "mac", Connected: true}, {Name: "alpha", Harness: "claude-code", Host: "linux", Connected: true}, {Name: "charlie", Harness: "codex", Host: "mac"}})
+		json.NewEncoder(w).Encode([]model.AgentInfo{{ID: "bravo", Harness: "codex", Host: "mac", Connected: true}, {ID: "alpha", Harness: "claude-code", Host: "linux", Connected: true}, {ID: "charlie", Harness: "codex", Host: "mac"}})
 	})
 	s := httptest.NewServer(mux)
 	t.Cleanup(s.Close)
@@ -59,7 +59,7 @@ func TestRegisterSavesAPrivateSessionAndSendUsesIt(t *testing.T) {
 	var seen []string
 	hub := fakeHub(t, &seen)
 	dir := t.TempDir()
-	if r := do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex"); r.code != 0 || !strings.Contains(r.out.String(), "registered alpha") {
+	if r := do(t, dir, hub.URL, "", "register", "--id", "alpha", "--harness", "codex"); r.code != 0 || !strings.Contains(r.out.String(), "registered alpha") {
 		t.Fatalf("register: %d %s %s", r.code, r.out.String(), r.err.String())
 	}
 	info, err := os.Stat(filepath.Join(dir, "session-alpha.json"))
@@ -83,7 +83,7 @@ func TestSendReadsTheBodyFromStandardInputForADash(t *testing.T) {
 	var seen []string
 	hub := fakeHub(t, &seen)
 	dir := t.TempDir()
-	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	do(t, dir, hub.URL, "", "register", "--id", "alpha", "--harness", "codex")
 	do(t, dir, hub.URL, "piped body", "send", "--as", "alpha", "--to", "bravo", "-")
 	if seen[1] != "send bravo piped body Bearer tok-alpha" {
 		t.Fatalf("seen %v", seen)
@@ -121,8 +121,8 @@ func TestMissingPiecesGiveClearErrors(t *testing.T) {
 	}{
 		{[]string{"send", "--to", "bravo", "x"}, "say who you are"},
 		{[]string{"send", "--as", "alpha", "--to", "bravo", "x"}, "no session here"},
-		{[]string{"send", "--as", "../etc", "--to", "bravo", "x"}, "bad agent name"},
-		{[]string{"register", "--name", "alpha", "--harness", "codex"}, "LANDLINE_URL"},
+		{[]string{"send", "--as", "../etc", "--to", "bravo", "x"}, "bad agent id"},
+		{[]string{"register", "--id", "alpha", "--harness", "codex"}, "LANDLINE_URL"},
 	} {
 		r := do(t, dir, "", "", c.args...)
 		if r.code != 1 || !strings.Contains(r.err.String(), c.want) {
@@ -141,16 +141,16 @@ func TestUnknownCommandsAndNoArgumentsShowUsage(t *testing.T) {
 	}
 }
 
-func TestRegisterRefusesAHubThatReturnsADifferentNameAndWritesNothing(t *testing.T) {
+func TestRegisterRefusesAHubThatReturnsADifferentIDAndWritesNothing(t *testing.T) {
 	t.Parallel()
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(model.RegisterResponse{Name: "../../../../victim/pwned", Token: "stolen"})
+		json.NewEncoder(w).Encode(model.RegisterResponse{ID: "../../../../victim/pwned", Token: "stolen"})
 	}))
 	defer hub.Close()
 	root := t.TempDir()
 	dir := filepath.Join(root, "a", "b", "config")
-	r := do(t, dir, hub.URL, "", "register", "--name", "innocent", "--harness", "codex")
-	if r.code != 1 || !strings.Contains(r.err.String(), "not the name that was asked for") {
+	r := do(t, dir, hub.URL, "", "register", "--id", "innocent", "--harness", "codex")
+	if r.code != 1 || !strings.Contains(r.err.String(), "not the id that was asked for") {
 		t.Fatalf("%d %q", r.code, r.err.String())
 	}
 	var found []string
@@ -172,7 +172,7 @@ func TestRegisterTightensAnExistingLooseSessionFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session-alpha.json")
 	os.WriteFile(path, []byte("{}"), 0o644)
-	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	do(t, dir, hub.URL, "", "register", "--id", "alpha", "--harness", "codex")
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", info.Mode().Perm())
 	}
@@ -197,16 +197,16 @@ func TestHubFieldsPrintedByLogSendAndAgentsCarryNoControlSequences(t *testing.T)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/register":
-			json.NewEncoder(w).Encode(model.RegisterResponse{Name: "alpha", Token: "t"})
+			json.NewEncoder(w).Encode(model.RegisterResponse{ID: "alpha", Token: "t"})
 		case "/v1/send":
 			json.NewEncoder(w).Encode(model.SendResponse{ID: evil, Seq: 1, Recipients: []string{evil}})
 		case "/v1/agents":
-			json.NewEncoder(w).Encode([]model.AgentInfo{{Name: "alpha", Harness: "h", Host: "m", Label: evil, Connected: true}})
+			json.NewEncoder(w).Encode([]model.AgentInfo{{ID: "alpha", Harness: "h", Host: "m", Project: evil, Connected: true}})
 		}
 	}))
 	defer hub.Close()
 	dir := t.TempDir()
-	do(t, dir, hub.URL, "", "register", "--name", "alpha", "--harness", "codex")
+	do(t, dir, hub.URL, "", "register", "--id", "alpha", "--harness", "codex")
 	for _, args := range [][]string{{"send", "--as", "alpha", "--to", "bravo", "hi"}} {
 		r := do(t, dir, hub.URL, "", args...)
 		if strings.ContainsAny(r.out.String(), "\x1b\x07") {

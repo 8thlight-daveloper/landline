@@ -28,11 +28,11 @@ func lonelyLandline(t *testing.T) (bin string, env []string, home string) {
 func TestLandlineAgentsTextIsOneTabSeparatedLinePerRowInTheScreensOrderAndMatchesTheJSONRows(t *testing.T) {
 	w := start(t)
 	w.register("tango")
-	w.registerLabelled("delta", "yankee")
-	w.registerLabelled("foxtrot", "bravo-l")
-	labelledLate := w.selfRegisteredWithLabel("a-x", "zed")
-	labelledEarly := w.selfRegisteredWithLabel("b-x", "amy")
-	plain := w.selfRegisteredWithLabel("c-x", "")
+	w.registerWithProject("delta", "yankee")
+	w.registerWithProject("foxtrot", "bravo-l")
+	projectedLate := w.selfRegisteredWithProject("a-x", "zed")
+	projectedEarly := w.selfRegisteredWithProject("b-x", "amy")
+	plain := w.selfRegisteredWithProject("c-x", "")
 	text := runBin(t, w.bin, w.env, "agents")
 	if text.code != 0 || text.stderr != "" {
 		t.Fatalf("%+v", text)
@@ -46,40 +46,40 @@ func TestLandlineAgentsTextIsOneTabSeparatedLinePerRowInTheScreensOrderAndMatche
 	if len(rows) != len(snapshot.Agents) || len(rows) != 6 {
 		t.Fatalf("%d lines for %d rows:\n%s", len(rows), len(snapshot.Agents), text.stdout)
 	}
-	var handles []string
+	var ids []string
 	for i, row := range rows {
 		fields := strings.Split(row, "\t")
 		if len(fields) < 4 || len(fields) > 5 {
 			t.Fatalf("the line %q has %d tab separated fields", row, len(fields))
 		}
 		entry := snapshot.Agents[i]
-		if fields[0] != entry["handle"] || fields[1] != entry["harness"] || fields[3] != entry["state"] {
+		if fields[0] != entry["id"] || fields[1] != entry["harness"] || fields[3] != entry["state"] {
 			t.Errorf("line %d %q does not match the row %v", i, row, entry)
 		}
 		if host, _ := entry["host"].(string); host != "" && fields[2] != host {
 			t.Errorf("line %d %q: the host is not %q", i, row, host)
 		}
-		handles = append(handles, fields[0])
+		ids = append(ids, fields[0])
 	}
 	want := expectedListOrder(listedAgentsOf(snapshot.Agents))
 	for i, agent := range want {
-		if handles[i] != agent.handle {
-			t.Fatalf("the order is %v, want %v", handles, want)
+		if ids[i] != agent.id {
+			t.Fatalf("the order is %v, want %v", ids, want)
 		}
 	}
-	connected := map[string]bool{labelledLate: true, labelledEarly: true, plain: true}
-	for i, handle := range handles {
-		if connected[handle] != (i < 3) {
-			t.Fatalf("connected agents are not first: %v", handles)
+	connected := map[string]bool{projectedLate: true, projectedEarly: true, plain: true}
+	for i, agentID := range ids {
+		if connected[agentID] != (i < 3) {
+			t.Fatalf("connected agents are not first: %v", ids)
 		}
 	}
-	for i, handle := range handles[:2] {
-		if handle != []string{labelledEarly, labelledLate}[i] {
-			t.Fatalf("labelled connected agents are not ordered by label: %v", handles)
+	for i, agentID := range ids[:2] {
+		if agentID != []string{projectedEarly, projectedLate}[i] {
+			t.Fatalf("connected agents with a project are not ordered by project: %v", ids)
 		}
 	}
-	if !strings.Contains(rows[0], "label: amy") {
-		t.Fatalf("the attribute text lacks the label: %q", rows[0])
+	if !strings.Contains(rows[0], "project: amy") {
+		t.Fatalf("the attribute text lacks the project: %q", rows[0])
 	}
 }
 
@@ -96,7 +96,7 @@ func TestLandlineAgentsReadsTheListWithAnObserverTokenAndRegistersNoAgentAndTake
 	}
 	for _, args := range [][]string{{"agents", "--as", "alpha"}, {"agents", "--json", "--as", "alpha"}} {
 		result := runBin(t, w.bin, w.env, args...)
-		if result.code == 0 || strings.Contains(result.stdout, "alpha\t") || strings.Contains(result.stdout, `"handle"`) {
+		if result.code == 0 || strings.Contains(result.stdout, "alpha\t") || strings.Contains(result.stdout, `"id"`) {
 			t.Errorf("%v: %+v", args, result)
 		}
 	}
@@ -270,8 +270,8 @@ func TestServerDownAndStatusIgnoreAPidInTheSwitchboardPidFileThatIsNotTheSwitchb
 
 func TestLandlineClaudePrintsTheChannelLaunchWithTheServerNamedLandline(t *testing.T) {
 	w := start(t)
-	result := runBin(t, w.bin, w.env, "claude", "--label", "lead", "--print")
-	if result.code != 0 || strings.TrimSpace(result.stdout) != "LANDLINE_LABEL=lead claude --dangerously-load-development-channels server:landline" {
+	result := runBin(t, w.bin, w.env, "claude", "--project", "lead", "--print")
+	if result.code != 0 || strings.TrimSpace(result.stdout) != "LANDLINE_PROJECT=lead claude --dangerously-load-development-channels server:landline" {
 		t.Fatalf("%+v", result)
 	}
 }

@@ -8,6 +8,5 @@ import (
 
 type Registry interface {
 	Register(agents []model.Agent, entry model.Agent, now time.Time) ([]model.Agent, error)
-	Find(agents []model.Agent, name string) (model.Agent, bool)
-	Resolve(all, live []model.Agent, query string) (model.Agent, []model.Agent)
+	Find(agents []model.Agent, id string) (model.Agent, bool)
 }

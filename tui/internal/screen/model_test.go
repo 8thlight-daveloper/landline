@@ -27,8 +27,8 @@ func send(m Model, msg tea.Msg) (Model, tea.Cmd) {
 func key(text string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)} }
 
 var sample = []hubclient.Agent{
-	{Name: "alpha", Harness: "claude", Host: "mac", Connected: true, Label: "lead", Folder: "/work/app", Branch: "main", Model: "opus", Effort: "high", LandlineVersion: "0.9"},
-	{Name: "bravo", Harness: "codex", Host: "mac"},
+	{ID: "alpha", Harness: "claude", Host: "mac", Connected: true, Project: "lead", Folder: "/work/app", Branch: "main", Model: "opus", Effort: "high", LandlineVersion: "0.9"},
+	{ID: "bravo", Harness: "codex", Host: "mac"},
 }
 
 func TestViewShowsLoadingBeforeTheFirstPoll(t *testing.T) {
@@ -41,7 +41,7 @@ func TestSnapshotShowsAgentsAndTheStatusLine(t *testing.T) {
 	m, _ := send(newModel(), tea.WindowSizeMsg{Width: 200, Height: 20})
 	m, cmd := send(m, snapshotMsg{agents: sample, at: clock, took: 10 * time.Millisecond})
 	view := m.View()
-	for _, want := range []string{"HANDLE", "alpha", "lead", "bravo", "/work/app", "opus", "switchboard http://hub:1", "refreshed 10:30:05"} {
+	for _, want := range []string{"ID", "alpha", "lead", "bravo", "/work/app", "opus", "switchboard http://hub:1", "refreshed 10:30:05"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("missing %q in\n%s", want, view)
 		}
@@ -50,7 +50,7 @@ func TestSnapshotShowsAgentsAndTheStatusLine(t *testing.T) {
 		t.Error("connected agent must come first")
 	}
 	rows := rowLines(strings.Split(view, "\n"))
-	if len(rows) != 2 || !strings.HasPrefix(rows[0], connectedShape+"  alpha") || !strings.HasPrefix(rows[1], disconnectedShape+"  bravo") {
+	if len(rows) != 2 || !strings.HasPrefix(rows[0], connectedShape+" alpha") || !strings.HasPrefix(rows[1], disconnectedShape+" bravo") {
 		t.Errorf("the rows are %q", rows)
 	}
 	if cmd == nil {
@@ -173,7 +173,7 @@ func TestNarrowWidthStillShowsTheHandle(t *testing.T) {
 func agentsNamed(n int) []hubclient.Agent {
 	out := []hubclient.Agent{}
 	for i := range n {
-		out = append(out, hubclient.Agent{Name: fmt.Sprintf("agent%02d", i), Harness: "claude", Host: "mac", Connected: true})
+		out = append(out, hubclient.Agent{ID: fmt.Sprintf("agent%02d", i), Harness: "claude", Host: "mac", Connected: true})
 	}
 	return out
 }
@@ -185,7 +185,7 @@ func TestFortyAgentsInA24RowWindowShowHeaderPrefixMoreAndStatus(t *testing.T) {
 	if len(lines) > 24 {
 		t.Fatalf("%d lines", len(lines))
 	}
-	if !strings.Contains(lines[0], "HANDLE") {
+	if !strings.Contains(lines[0], "ID") {
 		t.Fatalf("header %q", lines[0])
 	}
 	for i := range 18 {
@@ -225,7 +225,7 @@ func TestEveryHeightKeepsTheStatusLineWithinTheWindow(t *testing.T) {
 		if !strings.Contains(view, "switchboard http://hub:1") {
 			t.Fatalf("height %d: no status line in\n%s", height, view)
 		}
-		if height >= 4 && !strings.Contains(view, "HANDLE") {
+		if height >= 4 && !strings.Contains(view, "ID") {
 			t.Fatalf("height %d: no header", height)
 		}
 	}
@@ -241,8 +241,8 @@ func TestAListThatFitsShowsNoMoreLine(t *testing.T) {
 
 func TestHostileValuesNeverReachTheScreen(t *testing.T) {
 	hostile := []hubclient.Agent{{
-		Name: "alpha", Harness: "claude", Host: "mac", Connected: true,
-		Label: "\x1b]0;pwned\x07\x1b[2J", Folder: "x\ny\u202eevil", Branch: "b\rc", Model: "\u009b31m", Effort: "\x9b31m",
+		ID: "alpha", Harness: "claude", Host: "mac", Connected: true,
+		Project: "\x1b]0;pwned\x07\x1b[2J", Folder: "x\ny\u202eevil", Branch: "b\rc", Model: "\u009b31m", Effort: "\x9b31m",
 	}}
 	m, _ := send(newModel(), snapshotMsg{agents: hostile, at: clock})
 	m, _ = send(m, tea.WindowSizeMsg{Width: 200, Height: 30})

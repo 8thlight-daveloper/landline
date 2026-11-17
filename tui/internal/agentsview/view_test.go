@@ -12,24 +12,24 @@ import (
 
 var at = time.Date(2026, 11, 12, 10, 30, 0, 0, time.UTC)
 
-func handles(view View) []string {
+func ids(view View) []string {
 	out := []string{}
 	for _, row := range view.Agents {
-		out = append(out, row.Handle)
+		out = append(out, row.ID)
 	}
 	return out
 }
 
-func TestBuildSortsConnectedFirstThenLabelledThenLabelThenName(t *testing.T) {
+func TestBuildSortsConnectedFirstThenWithAProjectThenProjectThenID(t *testing.T) {
 	view := Build("http://hub", at, []hubclient.Agent{
-		{Name: "zulu", Label: "a", Connected: false},
-		{Name: "yankee", Label: "b", Connected: true},
-		{Name: "xray", Label: "a", Connected: true},
-		{Name: "whiskey", Label: "a", Connected: true},
-		{Name: "victor", Connected: true},
+		{ID: "zulu", Project: "a", Connected: false},
+		{ID: "yankee", Project: "b", Connected: true},
+		{ID: "xray", Project: "a", Connected: true},
+		{ID: "whiskey", Project: "a", Connected: true},
+		{ID: "victor", Connected: true},
 	})
 	want := "whiskey,xray,yankee,victor,zulu"
-	if got := strings.Join(handles(view), ","); got != want {
+	if got := strings.Join(ids(view), ","); got != want {
 		t.Fatalf("got %s want %s", got, want)
 	}
 	if view.Agents[4].State != Disconnected || view.Agents[0].State != Connected {
@@ -38,25 +38,25 @@ func TestBuildSortsConnectedFirstThenLabelledThenLabelThenName(t *testing.T) {
 }
 
 func TestBuildDoesNotChangeItsInputOrder(t *testing.T) {
-	input := []hubclient.Agent{{Name: "b"}, {Name: "a", Connected: true}}
+	input := []hubclient.Agent{{ID: "b"}, {ID: "a", Connected: true}}
 	Build("h", at, input)
-	if input[0].Name != "b" {
+	if input[0].ID != "b" {
 		t.Fatal("input reordered")
 	}
 }
 
 func TestJSONShapeIsPinned(t *testing.T) {
 	view := Build("http://127.0.0.1:8787", at, []hubclient.Agent{{
-		Name: "alpha", Harness: "claude", Host: "mac", Connected: true, Label: "lead",
-		LandlineVersion: "0.9", HarnessVersion: "2.1", Folder: "/w", Branch: "main", Worktree: "wt", Model: "m", Effort: "high",
-	}, {Name: "bravo", Harness: "codex", Host: "mac"}})
+		ID: "alpha", Harness: "claude", Host: "mac", Connected: true, Project: "lead",
+		Task: "menu bar app", TaskAt: time.Date(2026, 11, 16, 9, 15, 0, 0, time.UTC), LandlineVersion: "0.9", HarnessVersion: "2.1", Folder: "/w", Branch: "main", Worktree: "wt", Model: "m", Effort: "high",
+	}, {ID: "bravo", Harness: "codex", Host: "mac"}})
 	raw, err := json.Marshal(view)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := `{"screen":"agents","fetched_at":"2026-11-12T10:30:00Z","hub":"http://127.0.0.1:8787","agents":[` +
-		`{"handle":"alpha","label":"lead","harness":"claude","state":"connected","landline_version":"0.9","harness_version":"2.1","folder":"/w","branch":"main","worktree":"wt","model":"m","effort":"high","host":"mac"},` +
-		`{"handle":"bravo","harness":"codex","state":"disconnected","host":"mac"}]}`
+		`{"id":"alpha","project":"lead","task":"menu bar app","task_at":"2026-11-16T09:15:00Z","harness":"claude","state":"connected","landline_version":"0.9","harness_version":"2.1","folder":"/w","branch":"main","worktree":"wt","model":"m","effort":"high","host":"mac"},` +
+		`{"id":"bravo","harness":"codex","state":"disconnected","host":"mac"}]}`
 	if string(raw) != want {
 		t.Fatalf("got\n%s\nwant\n%s", raw, want)
 	}
@@ -70,7 +70,7 @@ func TestJSONForNoAgentsIsAnEmptyArray(t *testing.T) {
 }
 
 func TestJSONCarriesNoSecretOrToken(t *testing.T) {
-	view := Build("http://hub", at, []hubclient.Agent{{Name: "alpha", Harness: "claude", Host: "mac", Session: "session-xyz"}})
+	view := Build("http://hub", at, []hubclient.Agent{{ID: "alpha", Harness: "claude", Host: "mac", Session: "session-xyz"}})
 	raw, _ := json.Marshal(view)
 	for _, forbidden := range []string{"secret", "token", "bearer", "session"} {
 		if strings.Contains(strings.ToLower(string(raw)), forbidden) {
@@ -81,25 +81,25 @@ func TestJSONCarriesNoSecretOrToken(t *testing.T) {
 
 func hostile() hubclient.Agent {
 	return hubclient.Agent{
-		Name: "al\x1bpha", Harness: "c\u200dx", Host: "h\u0085ost", Connected: true,
-		Label: "\x1b]0;pwned\x07\x1b[2J", Folder: "x\ny\u202eevil", Branch: "b\rc",
+		ID: "al\x1bpha", Harness: "c\u200dx", Host: "h\u0085ost", Connected: true,
+		Project: "\x1b]0;pwned\x07\x1b[2J", Task: "t\x1b[31mask\nx\u202ey", Folder: "x\ny\u202eevil", Branch: "b\rc",
 		Model: "\u009b31m", Effort: "e\u2028f", Worktree: "w\tt", LandlineVersion: "\u00adv", HarnessVersion: "\ufeffv",
 	}
 }
 
 func fields(row Row) []string {
-	return []string{row.Handle, row.Label, row.Harness, row.State, row.LandlineVersion, row.HarnessVersion,
+	return []string{row.ID, row.Project, row.Task, row.Harness, row.State, row.LandlineVersion, row.HarnessVersion,
 		row.Folder, row.Branch, row.Worktree, row.Model, row.Effort, row.Host}
 }
 
 func TestBuildReplacesEveryControlFormatAndSeparatorRuneWithASpace(t *testing.T) {
 	row := Build("h", at, []hubclient.Agent{hostile()}).Agents[0]
 	want := map[string]string{
-		"handle": "al pha", "label": " ]0;pwned  [2J", "harness": "c x", "host": "h ost", "folder": "x y evil",
+		"id": "al pha", "project": " ]0;pwned  [2J", "task": "t [31mask x y", "harness": "c x", "host": "h ost", "folder": "x y evil",
 		"branch": "b c", "model": " 31m", "effort": "e f", "worktree": "w t", "landline": " v", "harness version": " v",
 	}
 	got := map[string]string{
-		"handle": row.Handle, "label": row.Label, "harness": row.Harness, "host": row.Host, "folder": row.Folder,
+		"id": row.ID, "project": row.Project, "task": row.Task, "harness": row.Harness, "host": row.Host, "folder": row.Folder,
 		"branch": row.Branch, "model": row.Model, "effort": row.Effort, "worktree": row.Worktree,
 		"landline": row.LandlineVersion, "harness version": row.HarnessVersion,
 	}
@@ -111,9 +111,9 @@ func TestBuildReplacesEveryControlFormatAndSeparatorRuneWithASpace(t *testing.T)
 }
 
 func TestBuildReplacesInvalidUTF8WithTheReplacementRune(t *testing.T) {
-	row := Build("h", at, []hubclient.Agent{{Name: "a\x9bb", Model: "\x9b31m"}}).Agents[0]
-	if strings.ContainsRune(row.Handle+row.Model, 0x9b) || strings.Contains(row.Handle+row.Model, "\x9b") {
-		t.Fatalf("%q %q", row.Handle, row.Model)
+	row := Build("h", at, []hubclient.Agent{{ID: "a\x9bb", Model: "\x9b31m"}}).Agents[0]
+	if strings.ContainsRune(row.ID+row.Model, 0x9b) || strings.Contains(row.ID+row.Model, "\x9b") {
+		t.Fatalf("%q %q", row.ID, row.Model)
 	}
 }
 
@@ -144,20 +144,20 @@ func TestHostileValuesLeaveNoControlRuneInTheJSONOrItsDecodedValues(t *testing.T
 }
 
 func TestPlainTextAndOtherUnicodeAreKept(t *testing.T) {
-	row := Build("h", at, []hubclient.Agent{{Name: "alpha", Label: "r\u00e9sum\u00e9 \u65e5\u672c  x"}}).Agents[0]
-	if row.Label != "r\u00e9sum\u00e9 \u65e5\u672c  x" {
-		t.Fatalf("got %q", row.Label)
+	row := Build("h", at, []hubclient.Agent{{ID: "alpha", Project: "r\u00e9sum\u00e9 \u65e5\u672c  x"}}).Agents[0]
+	if row.Project != "r\u00e9sum\u00e9 \u65e5\u672c  x" {
+		t.Fatalf("got %q", row.Project)
 	}
 }
 
-func TestLabelOrderBeatsHandleOrderAfterConnectedFirst(t *testing.T) {
+func TestProjectOrderBeatsIDOrderAfterConnectedFirst(t *testing.T) {
 	view := Build("http://hub", at, []hubclient.Agent{
-		{Name: "alpha", Label: "zeta", Connected: true},
-		{Name: "bravo", Label: "beta", Connected: true},
-		{Name: "charlie", Label: "alpha", Connected: false},
-		{Name: "delta", Label: "", Connected: false},
+		{ID: "alpha", Project: "zeta", Connected: true},
+		{ID: "bravo", Project: "beta", Connected: true},
+		{ID: "charlie", Project: "alpha", Connected: false},
+		{ID: "delta", Project: "", Connected: false},
 	})
-	if got, want := strings.Join(handles(view), ","), "bravo,alpha,charlie,delta"; got != want {
+	if got, want := strings.Join(ids(view), ","), "bravo,alpha,charlie,delta"; got != want {
 		t.Fatalf("got %s want %s", got, want)
 	}
 }
@@ -171,5 +171,27 @@ func TestBuildCleansAHubAddressPassedInDirectly(t *testing.T) {
 	}
 	if view.Hub != "http://h [2J   :1" {
 		t.Fatalf("got %q", view.Hub)
+	}
+}
+
+func TestARowBuiltFromTheOldKeysNameAndLabelHasNoIDAndNoProject(t *testing.T) {
+	var agent hubclient.Agent
+	if err := json.Unmarshal([]byte(`{"name":"x","label":"y","connected":true}`), &agent); err != nil {
+		t.Fatal(err)
+	}
+	row := Build("h", at, []hubclient.Agent{agent}).Agents[0]
+	if row.ID != "" || row.Project != "" {
+		t.Fatalf("an old key reached the row: %+v", row)
+	}
+}
+
+func TestARowWithATaskAndNoProjectKeepsTheTaskAndOmitsTheProjectKey(t *testing.T) {
+	view := Build("h", at, []hubclient.Agent{{ID: "a3f9", Task: "docs only", Connected: true}})
+	raw, err := json.Marshal(view.Agents[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"task":"docs only"`) || strings.Contains(string(raw), `"project"`) {
+		t.Fatalf("%s", raw)
 	}
 }

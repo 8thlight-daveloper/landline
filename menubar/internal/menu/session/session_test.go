@@ -32,7 +32,7 @@ func TestABuildFailureAloneKeepsTheSwitchboardReachableWithAnUnknownBuild(t *tes
 		"error":   {buildErr: errors.New("boom")},
 		"unknown": {known: false},
 	} {
-		s.agents = []hubclient.Agent{{Name: "alpha", Connected: true}}
+		s.agents = []hubclient.Agent{{ID: "alpha", Connected: true}}
 		got := Observe(s, false)
 		if !got.Reachable || len(got.Agents) != 1 || got.Switchboard.Known {
 			t.Errorf("%s: %+v", name, got)

@@ -193,7 +193,7 @@ func TestGetBuildDoesNotRegisterOrListAnythingAndTheObserverKeepsItsReadOnlyRigh
 	if err := json.Unmarshal([]byte(w.agentsBody(observer)), &listed); err != nil || len(listed) != 0 {
 		t.Errorf("asking for the build changed the agent list: %v %v", listed, err)
 	}
-	if status, _ := w.post("/v1/register", observer, map[string]string{"name": "mallory", "harness": "claude-code", "host": "mac"}); status != http.StatusForbidden {
+	if status, _ := w.post("/v1/register", observer, map[string]string{"id": "mallory", "harness": "claude-code", "host": "mac"}); status != http.StatusForbidden {
 		t.Errorf("the observer token may register: %d", status)
 	}
 }
@@ -231,7 +231,7 @@ func TestAnObserverOfKindMenubarGetsAToken200AndTheTokenReadsTheAgentList(t *tes
 		t.Fatalf("POST /v1/observers with kind menubar: %d %s", status, body)
 	}
 	var listed []map[string]any
-	if err := json.Unmarshal([]byte(w.agentsBody(issued.Token)), &listed); err != nil || len(listed) != 1 || listed[0]["name"] != "alpha" {
+	if err := json.Unmarshal([]byte(w.agentsBody(issued.Token)), &listed); err != nil || len(listed) != 1 || listed[0]["id"] != "alpha" {
 		t.Errorf("the menubar token does not read the agent list: %v %v", listed, err)
 	}
 }

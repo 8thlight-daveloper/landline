@@ -39,14 +39,14 @@ const Usage = `usage: landline <command> [flags]
 
   agents    [--json] [--interval D]   list agents and whether each is connected. --json prints the screen's view
   setup     claude|codex [--remove]   add the Landline MCP server, landline-mcp, to a harness, once. --remove takes it out
-  claude    [--label L] [-- args]   start Claude Code with the channel loaded
+  claude    [--project P] [-- args]   start Claude Code with the channel loaded
   server    up|down|restart|status|install|join|log   run and find the switchboard
 
-  register  --name N --harness H [--host H] [--session S]   needs LANDLINE_URL and LANDLINE_SECRET.
-            A hand-registered name holds no delivery stream, so it can send but cannot receive
+  register  --id N --harness H [--host H] [--session S] [--project P]   needs LANDLINE_URL and LANDLINE_SECRET.
+            A hand-registered id holds no delivery stream, so it can send but cannot receive
             unless "landline-mcp --as N --channel" runs for it
   send      --as N --to X [--thread T] [--kind K] [--reply-to ID] <body, or - for stdin>
-            --to names one agent. The agent must be connected, or the send fails
+            --to takes the id of one agent, as "landline agents" lists it. The agent must be connected, or the send fails
   log       [--after SEQ]
   join      <switchboard address>   save a switchboard address and its secret, for a switchboard on another machine
   version   print the version and the build
@@ -109,10 +109,11 @@ func flags(name string, env Env) *flag.FlagSet {
 
 func register(args []string, env Env) error {
 	set := flags("register", env)
-	name := set.String("name", env.Getenv("LANDLINE_AS"), "agent name")
+	id := set.String("id", env.Getenv("LANDLINE_AS"), "agent id")
 	harness := set.String("harness", "", "harness, such as codex or claude-code")
 	host := set.String("host", env.Host, "host name")
 	sessionID := set.String("session", "", "harness session id")
+	project := set.String("project", "", "project the agent works on")
 	if err := set.Parse(args); err != nil {
 		return err
 	}
@@ -121,32 +122,32 @@ func register(args []string, env Env) error {
 		return errors.New("set LANDLINE_URL and LANDLINE_SECRET")
 	}
 	out, err := client.New(url, secret).Register(model.RegisterRequest{
-		Name: *name, Harness: *harness, Host: *host, Session: *sessionID,
+		ID: *id, Harness: *harness, Host: *host, Session: *sessionID, Project: *project,
 	})
 	if err != nil {
 		return err
 	}
-	if out.Name != *name {
-		return fmt.Errorf("the switchboard registered %q and not the name that was asked for. Nothing was saved", out.Name)
+	if out.ID != *id {
+		return fmt.Errorf("the switchboard registered %q and not the id that was asked for. Nothing was saved", out.ID)
 	}
-	if err := saveSession(env, out.Name, session{URL: url, Token: out.Token}); err != nil {
+	if err := saveSession(env, out.ID, session{URL: url, Token: out.Token}); err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "registered %s\n", out.Name)
+	fmt.Fprintf(env.Stdout, "registered %s\n", out.ID)
 	return nil
 }
 
-var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
-func saveSession(env Env, name string, s session) error {
-	if !namePattern.MatchString(name) {
-		return errors.New("bad agent name")
+func saveSession(env Env, id string, s session) error {
+	if !idPattern.MatchString(id) {
+		return errors.New("bad agent id")
 	}
 	if err := os.MkdirAll(env.ConfigDir, 0o700); err != nil {
 		return err
 	}
 	raw, _ := json.Marshal(s)
-	path := filepath.Join(env.ConfigDir, "session-"+name+".json")
+	path := filepath.Join(env.ConfigDir, "session-"+id+".json")
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		return err
 	}
@@ -169,7 +170,7 @@ func connect(as string, env Env) (*client.Client, error) {
 		return nil, errors.New("say who you are with --as or LANDLINE_AS")
 	}
 	if strings.ContainsAny(as, "/\\") {
-		return nil, errors.New("bad agent name")
+		return nil, errors.New("bad agent id")
 	}
 	raw, err := os.ReadFile(filepath.Join(env.ConfigDir, "session-"+as+".json"))
 	if err != nil {
@@ -194,8 +195,8 @@ func forgotten(err error) error {
 
 func send(args []string, env Env) error {
 	set := flags("send", env)
-	as := set.String("as", env.Getenv("LANDLINE_AS"), "your agent name")
-	to := set.String("to", "", "recipient name")
+	as := set.String("as", env.Getenv("LANDLINE_AS"), "your agent id")
+	to := set.String("to", "", "recipient id")
 	thread := set.String("thread", "", "thread")
 	kind := set.String("kind", "", "chat, task, reply, or review")
 	reply := set.String("reply-to", "", "id of the message this answers")

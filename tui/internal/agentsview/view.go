@@ -15,8 +15,10 @@ const (
 )
 
 type Row struct {
-	Handle          string `json:"handle"`
-	Label           string `json:"label,omitempty"`
+	ID              string `json:"id"`
+	Project         string `json:"project,omitempty"`
+	Task            string `json:"task,omitempty"`
+	TaskAt          string `json:"task_at,omitempty"`
 	Harness         string `json:"harness"`
 	State           string `json:"state"`
 	LandlineVersion string `json:"landline_version,omitempty"`
@@ -45,8 +47,12 @@ func Build(hub string, at time.Time, agents []hubclient.Agent) View {
 		if agent.Connected {
 			state = Connected
 		}
+		taskAt := ""
+		if !agent.TaskAt.IsZero() {
+			taskAt = agent.TaskAt.UTC().Format(time.RFC3339)
+		}
 		rows = append(rows, Row{
-			Handle: clean.Text(agent.Name), Label: clean.Text(agent.Label), Harness: clean.Text(agent.Harness), State: state,
+			ID: clean.Text(agent.ID), Project: clean.Text(agent.Project), Task: clean.Text(agent.Task), TaskAt: taskAt, Harness: clean.Text(agent.Harness), State: state,
 			LandlineVersion: clean.Text(agent.LandlineVersion), HarnessVersion: clean.Text(agent.HarnessVersion),
 			LandlineCommit: clean.Text(agent.LandlineCommit), LandlineDate: clean.Text(agent.LandlineDate),
 			Folder: clean.Text(agent.Folder), Branch: clean.Text(agent.Branch), Worktree: clean.Text(agent.Worktree),
@@ -58,13 +64,13 @@ func Build(hub string, at time.Time, agents []hubclient.Agent) View {
 		if a.State != b.State {
 			return a.State == Connected
 		}
-		if (a.Label == "") != (b.Label == "") {
-			return a.Label != ""
+		if (a.Project == "") != (b.Project == "") {
+			return a.Project != ""
 		}
-		if a.Label != b.Label {
-			return a.Label < b.Label
+		if a.Project != b.Project {
+			return a.Project < b.Project
 		}
-		return a.Handle < b.Handle
+		return a.ID < b.ID
 	})
 	return View{Screen: "agents", FetchedAt: at.UTC().Format(time.RFC3339), Hub: clean.Text(hub), Agents: rows}
 }

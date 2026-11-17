@@ -202,11 +202,11 @@ func fixedAgents() []map[string]any {
 	return []map[string]any{
 		fakeAgent("tango", true, map[string]any{"harness": "codex", "host": "mac-2"}),
 		fakeAgent("bravo", true, map[string]any{
-			"label": "zed-review", "model": "opus", "effort": "high", "folder": "/work/secret-repo", "branch": "feature/private",
+			"project": "zed-review", "model": "opus", "effort": "high", "folder": "/work/secret-repo", "branch": "feature/private",
 			"landline_version": "0.2.0", "landline_commit": stampCommit,
 		}),
-		fakeAgent("alpha", true, map[string]any{"label": "amy-docs", "folder": "/work/docs", "branch": "main"}),
-		fakeAgent("echo", false, map[string]any{"label": "yankee"}),
+		fakeAgent("alpha", true, map[string]any{"project": "amy-docs", "task": "menu bar app for ADR 0140", "task_at": "2026-11-16T09:15:30Z", "folder": "/work/docs", "branch": "main"}),
+		fakeAgent("echo", false, map[string]any{"project": "yankee"}),
 		fakeAgent("delta", false, nil),
 		fakeAgent("charlie", true, nil),
 	}
@@ -216,12 +216,12 @@ func TestMenuTextListsAgentRowsInTheScreensOrderWithTheirFieldsAndNoFolderOrBran
 	fake := newFakeSwitchboard(t, "127.0.0.1", fixedAgents(), 200, fakeBuild(menubarVersion, stampCommit, stampDate))
 	rig := newMenubarRig(t, flagsFor(menubarVersion, stampCommit, stampDate), fake.url, landlineNextToBinary)
 	var head []string
-	head = append(head, agentRow("amy-docs", liveMarker, "Handle: alpha", "Harness: claude-code", "Host: mac", "Folder: /work/docs", "Branch: main")...)
-	head = append(head, agentRow("zed-review", liveMarker, "Handle: bravo", "Harness: claude-code", "Host: mac", "Model: opus", "Effort: high", "Folder: /work/secret-repo", "Branch: feature/private", "Landline version: 0.2.0")...)
-	head = append(head, agentRow("charlie", liveMarker, "Handle: charlie", "Harness: claude-code", "Host: mac")...)
-	head = append(head, agentRow("tango", liveMarker, "Handle: tango", "Harness: codex", "Host: mac-2")...)
-	head = append(head, agentRow("yankee", "disconnected", "Handle: echo", "Harness: claude-code", "Host: mac")...)
-	head = append(head, agentRow("delta", "disconnected", "Handle: delta", "Harness: claude-code", "Host: mac")...)
+	head = append(head, agentRow("amy-docs alpha", liveMarker, "ID: alpha", "Project: amy-docs", "Task: menu bar app for ADR 0140", "Harness: claude-code", "Host: mac", "Folder: /work/docs", "Branch: main")...)
+	head = append(head, agentRow("zed-review bravo", liveMarker, "ID: bravo", "Project: zed-review", "Harness: claude-code", "Host: mac", "Model: opus", "Effort: high", "Folder: /work/secret-repo", "Branch: feature/private", "Landline version: 0.2.0")...)
+	head = append(head, agentRow("charlie", liveMarker, "ID: charlie", "Harness: claude-code", "Host: mac")...)
+	head = append(head, agentRow("tango", liveMarker, "ID: tango", "Harness: codex", "Host: mac-2")...)
+	head = append(head, agentRow("yankee echo", "disconnected", "ID: echo", "Project: yankee", "Harness: claude-code", "Host: mac")...)
+	head = append(head, agentRow("delta", "disconnected", "ID: delta", "Harness: claude-code", "Host: mac")...)
 	want := expectedMenu("jack 4", head, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, stampCommit)), menubarBuildLine(menubarVersion, stampCommit))
 	got := rig.menu(t)
 	if got != want {
@@ -258,13 +258,13 @@ func TestMenuTextSanitizesEveryFieldOfAHostileAgentTheWayTheScreenDoes(t *testin
 	hostile := func(name string) string { return name + "\x1b[31m\nX\r\t\u2028\u2029\u202e\u200b\x07\x00end" }
 	fields := map[string]any{
 		"harness": hostile("harness"), "host": hostile("host"), "model": hostile("model"), "effort": hostile("effort"),
-		"folder": hostile("folder"), "branch": hostile("branch"), "label": hostile("label"), "landline_version": hostile("version"),
+		"folder": hostile("folder"), "branch": hostile("branch"), "project": hostile("project"), "task": hostile("task"), "landline_version": hostile("version"),
 	}
-	agent := fakeAgent(hostile("handle"), true, fields)
+	agent := fakeAgent(hostile("id"), true, fields)
 	fake := newFakeSwitchboard(t, "127.0.0.1", []map[string]any{agent}, 200, fakeBuild(menubarVersion, "", ""))
 	rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
-	row := agentRow(cleaned(hostile("label")), liveMarker,
-		"Handle: "+cleaned(hostile("handle")), "Harness: "+cleaned(hostile("harness")), "Host: "+cleaned(hostile("host")),
+	row := agentRow(cleaned(hostile("project"))+" "+cleaned(hostile("id")), liveMarker,
+		"ID: "+cleaned(hostile("id")), "Project: "+cleaned(hostile("project")), "Task: "+cleaned(hostile("task")), "Harness: "+cleaned(hostile("harness")), "Host: "+cleaned(hostile("host")),
 		"Model: "+cleaned(hostile("model")), "Effort: "+cleaned(hostile("effort")), "Folder: "+cleaned(hostile("folder")),
 		"Branch: "+cleaned(hostile("branch")), "Landline version: "+cleaned(hostile("version")))
 	want := expectedMenu("jack 1", row, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(menubarVersion, ""))
@@ -279,17 +279,17 @@ func TestMenuTextSanitizesEveryFieldOfAHostileAgentTheWayTheScreenDoes(t *testin
 
 func TestMenuTextKeepsEveryAgentOnItsOwnLinesWhateverTheLengthOfItsValues(t *testing.T) {
 	long := strings.Repeat("x", 5000)
-	agents := []map[string]any{fakeAgent("alpha", true, map[string]any{"label": long, "folder": "/" + long, "model": long, "branch": long})}
+	agents := []map[string]any{fakeAgent("alpha", true, map[string]any{"project": long, "task": long, "folder": "/" + long, "model": long, "branch": long})}
 	fake := newFakeSwitchboard(t, "127.0.0.1", agents, 200, fakeBuild(menubarVersion, "", ""))
 	rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
 	got := rig.menu(t)
-	shape := agentRow("x", liveMarker, "Handle: alpha", "Harness: claude-code", "Host: mac", "Model: x", "Folder: x", "Branch: x")
+	shape := agentRow("x", liveMarker, "ID: alpha", "Project: x", "Task: x", "Harness: claude-code", "Host: mac", "Model: x", "Folder: x", "Branch: x")
 	want := expectedMenu("jack 1", shape, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(menubarVersion, ""))
 	if len(menuLines(got)) != len(menuLines(want)) {
 		t.Fatalf("a long value changed the number of lines: %d, want %d", len(menuLines(got)), len(menuLines(want)))
 	}
-	if !strings.Contains(got, "Handle: alpha"+disabledMark+"\n") {
-		t.Errorf("the handle line is missing:\n%.400s", got)
+	if !strings.Contains(got, "ID: alpha"+disabledMark+"\n") {
+		t.Errorf("the id line is missing:\n%.400s", got)
 	}
 }
 
@@ -455,8 +455,8 @@ func TestMenuTextTreatsAFailureOfTheBuildRouteAloneAsAnUnknownBuildAndChangesNot
 		"an empty body":         {200, nil, " "},
 	}
 	var head []string
-	head = append(head, agentRow("alpha", liveMarker, "Handle: alpha", "Harness: claude-code", "Host: mac")...)
-	head = append(head, agentRow("echo", "disconnected", "Handle: echo", "Harness: claude-code", "Host: mac")...)
+	head = append(head, agentRow("alpha", liveMarker, "ID: alpha", "Harness: claude-code", "Host: mac")...)
+	head = append(head, agentRow("echo", "disconnected", "ID: echo", "Harness: claude-code", "Host: mac")...)
 	for name, c := range cases {
 		fake := newFakeSwitchboard(t, "127.0.0.1", agents, c.status, c.body)
 		fake.buildRaw = c.raw
@@ -493,22 +493,25 @@ func TestMenuTextShowsDiffersOnlyWhenBothCommitsAreNonEmptyAndDiffer(t *testing.
 	}
 }
 
-func TestMenuTextAgainstARealSwitchboardListsConnectedFirstThenLabelThenHandleWithMarkersAndTheCount(t *testing.T) {
+func TestMenuTextAgainstARealSwitchboardListsConnectedFirstThenProjectThenIDWithMarkersAndTheCount(t *testing.T) {
 	menubarBinary(t, defaultFlags(t))
 	w := start(t)
-	w.registerLabelled("delta", "yankee")
-	w.registerLabelled("foxtrot", "bravo-l")
+	w.registerWithProject("delta", "yankee")
+	w.registerWithProject("foxtrot", "bravo-l")
 	w.register("tango", "alpha")
 	if status, body := w.post("/v1/register", secret, map[string]string{
-		"name": "kilo", "harness": "codex", "host": "mac", "label": "mike", "model": "gpt-x", "effort": "low", "folder": "/srv/kilo-work", "branch": "release",
+		"id": "kilo", "harness": "codex", "host": "mac", "project": "mike", "model": "gpt-x", "effort": "low", "folder": "/srv/kilo-work", "branch": "release",
 	}); status != http.StatusOK {
 		t.Fatalf("register kilo: %d %s", status, body)
 	}
-	labelledLate := w.selfRegisteredWithLabel("a-x", "zed")
-	labelledEarly := w.selfRegisteredWithLabel("b-x", "amy")
-	plainLate := w.selfRegisteredWithLabel("d-x", "")
-	plainEarly := w.selfRegisteredWithLabel("c-x", "")
-	connected := map[string]bool{labelledLate: true, labelledEarly: true, plainLate: true, plainEarly: true}
+	projectLate := w.selfRegisteredWithProject("a-x", "zed")
+	projectEarly := w.selfRegisteredWithProject("b-x", "amy")
+	plainLate := w.selfRegisteredWithProject("d-x", "")
+	plainEarly := w.selfRegisteredWithProject("c-x", "")
+	if status, body := w.post("/v1/status", w.token(projectLate), map[string]string{"task": "menu bar app for ADR 0140"}); status != http.StatusOK {
+		t.Fatalf("set the task: %d %s", status, body)
+	}
+	connected := map[string]bool{projectLate: true, projectEarly: true, plainLate: true, plainEarly: true}
 	var listed []map[string]any
 	if err := json.Unmarshal([]byte(w.agentsBody(w.registerObserver("tui"))), &listed); err != nil {
 		t.Fatal(err)
@@ -519,8 +522,8 @@ func TestMenuTextAgainstARealSwitchboardListsConnectedFirstThenLabelThenHandleWi
 		if entry["connected"] == true {
 			state = "connected"
 		}
-		label, _ := entry["label"].(string)
-		agents = append(agents, listedAgent{handle: entry["name"].(string), state: state, label: label})
+		project, _ := entry["project"].(string)
+		agents = append(agents, listedAgent{id: entry["id"].(string), state: state, project: project})
 	}
 	if len(agents) != 9 {
 		t.Fatalf("the fixture has %d agents", len(agents))
@@ -544,38 +547,67 @@ func TestMenuTextAgainstARealSwitchboardListsConnectedFirstThenLabelThenHandleWi
 		t.Fatalf("%d rows, want %d:\n%s", len(rows), len(order), strings.Join(lines, "\n"))
 	}
 	for i, agent := range order {
-		title := agent.handle
-		if agent.label != "" {
-			title = agent.label
-		}
 		marker := "disconnected"
-		if connected[agent.handle] {
+		if connected[agent.id] {
 			marker = liveMarker
 		}
-		if rows[i] != shapeFor(marker)+" "+title {
-			t.Errorf("row %d is %q, want %q", i, rows[i], shapeFor(marker)+" "+title)
+		if want := shapeFor(marker) + " " + titleOf(agent.id, agents); rows[i] != want {
+			t.Errorf("row %d is %q, want %q", i, rows[i], want)
 		}
 	}
-	block := rowBlock(lines, "\u25cb mike")
-	want := agentRow("mike", "disconnected", "Handle: kilo", "Harness: codex", "Host: mac", "Model: gpt-x", "Effort: low", "Folder: /srv/kilo-work", "Branch: release")
+	block := rowBlock(lines, "\u25cb mike kilo")
+	want := agentRow("mike kilo", "disconnected", "ID: kilo", "Project: mike", "Harness: codex", "Host: mac", "Model: gpt-x", "Effort: low", "Folder: /srv/kilo-work", "Branch: release")
 	if strings.Join(block, "\n") != strings.Join(want, "\n") {
 		t.Errorf("the submenu of kilo is:\n%s\nwant:\n%s", strings.Join(block, "\n"), strings.Join(want, "\n"))
 	}
-	for _, handle := range []string{labelledLate, plainEarly} {
-		submenu := strings.Join(rowBlock(lines, "\u25cf "+titleOf(handle, agents)), "\n")
-		if !strings.Contains(submenu, "  Handle: "+handle+disabledMark+"\n") || !strings.Contains(submenu, "  Folder: ") || !strings.HasSuffix(submenu, "  Copy handle") {
-			t.Errorf("the submenu of %s lacks its fields:\n%s", handle, submenu)
+	late := rowBlock(lines, "\u25cf zed "+projectLate)
+	if len(late) < 5 || late[1] != "  State: connected"+disabledMark || late[2] != "  ID: "+projectLate+disabledMark ||
+		late[3] != "  Project: zed"+disabledMark || late[4] != "  Task: menu bar app for ADR 0140"+disabledMark || late[len(late)-1] != "  Copy id" {
+		t.Errorf("the submenu with a project and a task is:\n%s", strings.Join(late, "\n"))
+	}
+	early := strings.Join(rowBlock(lines, "\u25cf amy "+projectEarly), "\n")
+	if strings.Contains(early, "Task:") || !strings.Contains(early, "  Project: amy"+disabledMark+"\n") {
+		t.Errorf("the submenu of an agent with a project and no task is:\n%s", early)
+	}
+	for _, id := range []string{plainLate, plainEarly} {
+		submenu := strings.Join(rowBlock(lines, "\u25cf "+id), "\n")
+		if !strings.Contains(submenu, "  ID: "+id+disabledMark+"\n") || strings.Contains(submenu, "Project:") || strings.Contains(submenu, "Task:") || !strings.HasSuffix(submenu, "  Copy id") {
+			t.Errorf("the submenu of %s, which has no project, is:\n%s", id, submenu)
 		}
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "Handle") || strings.Contains(strings.Join(lines, "\n"), "Label") {
+		t.Errorf("an old word is in the menu:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
-func titleOf(handle string, agents []listedAgent) string {
-	for _, agent := range agents {
-		if agent.handle == handle && agent.label != "" {
-			return agent.label
+func TestMenuTextShowsAClearedTaskAsNoTaskLineAndAChangedTaskAsTheNewText(t *testing.T) {
+	menubarBinary(t, defaultFlags(t))
+	w := start(t)
+	id := w.selfRegisteredWithProject("task-x", "demo")
+	rig := newMenubarRig(t, defaultFlags(t), w.url, landlineNextToBinary)
+	for task, want := range map[string]string{"first goal": "  Task: first goal" + disabledMark + "\n", "second goal": "  Task: second goal" + disabledMark + "\n"} {
+		if status, body := w.post("/v1/status", w.token(id), map[string]string{"task": task}); status != http.StatusOK {
+			t.Fatalf("%d %s", status, body)
+		}
+		if got := rig.menu(t); !strings.Contains(got, want) {
+			t.Errorf("the menu lacks %q:\n%s", want, got)
 		}
 	}
-	return handle
+	if status, body := w.post("/v1/status", w.token(id), map[string]string{"task": ""}); status != http.StatusOK {
+		t.Fatalf("%d %s", status, body)
+	}
+	if got := rig.menu(t); strings.Contains(got, "Task:") {
+		t.Errorf("a cleared task still shows:\n%s", got)
+	}
+}
+
+func titleOf(id string, agents []listedAgent) string {
+	for _, agent := range agents {
+		if agent.id == id && agent.project != "" {
+			return agent.project + " " + id
+		}
+	}
+	return id
 }
 
 func rowBlock(lines []string, title string) []string {
@@ -598,9 +630,9 @@ func rowBlock(lines []string, title string) []string {
 func TestMenuTextTwiceAgainstTheSameStatePrintsIdenticalBytes(t *testing.T) {
 	menubarBinary(t, defaultFlags(t))
 	w := start(t)
-	w.registerLabelled("delta", "yankee")
-	w.selfRegisteredWithLabel("a-x", "zed")
-	w.selfRegisteredWithLabel("b-x", "")
+	w.registerWithProject("delta", "yankee")
+	w.selfRegisteredWithProject("a-x", "zed")
+	w.selfRegisteredWithProject("b-x", "")
 	rig := newMenubarRig(t, defaultFlags(t), w.url, landlineNextToBinary)
 	first := rig.run(t, "menu", "--text")
 	second := rig.run(t, "menu", "--text")
@@ -766,5 +798,19 @@ func TestMenuTextRowShapesAreExactlyTheSolidAndTheHollowCircleAndTheTitleHasNoSt
 		if !strings.HasPrefix(line, " ") && (strings.Contains(line, "connected") || strings.Contains(line, "[")) && !strings.HasPrefix(line, "icon:") {
 			t.Errorf("a top level line carries a state word or a bracket: %q", line)
 		}
+	}
+}
+
+func TestMenuTextShowsAnAgentWithATaskAndNoProjectAsItsIDAloneWithAStateIDAndTaskSubmenu(t *testing.T) {
+	agents := []map[string]any{fakeAgent("alpha", true, map[string]any{"task": "docs only"})}
+	fake := newFakeSwitchboard(t, "127.0.0.1", agents, 200, fakeBuild(menubarVersion, "", ""))
+	got := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary).menu(t)
+	row := agentRow("alpha", liveMarker, "ID: alpha", "Task: docs only", "Harness: claude-code", "Host: mac")
+	want := expectedMenu("jack 1", row, localSwitchboard(fake.url, true, switchboardBuildLine(menubarVersion, "")), menubarBuildLine(menubarVersion, ""))
+	if got != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+	if strings.Contains(got, "Project:") {
+		t.Errorf("an agent with no project shows a Project line:\n%s", got)
 	}
 }

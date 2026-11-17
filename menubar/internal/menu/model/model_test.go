@@ -33,26 +33,28 @@ func TestTextOfAReachableSwitchboardWithAgents(t *testing.T) {
 	in := local(true)
 	in.Switchboard = Switchboard{Known: true, Build: app()}
 	in.Agents = []agentsview.Row{
-		{Handle: "alpha", Label: "amy-docs", Harness: "claude-code", Host: "mac", State: agentsview.Connected, Folder: "/work/docs", Branch: "main"},
-		{Handle: "delta", Harness: "claude-code", Host: "mac", State: agentsview.Disconnected},
+		{ID: "alpha", Project: "amy-docs", Task: "menu bar app for ADR 0140", Harness: "claude-code", Host: "mac", State: agentsview.Connected, Folder: "/work/docs", Branch: "main"},
+		{ID: "delta", Harness: "claude-code", Host: "mac", State: agentsview.Disconnected},
 	}
 	want := `icon: jack 1
-● amy-docs
+● amy-docs alpha
   State: connected (disabled)
-  Handle: alpha (disabled)
+  ID: alpha (disabled)
+  Project: amy-docs (disabled)
+  Task: menu bar app for ADR 0140 (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
   Folder: /work/docs (disabled)
   Branch: main (disabled)
   ---
-  Copy handle
+  Copy id
 ○ delta
   State: disconnected (disabled)
-  Handle: delta (disabled)
+  ID: delta (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
   ---
-  Copy handle
+  Copy id
 ---
 Switchboard
   Running at http://127.0.0.1:8787 (disabled)
@@ -98,7 +100,7 @@ Switchboard
 
 func TestAnUnreachableSwitchboardListsNoAgentsWhateverTheInputHolds(t *testing.T) {
 	in := local(false)
-	in.Agents = []agentsview.Row{{Handle: "alpha", State: agentsview.Connected}}
+	in.Agents = []agentsview.Row{{ID: "alpha", State: agentsview.Connected}}
 	if got := Build(in).Text(); strings.Contains(got, "alpha") || strings.HasPrefix(got, "icon: jack 1") {
 		t.Fatalf("got:\n%s", got)
 	}
@@ -173,7 +175,7 @@ func TestTheBuildLineSaysWhenTheCommitDiffersOnlyThen(t *testing.T) {
 func TestEveryLineIsOneLineAndLongValuesAreCut(t *testing.T) {
 	long := strings.Repeat("x", 5000)
 	in := local(true)
-	in.Agents = []agentsview.Row{{Handle: "alpha", Label: long, Folder: "/" + long, State: agentsview.Connected}}
+	in.Agents = []agentsview.Row{{ID: "alpha", Project: long, Folder: "/" + long, State: agentsview.Connected}}
 	in.Notice = "Failed: a\nb\x1b[2J"
 	got := Build(in).Text()
 	for _, l := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
@@ -188,7 +190,7 @@ func TestEveryLineIsOneLineAndLongValuesAreCut(t *testing.T) {
 
 func TestIconCountsConnectedAgentsOnly(t *testing.T) {
 	in := local(true)
-	in.Agents = []agentsview.Row{{Handle: "a", State: agentsview.Connected}, {Handle: "b", State: agentsview.Disconnected}}
+	in.Agents = []agentsview.Row{{ID: "a", State: agentsview.Connected}, {ID: "b", State: agentsview.Disconnected}}
 	if got := Build(in).Icon; got != (Icon{Count: 1}) || got.CountText() != "1" {
 		t.Fatalf("%+v", got)
 	}
@@ -217,7 +219,7 @@ func TestLoopbackAcceptsLocalhostAndLoopbackIPsOnly(t *testing.T) {
 
 func TestTheActionsAreTheFixedCommandsAndNothingFromTheSwitchboard(t *testing.T) {
 	in := local(true)
-	in.Agents = []agentsview.Row{{Handle: "evil; rm -rf /", State: agentsview.Connected}}
+	in.Agents = []agentsview.Row{{ID: "evil; rm -rf /", State: agentsview.Connected}}
 	var runs [][]string
 	var walk func(items []Item)
 	walk = func(items []Item) {
@@ -243,12 +245,12 @@ func TestTheActionsAreTheFixedCommandsAndNothingFromTheSwitchboard(t *testing.T)
 	}
 }
 
-func TestCopyHandleCopiesTheHandleAndNothingElse(t *testing.T) {
+func TestCopyIDCopiesTheIDAndNothingElse(t *testing.T) {
 	in := local(true)
-	in.Agents = []agentsview.Row{{Handle: "alpha", Label: "amy", Folder: "/f", State: agentsview.Connected}}
+	in.Agents = []agentsview.Row{{ID: "alpha", Project: "amy", Folder: "/f", State: agentsview.Connected}}
 	row := Build(in).Items[0]
 	copyItem := row.Children[len(row.Children)-1]
-	if copyItem.Title != "Copy handle" || copyItem.Action.Kind != Copy || copyItem.Action.Text != "alpha" {
+	if copyItem.Title != "Copy id" || copyItem.Action.Kind != Copy || copyItem.Action.Text != "alpha" {
 		t.Fatalf("%+v", copyItem)
 	}
 }
@@ -261,5 +263,76 @@ func TestSuccessLinesNameTheHarness(t *testing.T) {
 	want := "Claude Code set up. Start a new session.|Claude Code removed.|Codex set up. Start a new session.|Codex removed."
 	if strings.Join(dones, "|") != want {
 		t.Fatal(dones)
+	}
+}
+
+func TestARowIsTitledByProjectThenIDAndAnAgentWithoutAProjectShowsItsIDAlone(t *testing.T) {
+	in := local(true)
+	in.Agents = []agentsview.Row{
+		{ID: "a3f9", Project: "landline", State: agentsview.Connected},
+		{ID: "b7c2", State: agentsview.Connected},
+		{ID: "c0de", Project: "landline", State: agentsview.Disconnected},
+	}
+	menu := Build(in)
+	for i, want := range []string{"landline a3f9", "b7c2", "landline c0de"} {
+		if got := strings.TrimLeft(menu.Items[i].Title, "\u25cf\u25cb "); got != want {
+			t.Errorf("row %d is titled %q, want the name %q after any text shape", i, menu.Items[i].Title, want)
+		}
+	}
+	lines := strings.Split(menu.Text(), "\n")
+	for _, want := range []string{"\u25cf landline a3f9", "\u25cf b7c2", "\u25cb landline c0de"} {
+		found := false
+		for _, line := range lines {
+			found = found || line == want
+		}
+		if !found {
+			t.Errorf("the menu text has no row line %q:\n%s", want, menu.Text())
+		}
+	}
+}
+
+func TestTheSubmenuHasStateThenIDThenProjectThenTaskAndLeavesOutAProjectOrTaskThatIsNotSet(t *testing.T) {
+	titles := func(row agentsview.Row) []string {
+		in := local(true)
+		in.Agents = []agentsview.Row{row}
+		var out []string
+		for _, child := range Build(in).Items[0].Children {
+			out = append(out, child.Title)
+		}
+		return out
+	}
+	full := titles(agentsview.Row{ID: "a3f9", Project: "landline", Task: "write tests", Harness: "claude-code", Host: "mac", State: agentsview.Connected})
+	want := []string{"State: connected", "ID: a3f9", "Project: landline", "Task: write tests", "Harness: claude-code", "Host: mac", "", "Copy id"}
+	if strings.Join(full, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %q, want %q", full, want)
+	}
+	noProject := titles(agentsview.Row{ID: "a3f9", Task: "docs only", State: agentsview.Connected})
+	if want := "State: connected|ID: a3f9|Task: docs only||Copy id"; strings.Join(noProject, "|") != want {
+		t.Fatalf("a task and no project: got %q, want %q", noProject, want)
+	}
+	bare := titles(agentsview.Row{ID: "a3f9", Harness: "claude-code", Host: "mac", State: agentsview.Connected})
+	for _, title := range bare {
+		if strings.HasPrefix(title, "Project") || strings.HasPrefix(title, "Task") || strings.Contains(title, "Handle") || strings.Contains(title, "Label") {
+			t.Errorf("an unset or old item shows: %q", title)
+		}
+	}
+}
+
+func TestATaskAndAProjectAreOneLineEachAndCutWhenLong(t *testing.T) {
+	long := strings.Repeat("t", 5000)
+	in := local(true)
+	in.Agents = []agentsview.Row{{ID: "alpha", Project: "p", Task: long, State: agentsview.Connected}}
+	for _, l := range strings.Split(strings.TrimSuffix(Build(in).Text(), "\n"), "\n") {
+		if len([]rune(l)) > maxTitleRunes+len(disabledText)+len("\u25cb ")+len("State: disconnected")+len(indent)+len("Folder: ") {
+			t.Fatalf("a line is %d runes", len([]rune(l)))
+		}
+	}
+}
+
+func TestAnAgentWithATaskAndNoProjectIsTitledByItsIDAlone(t *testing.T) {
+	in := local(true)
+	in.Agents = []agentsview.Row{{ID: "a3f9", Task: "docs only", State: agentsview.Connected}}
+	if got := strings.TrimLeft(Build(in).Items[0].Title, "\u25cf\u25cb "); got != "a3f9" {
+		t.Fatalf("the title is %q", got)
 	}
 }

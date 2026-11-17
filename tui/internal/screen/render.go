@@ -8,7 +8,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const columnGap = 2
+const (
+	columnGap = 2
+	shapeGap  = 1
+)
 
 type column struct {
 	title    string
@@ -36,8 +39,9 @@ func legend() string {
 
 var columns = []column{
 	{"", shapeOf, 1, 1, false},
-	{"HANDLE", func(r agentsview.Row) string { return r.Handle }, 0, 1, true},
-	{"LABEL", func(r agentsview.Row) string { return r.Label }, 16, 6, false},
+	{"ID", func(r agentsview.Row) string { return r.ID }, 0, 1, true},
+	{"PROJECT", func(r agentsview.Row) string { return r.Project }, 16, 6, false},
+	{"TASK", func(r agentsview.Row) string { return r.Task }, 24, 8, false},
 	{"HARNESS", func(r agentsview.Row) string { return r.Harness }, 12, 6, false},
 	{"LANDLINE", func(r agentsview.Row) string { return r.LandlineVersion }, 9, 5, false},
 	{"FOLDER", func(r agentsview.Row) string { return r.Folder }, 28, 10, true},
@@ -56,11 +60,11 @@ var (
 
 const (
 	shapeIndex  = 0
-	handleIndex = 1
+	idIndex     = 1
 	staleMarker = "(stale)"
 )
 
-var priority = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+var priority = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
 func naturalWidth(c column, rows []agentsview.Row) int {
 	w := ansi.StringWidth(c.title)
@@ -76,13 +80,13 @@ func visibleColumns(rows []agentsview.Row, width int) ([]column, []int) {
 	if width <= 0 {
 		return nil, nil
 	}
-	handleWidth := naturalWidth(columns[handleIndex], rows)
+	idWidth := naturalWidth(columns[idIndex], rows)
 	shapeWidth := columns[shapeIndex].capWidth
-	if shapeWidth+columnGap+handleWidth > width {
-		return []column{columns[shapeIndex], columns[handleIndex]}, []int{min(shapeWidth, width), max(width-shapeWidth-columnGap, 0)}
+	if shapeWidth+shapeGap+idWidth > width {
+		return []column{columns[shapeIndex], columns[idIndex]}, []int{min(shapeWidth, width), max(width-shapeWidth-shapeGap, 0)}
 	}
-	allowed := map[int]int{shapeIndex: shapeWidth, handleIndex: handleWidth}
-	used := shapeWidth + columnGap + handleWidth
+	allowed := map[int]int{shapeIndex: shapeWidth, idIndex: idWidth}
+	used := shapeWidth + shapeGap + idWidth
 	for _, index := range priority[2:] {
 		c := columns[index]
 		remaining := width - used - columnGap
@@ -104,7 +108,7 @@ func visibleColumns(rows []agentsview.Row, width int) ([]column, []int) {
 			continue
 		}
 		size := limit
-		if index != handleIndex && index != shapeIndex {
+		if index != idIndex && index != shapeIndex {
 			size = max(min(naturalWidth(c, rows), limit), c.minWidth)
 		}
 		shown = append(shown, c)
@@ -134,11 +138,21 @@ func fit(text string, width int, fromLeft bool) string {
 }
 
 func line(cells []string, columns []column, widths []int, styles []lipgloss.Style, width int) string {
-	parts := make([]string, len(cells))
+	var out strings.Builder
 	for i, cell := range cells {
-		parts[i] = styles[i].Render(fit(cell, widths[i], columns[i].fromLeft))
+		if i > 0 {
+			out.WriteString(strings.Repeat(" ", gapAfter(i-1)))
+		}
+		out.WriteString(styles[i].Render(fit(cell, widths[i], columns[i].fromLeft)))
 	}
-	return ansi.Truncate(strings.Join(parts, strings.Repeat(" ", columnGap)), width, "")
+	return ansi.Truncate(out.String(), width, "")
+}
+
+func gapAfter(position int) int {
+	if position == shapeIndex {
+		return shapeGap
+	}
+	return columnGap
 }
 
 func table(rows []agentsview.Row, width int, stale bool) []string {

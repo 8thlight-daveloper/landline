@@ -26,7 +26,7 @@ type Identity struct {
 	LandlineDate    string
 	Model           string
 	Effort          string
-	Label           string
+	Project         string
 }
 
 type GitRunner func(dir string, args ...string) (string, error)
@@ -44,8 +44,33 @@ func DetectIdentity(env Env, dir string, git GitRunner) Identity {
 			id.Worktree = filepath.Base(top)
 		}
 	}
+	id.Project = repositoryProject(dir, git)
 	id.Effort = env.Getenv("CLAUDE_EFFORT")
 	return id
+}
+
+const gitDirectoryName = ".git"
+
+func repositoryProject(dir string, git GitRunner) string {
+	common, err := git(dir, "rev-parse", "--git-common-dir")
+	if err != nil || common == "" {
+		return projectName(filepath.Base(dir))
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(dir, common)
+	}
+	common = filepath.Clean(common)
+	if filepath.Base(common) == gitDirectoryName {
+		return projectName(filepath.Base(filepath.Dir(common)))
+	}
+	return projectName(strings.TrimSuffix(filepath.Base(common), gitDirectoryName))
+}
+
+func projectName(base string) string {
+	if base == "." || base == string(filepath.Separator) {
+		return ""
+	}
+	return base
 }
 
 func (base Identity) With(over Identity) Identity {
@@ -61,14 +86,14 @@ func (base Identity) With(over Identity) Identity {
 		HarnessVersion:  pick(over.HarnessVersion, base.HarnessVersion),
 		LandlineVersion: pick(over.LandlineVersion, base.LandlineVersion),
 		LandlineCommit:  pick(over.LandlineCommit, base.LandlineCommit), LandlineDate: pick(over.LandlineDate, base.LandlineDate), Model: pick(over.Model, base.Model),
-		Effort: pick(over.Effort, base.Effort), Label: pick(over.Label, base.Label),
+		Effort: pick(over.Effort, base.Effort), Project: pick(over.Project, base.Project),
 	}
 }
 
 func EnvironmentIdentity(env Env) Identity {
 	return Identity{
 		Folder: env.Getenv("LANDLINE_FOLDER"), Model: env.Getenv("LANDLINE_MODEL"),
-		Effort: env.Getenv("LANDLINE_EFFORT"), Label: env.Getenv("LANDLINE_LABEL"),
+		Effort: env.Getenv("LANDLINE_EFFORT"), Project: env.Getenv("LANDLINE_PROJECT"),
 	}
 }
 
@@ -92,7 +117,7 @@ type Session struct {
 	identity                  Identity
 	overrides                 Identity
 	client                    *client.Client
-	handle                    string
+	id                        string
 	clientName, clientVersion string
 	detect                    func() Identity
 }
@@ -107,10 +132,10 @@ func (s *Session) SetClient(name, version string) {
 	s.clientName, s.clientVersion = name, version
 }
 
-func (s *Session) Handle() string {
+func (s *Session) ID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.handle
+	return s.id
 }
 
 func (s *Session) hubDown(err error) error {
@@ -132,21 +157,21 @@ func (s *Session) register() error {
 		Seed: identity.Seed, Harness: identity.Harness, Host: host, Session: s.env.Getenv("CLAUDE_CODE_SESSION_ID"),
 		Folder: identity.Folder, Branch: identity.Branch, Worktree: identity.Worktree, HarnessVersion: identity.HarnessVersion, LandlineVersion: identity.LandlineVersion,
 		LandlineCommit: identity.LandlineCommit, LandlineDate: identity.LandlineDate,
-		Model: identity.Model, Effort: identity.Effort, Label: identity.Label,
+		Model: identity.Model, Effort: identity.Effort, Project: identity.Project,
 	})
 	if err != nil {
 		return s.hubDown(err)
 	}
-	replaced := s.handle
-	s.identity, s.handle, s.client = identity, out.Name, client.New(url, out.Token)
+	replaced := s.id
+	s.identity, s.id, s.client = identity, out.ID, client.New(url, out.Token)
 	raw, _ := json.Marshal(session{URL: url, Token: out.Token})
 	if os.MkdirAll(s.env.ConfigDir, 0o700) == nil {
-		path := filepath.Join(s.env.ConfigDir, "session-"+out.Name+".json")
+		path := filepath.Join(s.env.ConfigDir, "session-"+out.ID+".json")
 		if os.WriteFile(path, raw, 0o600) == nil {
 			os.Chmod(path, 0o600)
 		}
 	}
-	if replaced != "" && replaced != out.Name {
+	if replaced != "" && replaced != out.ID {
 		os.Remove(filepath.Join(s.env.ConfigDir, "session-"+replaced+".json"))
 	}
 	return nil
@@ -213,16 +238,30 @@ func (s *Session) Attach(req model.AttachRequest) (out model.AttachResponse, err
 	err = s.call(func(c *client.Client) (e error) { out, e = c.Attach(req); return })
 	if err == nil {
 		s.mu.Lock()
-		s.overrides = s.overrides.With(Identity{Model: req.Model, Effort: req.Effort, Label: req.Label})
+		s.overrides = s.overrides.With(Identity{Model: req.Model, Effort: req.Effort, Project: req.Project})
 		s.mu.Unlock()
 	}
+	return
+}
+
+func (s *Session) Project() (project string, given bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.overrides.Project != "" {
+		return s.overrides.Project, true
+	}
+	return s.identity.Project, false
+}
+
+func (s *Session) Status(req model.StatusRequest) (out model.StatusResponse, err error) {
+	err = s.call(func(c *client.Client) (e error) { out, e = c.Status(req); return })
 	return
 }
 
 func (s *Session) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.handle != "" {
-		os.Remove(filepath.Join(s.env.ConfigDir, "session-"+s.handle+".json"))
+	if s.id != "" {
+		os.Remove(filepath.Join(s.env.ConfigDir, "session-"+s.id+".json"))
 	}
 }

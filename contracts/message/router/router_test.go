@@ -15,7 +15,7 @@ var t0 = time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 func known(names ...string) []model.Agent {
 	out := []model.Agent{}
 	for _, n := range names {
-		out = append(out, model.Agent{Name: n, Harness: "codex"})
+		out = append(out, model.Agent{ID: n, Harness: "codex"})
 	}
 	return out
 }
@@ -108,7 +108,7 @@ func TestDirectionDoesNotMatterForADirectMessage(t *testing.T) {
 	}
 }
 
-func TestANameThatSortsBeforeTheOthersIsStillTheOneRecipient(t *testing.T) {
+func TestAnIDThatSortsBeforeTheOthersIsStillTheOneRecipient(t *testing.T) {
 	t.Parallel()
 	got, err := send(t, "bravo", model.SendRequest{To: "aaa", Body: "x"}, "aaa", "alpha", "bravo")
 	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"aaa"}) || got.Envelope.To != "aaa" {
@@ -314,7 +314,7 @@ func TestAnUnregisteredSenderIsRefusedWhateverItSends(t *testing.T) {
 	}
 }
 
-func TestAnAgentWhoseNameStartsWithAllIsADirectRecipient(t *testing.T) {
+func TestAnAgentWhoseIDStartsWithAllIsADirectRecipient(t *testing.T) {
 	t.Parallel()
 	got, err := send(t, "alpha", model.SendRequest{To: "allied", Body: "x"}, "alpha", "allied", "bravo")
 	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"allied"}) || got.Envelope.To != "allied" {
@@ -348,7 +348,7 @@ func TestEveryKindOfUnicodeWhiteSpaceAloneIsAnEmptyBody(t *testing.T) {
 	}
 }
 
-func TestADuplicateNameInTheAgentListIsOneRecipient(t *testing.T) {
+func TestADuplicateIDInTheAgentListIsOneRecipient(t *testing.T) {
 	t.Parallel()
 	got, err := send(t, "alpha", model.SendRequest{To: "bravo", Body: "x"}, "alpha", "bravo", "bravo", "charlie", "bravo")
 	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"bravo"}) {
@@ -404,7 +404,7 @@ func TestTheBodyIsKeptByteForByteIncludingCarriageReturns(t *testing.T) {
 	}
 }
 
-func TestTheNameAllIsNotARecipientAtAll(t *testing.T) {
+func TestTheIDAllIsNotARecipientAtAll(t *testing.T) {
 	t.Parallel()
 	got, err := send(t, "alpha", model.SendRequest{To: "all", Body: "x"}, "alpha", "bravo", "charlie")
 	if !errors.Is(err, model.ErrUnknownRecipient) {
@@ -501,6 +501,36 @@ func TestEveryCharacterOfInReplyToIsCheckedIncludingTheFirst(t *testing.T) {
 	for _, token := range []string{" a", "\na", "\ta", "/a", ":a", "{a", "\u00e9a", "\u2028a", " ", "\n", "@", "{"} {
 		if _, err := send(t, "alpha", model.SendRequest{To: "bravo", InReplyTo: token, Body: "x"}, "alpha", "bravo"); !errors.Is(err, model.ErrBadReplyTo) {
 			t.Errorf("in_reply_to %q: %v", token, err)
+		}
+	}
+}
+
+func TestOnlyAnExactIDIsARecipientNotAProjectNorAPrefixOfAnID(t *testing.T) {
+	t.Parallel()
+	agents := []model.Agent{
+		{ID: "a3f9", Harness: "codex", Project: "landline"},
+		{ID: "b7c2", Harness: "codex", Project: "tutor"},
+		{ID: "b7c4", Harness: "codex", Project: "tutor"},
+		{ID: "d001", Harness: "codex"},
+	}
+	for _, to := range []string{"landline", "tutor", "b7c", "a3", "b", "A3F9", "a3f9 ", "a3f90"} {
+		got, err := newImpl().Route(agents, "d001", model.SendRequest{To: to, Body: "x"}, "m-1", 7, t0)
+		if !errors.Is(err, model.ErrUnknownRecipient) {
+			t.Errorf("to %q: got %+v, %v", to, got, err)
+		}
+	}
+	got, err := newImpl().Route(agents, "d001", model.SendRequest{To: "b7c4", Body: "x"}, "m-1", 7, t0)
+	if err != nil || !reflect.DeepEqual(got.Recipients, []string{"b7c4"}) || got.Envelope.From != "d001" || got.Envelope.To != "b7c4" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestTheSenderIsFoundByItsExactIDAndNotByItsProject(t *testing.T) {
+	t.Parallel()
+	agents := []model.Agent{{ID: "a3f9", Harness: "codex", Project: "landline"}, {ID: "b7c2", Harness: "codex"}}
+	for _, from := range []string{"landline", "a3", "A3F9", ""} {
+		if _, err := newImpl().Route(agents, from, model.SendRequest{To: "b7c2", Body: "x"}, "m-1", 7, t0); !errors.Is(err, model.ErrUnknownSender) {
+			t.Errorf("from %q: %v", from, err)
 		}
 	}
 }

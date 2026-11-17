@@ -28,9 +28,11 @@ const (
 	codeInvalidParams  = -32602
 )
 
-const instructions = `Landline connects you to other coding agents. Use landline_agents to see who is around and landline_send to message one agent.
+const instructions = `Landline connects you to other coding agents. Use landline_agents to see who is around and landline_send to message one agent by its id.
 
-Before you use the other Landline tools, call landline_register once with what you know about yourself: your model name, your effort level if you know it, and a short label if your user gave you one. Other agents see these as your own claims. If you are Codex, read CODEX_THREAD_ID from your shell environment, for example with the command echo $CODEX_THREAD_ID, and pass it as codex_thread. Landline then sends a message to your session that holds a code. Call landline_register again with the same codex_thread and that code, and Landline will be able to deliver messages to you.
+Before you use the other Landline tools, call landline_register once with what you know about yourself: your model name, your effort level if you know it, and the project you are working on if you know it. The project names the group of agents that work on it, and agents with the same project are colleagues. Other agents see these as your own claims. If you give no project, Landline uses the name of your project's repository folder. If you are Codex, read CODEX_THREAD_ID from your shell environment, for example with the command echo $CODEX_THREAD_ID, and pass it as codex_thread. Landline then sends a message to your session that holds a code. Call landline_register again with the same codex_thread and that code, and Landline will be able to deliver messages to you.
+
+Then call landline_status with the outcome you are working toward, and change it when your goal changes. Everyone connected and your user can read it.
 
 Mail arrives as a channel event or as a queued turn in your session, and never through a tool you call. A message to an agent that is not connected fails at once and is not held.
 
@@ -46,6 +48,7 @@ type Hub interface {
 	Send(model.SendBody) (model.SendResponse, error)
 	Agents() ([]model.AgentInfo, error)
 	Attach(model.AttachRequest) (model.AttachResponse, error)
+	Status(model.StatusRequest) (model.StatusResponse, error)
 	Deliveries(ctx context.Context, handle func(model.Delivery)) error
 	Report(id string, report model.DeliveryReport) error
 }
@@ -90,6 +93,38 @@ type toolResult struct {
 type session struct {
 	introduced  atomic.Bool
 	codexThread atomic.Pointer[string]
+	project     func() (project string, given bool)
+	currentID   func() string
+	mu          sync.Mutex
+	lastID      string
+	task        string
+	taskOwner   string
+}
+
+func (s *session) idNow() string {
+	if s.currentID != nil {
+		return s.currentID()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastID
+}
+
+func (s *session) rememberTask(task string) {
+	owner := s.idNow()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.task, s.taskOwner = task, owner
+}
+
+func (s *session) taskFor(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastID = id
+	if s.taskOwner != id {
+		return ""
+	}
+	return s.task
 }
 
 type schema map[string]any
@@ -105,6 +140,8 @@ type Options struct {
 	ReadyDelay time.Duration
 	OnClient   func(name, version string)
 	OnReady    func()
+	Project    func() (project string, given bool)
+	ID         func() string
 }
 
 type lockedWriter struct {
@@ -125,7 +162,7 @@ func Serve(in io.Reader, out io.Writer, hub Hub) error {
 func ServeWith(in io.Reader, out io.Writer, hub Hub, options Options) error {
 	out = &lockedWriter{out: out}
 	ready := make(chan struct{})
-	var state session
+	state := session{project: options.Project, currentID: options.ID}
 	var readyOnce sync.Once
 	var seenMu sync.Mutex
 	initialized, listed := false, false
@@ -283,16 +320,16 @@ func tools() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "landline_agents",
-			"description": "List the agents Landline knows: name, harness, host, whether each is connected, and the attributes they claim.",
+			"description": "List the agents Landline knows: id, harness, host, whether each is connected, and the attributes they claim.",
 			"inputSchema": schema{"type": "object", "properties": schema{}},
 		},
 		{
 			"name":        "landline_send",
-			"description": "Send a message to one agent by name. It fails at once if that agent is not connected. Never include secrets, tokens, or passwords.",
+			"description": "Send a message to one agent by its id, as landline_agents lists it. It fails at once if that agent is not connected. Never include secrets, tokens, or passwords.",
 			"inputSchema": schema{
 				"type": "object",
 				"properties": schema{
-					"to":          schema{"type": "string", "description": "The name of one agent."},
+					"to":          schema{"type": "string", "description": "The id of one agent."},
 					"body":        schema{"type": "string", "description": "The message text."},
 					"thread":      schema{"type": "string", "description": "Thread name. Defaults to main."},
 					"kind":        schema{"type": "string", "enum": []string{"chat", "task", "reply", "review"}},
@@ -303,22 +340,41 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "landline_register",
-			"description": "Tell Landline about yourself: your model, effort, label, and, for Codex, your session id so that messages can be delivered to you. These are your own claims. For Codex, call it with codex_thread, wait for the message that holds a code, then call it again with codex_thread and the code.",
+			"description": "Tell Landline about yourself: your model, effort, project, and, for Codex, your session id so that messages can be delivered to you. These are your own claims. For Codex, call it with codex_thread, wait for the message that holds a code, then call it again with codex_thread and the code.",
 			"inputSchema": schema{
 				"type": "object",
 				"properties": schema{
 					"model":        schema{"type": "string", "description": "Your model name, such as claude-opus-5-5."},
 					"effort":       schema{"type": "string", "description": "Your effort level, if you know it."},
-					"label":        schema{"type": "string", "description": "A short name your user gave you."},
+					"project":      schema{"type": "string", "description": projectDescription},
 					"codex_thread": schema{"type": "string", "description": "Codex only: the value of CODEX_THREAD_ID in your shell environment."},
 					"code":         schema{"type": "string", "description": "Codex only: the code from the message Landline sent to your session."},
 				},
 			},
 		},
+		{
+			"name":        "landline_status",
+			"description": statusDescription,
+			"inputSchema": schema{
+				"type":       "object",
+				"properties": schema{"task": schema{"type": "string", "description": "The outcome you are working toward. At most 64 bytes. An empty task clears it."}},
+				"required":   []string{"task"},
+			},
+		},
 	}
 }
 
-const registerReminder = "You have not told Landline about yourself yet. Call landline_register with your model, your effort level, and a label if you have one, so other agents can tell you apart."
+const projectDescription = "The name of the project you are working on, shared with the other agents on that project, for example `landline`. " +
+	"Agents with the same project are colleagues: they may exchange read-only requests, and other agents and your user see the project in the agent list. " +
+	"Do not put a task or a role here. If you give none, Landline uses the name of your project's repository folder."
+
+const statusDescription = "The outcome you are working toward, in a short phrase you would say to a teammate, for example `menu bar app for ADR 0140`. " +
+	"Set it when you start work and change it when your goal changes, not when a step ends: if it would change when one test passes, it is too low. " +
+	"It is not the project, which is your `project`, and not a plan. " +
+	"Everyone connected and your user can read it, so put in no secrets, no client names, and no personal data. " +
+	"At most 64 bytes. An empty task clears it."
+
+const registerReminder = "You have not told Landline about yourself yet. Call landline_register with your model, your effort level, and your project if you know it, so other agents can tell you apart. The project names the group of agents that work on it. Then call landline_status to say what you are working toward."
 
 func callTool(params json.RawMessage, hub Hub, state *session) (any, *rpcError) {
 	var call toolCall
@@ -334,6 +390,8 @@ func callTool(params json.RawMessage, hub Hub, state *session) (any, *rpcError) 
 			}
 		}
 		return result, failure
+	case "landline_status":
+		return remind(runStatus(call.Arguments, hub, state))(state)
 	case "landline_agents":
 		return remind(runAgents(hub))(state)
 	case "landline_send":
@@ -373,13 +431,33 @@ func runAgents(hub Hub) (any, *rpcError) {
 		if agent.Connected {
 			state = "connected"
 		}
-		line := fmt.Sprintf("%s\t%s\t%s\t%s", agent.Name, agent.Harness, agent.Host, state)
+		line := fmt.Sprintf("%s\t%s\t%s\t%s", agent.ID, agent.Harness, agent.Host, state)
 		if attributes := agent.Attributes(); attributes != "" {
 			line += "\t" + attributes
 		}
 		lines = append(lines, line)
 	}
 	return textResult(strings.Join(lines, "\n"), false), nil
+}
+
+func runStatus(arguments map[string]json.RawMessage, hub Hub, state *session) (any, *rpcError) {
+	raw, found := present(arguments, "task")
+	if !found {
+		return nil, invalidParams("missing required argument: task")
+	}
+	var task string
+	if err := json.Unmarshal(raw, &task); err != nil {
+		return nil, invalidParams("task must be a string")
+	}
+	answer, err := hub.Status(model.StatusRequest{Task: task})
+	if err != nil {
+		return textResult(err.Error(), true), nil
+	}
+	state.rememberTask(answer.Task)
+	if answer.Task == "" {
+		return textResult("task cleared", false), nil
+	}
+	return textResult("task: "+answer.Task, false), nil
 }
 
 func runSend(arguments map[string]json.RawMessage, hub Hub) (any, *rpcError) {
@@ -562,7 +640,7 @@ func runRegister(arguments map[string]json.RawMessage, hub Hub, state *session) 
 	for _, field := range []struct {
 		name string
 		into *string
-	}{{"model", &request.Model}, {"effort", &request.Effort}, {"label", &request.Label}, {"codex_thread", &request.CodexThread}, {"code", &request.Code}} {
+	}{{"model", &request.Model}, {"effort", &request.Effort}, {"project", &request.Project}, {"codex_thread", &request.CodexThread}, {"code", &request.Code}} {
 		value, rpcFailure := stringArgument(arguments, field.name, false)
 		if rpcFailure != nil {
 			return nil, rpcFailure
@@ -570,7 +648,7 @@ func runRegister(arguments map[string]json.RawMessage, hub Hub, state *session) 
 		*field.into = value
 	}
 	if request == (model.AttachRequest{}) {
-		return nil, invalidParams("give at least one of model, effort, label, or codex_thread")
+		return nil, invalidParams("give at least one of model, effort, project, or codex_thread")
 	}
 	response, err := hub.Attach(request)
 	if err != nil {
@@ -579,23 +657,45 @@ func runRegister(arguments map[string]json.RawMessage, hub Hub, state *session) 
 	if response.Attached && request.CodexThread != "" {
 		state.codexThread.Store(&request.CodexThread)
 	}
-	parts := []string{}
-	if response.Name != "" {
-		parts = append(parts, "you are "+response.Name)
+	project, given := request.Project, true
+	if state.project != nil {
+		project, given = state.project()
 	}
-	if len(response.Updated) > 0 {
-		parts = append(parts, "recorded "+strings.Join(response.Updated, ", "))
-	}
+	text := registerLine(response, project, given, state.taskFor(response.ID))
 	if response.Challenge {
-		parts = append(parts, "sent a code to that Codex session. When the message arrives, call landline_register again with the same codex_thread and the code")
+		text += " Landline sent a code to that Codex session. When the message arrives, call landline_register again with the same codex_thread and the code."
 	}
 	if response.Attached {
-		parts = append(parts, "this Codex session is attached, so Landline can deliver messages to it")
+		text += " Landline attached this Codex session, so it can deliver messages to it."
 	}
-	if len(parts) == 0 {
-		parts = append(parts, "nothing changed")
+	return textResult(text, false), nil
+}
+
+func registerLine(response model.AttachResponse, project string, given bool, task string) string {
+	line := "you are " + response.ID + ". "
+	if project == "" {
+		line += "no project, so you are in no group."
+	} else {
+		origin := "from your repository"
+		if given {
+			origin = "as you gave it"
+		}
+		line += fmt.Sprintf("project: %s (%s), shared with %s.", project, origin, peersPhrase(response.ProjectPeers))
 	}
-	return textResult(strings.Join(parts, "; "), false), nil
+	if task != "" {
+		return line + " task: " + task + "."
+	}
+	return line + " task: none. Set one with landline_status when your goal is clear."
+}
+
+func peersPhrase(peers int) string {
+	switch peers {
+	case 0:
+		return "no other agent currently connected"
+	case 1:
+		return "1 other agent currently connected"
+	}
+	return fmt.Sprintf("%d other agents currently connected", peers)
 }
 
 func clientOf(line []byte) (string, string) {

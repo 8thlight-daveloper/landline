@@ -27,7 +27,7 @@ func ClaudeLaunch(args []string) (Launch, error) {
 	var pass []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--label", "--model", "--effort":
+		case "--project", "--model", "--effort":
 			if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" {
 				return Launch{}, fmt.Errorf("%s needs a value", args[i])
 			}

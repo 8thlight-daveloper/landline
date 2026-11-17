@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,11 +60,11 @@ func startWith(t *testing.T, adjust func(*Config)) *harness {
 			return fmt.Sprintf("m-%02d", counter)
 		},
 		NewCode: func() string { return "ABC123" },
-		NewSuffix: func() string {
+		NewAgentID: func() string {
 			counterMu.Lock()
 			defer counterMu.Unlock()
 			suffix++
-			return fmt.Sprintf("s%02d", suffix)
+			return fmt.Sprintf("a%03x", suffix)
 		},
 		Notify: func(s string) { h.mu.Lock(); h.notes = append(h.notes, s); h.mu.Unlock() },
 	}
@@ -120,7 +121,7 @@ func (h *harness) register(name string) string {
 
 func (h *harness) registerVersioned(name, landlineVersion string) string {
 	h.t.Helper()
-	status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: name, Harness: "codex", Host: "mac", Session: "s-" + name, LandlineVersion: landlineVersion})
+	status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{ID: name, Harness: "codex", Host: "mac", Session: "s-" + name, LandlineVersion: landlineVersion})
 	if status != 200 {
 		h.t.Fatalf("register %s: %d %s", name, status, raw)
 	}
@@ -141,7 +142,7 @@ func (h *harness) registerSeed(seed string, extra map[string]string) (string, st
 	}
 	var out model.RegisterResponse
 	json.Unmarshal(raw, &out)
-	return out.Name, out.Token
+	return out.ID, out.Token
 }
 
 func (h *harness) agents(token string) []model.AgentInfo {
@@ -155,7 +156,7 @@ func (h *harness) agents(token string) []model.AgentInfo {
 func (h *harness) agent(token, name string) (model.AgentInfo, bool) {
 	h.t.Helper()
 	for _, each := range h.agents(token) {
-		if each.Name == name {
+		if each.ID == name {
 			return each, true
 		}
 	}
@@ -346,10 +347,10 @@ func TestTheDefaultTimingsAreTheDocumentedOnes(t *testing.T) {
 func TestRegisterNeedsTheHubSecret(t *testing.T) {
 	t.Parallel()
 	h := start(t)
-	if status, _ := h.call("POST", "/v1/register", "wrong", model.RegisterRequest{Name: "alpha", Harness: "codex"}); status != 401 {
+	if status, _ := h.call("POST", "/v1/register", "wrong", model.RegisterRequest{ID: "alpha", Harness: "codex"}); status != 401 {
 		t.Fatalf("status %d", status)
 	}
-	if status, _ := h.call("POST", "/v1/register", "", model.RegisterRequest{Name: "alpha", Harness: "codex"}); status != 401 {
+	if status, _ := h.call("POST", "/v1/register", "", model.RegisterRequest{ID: "alpha", Harness: "codex"}); status != 401 {
 		t.Fatalf("status %d", status)
 	}
 }
@@ -357,10 +358,10 @@ func TestRegisterNeedsTheHubSecret(t *testing.T) {
 func TestRegisterRefusesABadNameAndAWakeField(t *testing.T) {
 	t.Parallel()
 	h := start(t)
-	if status, _ := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: "Bad Name", Harness: "codex"}); status != 400 {
+	if status, _ := h.call("POST", "/v1/register", secret, model.RegisterRequest{ID: "Bad Name", Harness: "codex"}); status != 400 {
 		t.Errorf("bad name: status %d", status)
 	}
-	if status, _ := h.call("POST", "/v1/register", secret, map[string]string{"name": "alpha", "harness": "codex", "wake_kind": "codex", "wake_target": "x"}); status != 400 {
+	if status, _ := h.call("POST", "/v1/register", secret, map[string]string{"id": "alpha", "harness": "codex", "wake_kind": "codex", "wake_target": "x"}); status != 400 {
 		t.Errorf("wake fields: status %d", status)
 	}
 }
@@ -370,7 +371,7 @@ func TestRegisterWantsEitherANameOrASeedAndNeverBoth(t *testing.T) {
 	h := start(t)
 	for _, body := range []map[string]string{
 		{"harness": "x"},
-		{"harness": "x", "name": "alpha", "seed": "alpha"},
+		{"harness": "x", "id": "alpha", "seed": "alpha"},
 	} {
 		if status, _ := h.call("POST", "/v1/register", secret, body); status != 400 {
 			t.Errorf("%v: %d", body, status)
@@ -806,33 +807,23 @@ func TestTheRemovedRoutesAreGone(t *testing.T) {
 	}
 }
 
-func TestASeedGetsAFreshHandleEveryTimeAndNeverAnOldOne(t *testing.T) {
+func TestASeedGetsAFreshFourHexIDEveryTimeAndTheSeedTextDoesNotShapeIt(t *testing.T) {
 	t.Parallel()
 	h := start(t)
 	first, _ := h.registerSeed("threnos", nil)
 	second, _ := h.registerSeed("threnos", nil)
 	third, _ := h.registerSeed("Repo Tutor!", nil)
-	if first != "threnos-s01" || second != "threnos-s02" || third != "repo-tutor-s03" {
+	if first != "a001" || second != "a002" || third != "a003" {
 		t.Fatalf("%q %q %q", first, second, third)
-	}
-}
-
-func TestASeedThatSanitizesToNothingStillGetsAHandleAndALongOneIsCut(t *testing.T) {
-	t.Parallel()
-	h := start(t)
-	bare, _ := h.registerSeed("***", nil)
-	long, _ := h.registerSeed(strings.Repeat("abcdefghij", 6), nil)
-	if bare != "agent-s01" || len(long) > 32 || !strings.HasSuffix(long, "-s02") {
-		t.Fatalf("%q %q", bare, long)
 	}
 }
 
 func TestAttributesAreRegisteredShownInTheListAndChecked(t *testing.T) {
 	t.Parallel()
 	h := start(t)
-	handle, token := h.registerSeed("threnos", map[string]string{"folder": "threnos", "branch": "fix/login", "harness_version": "2.1.296", "landline_version": "0.2.0", "model": "claude-opus-5-5", "effort": "medium", "label": "lead"})
+	handle, token := h.registerSeed("threnos", map[string]string{"folder": "threnos", "branch": "fix/login", "harness_version": "2.1.296", "landline_version": "0.2.0", "model": "claude-opus-5-5", "effort": "medium", "project": "lead"})
 	found, _ := h.agent(token, handle)
-	if found.Folder != "threnos" || found.Branch != "fix/login" || found.HarnessVersion != "2.1.296" || found.LandlineVersion != "0.2.0" || found.Model != "claude-opus-5-5" || found.Effort != "medium" || found.Label != "lead" {
+	if found.Folder != "threnos" || found.Branch != "fix/login" || found.HarnessVersion != "2.1.296" || found.LandlineVersion != "0.2.0" || found.Model != "claude-opus-5-5" || found.Effort != "medium" || found.Project != "lead" {
 		t.Fatalf("%+v", found)
 	}
 	if status, _ := h.call("POST", "/v1/register", secret, map[string]string{"seed": "x", "harness": "h", "branch": "bad\nbranch"}); status != 400 {
@@ -850,7 +841,7 @@ func TestASendToAnAgentWithNoLandlineVersionOnRecordSaysItMustBeRestarted(t *tes
 	h.registerVersioned("old", "")
 	h.registerVersioned("current", "0.2.0")
 	status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: "old", Body: "x"})
-	if status != 409 || !strings.Contains(string(raw), "not connected: no landline version is on record") || !strings.Contains(string(raw), "hand-registered name, which can send and cannot receive") || !strings.Contains(string(raw), "Restart its session if it is a landline session") {
+	if status != 409 || !strings.Contains(string(raw), "not connected: no landline version is on record") || !strings.Contains(string(raw), "hand-registered id, which can send and cannot receive") || !strings.Contains(string(raw), "Restart its session if it is a landline session") {
 		t.Fatalf("an unversioned agent: %d %s", status, raw)
 	}
 	status, raw = h.call("POST", "/v1/send", sender, model.SendBody{To: "current", Body: "x"})
@@ -862,33 +853,203 @@ func TestASendToAnAgentWithNoLandlineVersionOnRecordSaysItMustBeRestarted(t *tes
 	}
 }
 
-func TestSendResolvesALabelAPrefixAndAnExactHandleAndRefusesAnAmbiguousName(t *testing.T) {
+func TestSendTakesAnExactIDAndNothingElse(t *testing.T) {
 	t.Parallel()
 	h := start(t)
 	_, sender := h.registerSeed("sender", nil)
-	tutorOne, tutorToken := h.registerSeed("repo-tutor", map[string]string{"label": "tutor"})
-	otherName, otherToken := h.registerSeed("other", map[string]string{"label": "reviewer"})
+	tutorID, tutorToken := h.registerSeed("repo-tutor", map[string]string{"project": "tutor"})
 	tutorStream := h.openStream(tutorToken)
-	otherStream := h.openStream(otherToken)
-	delivery, result := h.deliveredSend(sender, tutorStream, tutorToken, model.SendBody{To: "tutor", Body: "by label"})
-	if result.status != 200 || delivery.Message.To != tutorOne {
-		t.Fatalf("label: %d %s %+v", result.status, result.raw, delivery.Message)
+	if delivery, result := h.deliveredSend(sender, tutorStream, tutorToken, model.SendBody{To: tutorID, Body: "exact"}); result.status != 200 || delivery.Message.To != tutorID {
+		t.Fatalf("exact: %d %s", result.status, result.raw)
 	}
-	delivery, result = h.deliveredSend(sender, otherStream, otherToken, model.SendBody{To: "revi", Body: "by prefix"})
-	if result.status != 200 || delivery.Message.To != otherName {
-		t.Fatalf("prefix: %d %s", result.status, result.raw)
+	for _, to := range []string{tutorID[:2], "tutor", "tut", "nobody", "all", ""} {
+		if status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: to, Body: "x"}); status != 404 {
+			t.Errorf("%q: %d %s", to, status, raw)
+		}
 	}
-	if _, result = h.deliveredSend(sender, tutorStream, tutorToken, model.SendBody{To: tutorOne, Body: "exact"}); result.status != 200 {
-		t.Fatalf("exact: %d", result.status)
+}
+
+func (h *harness) errorOf(token string, to string) (int, string) {
+	h.t.Helper()
+	status, raw := h.call("POST", "/v1/send", token, model.SendBody{To: to, Body: "x"})
+	var out model.ErrorResponse
+	json.Unmarshal(raw, &out)
+	return status, out.Error
+}
+
+func TestTheHintNamesTheConnectedHoldersOfAProjectOtherThanTheSenderSortedAndCutAtTen(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	_, outsider := h.registerSeed("outsider", nil)
+	plain := model.ErrUnknownRecipient.Error()
+	var ids []string
+	var tokens []string
+	for i := 0; i < 12; i++ {
+		id, token := h.registerSeed("w", map[string]string{"project": "crew"})
+		h.openStream(token)
+		ids = append(ids, id)
+		tokens = append(tokens, token)
 	}
-	_, secondToken := h.registerSeed("repo-tutor-two", map[string]string{"label": "tutor"})
-	h.openStream(secondToken)
-	status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: "tutor", Body: "ambiguous"})
-	if status != 409 || !strings.Contains(string(raw), tutorOne) || !strings.Contains(string(raw), "Use a handle") {
-		t.Fatalf("ambiguous: %d %s", status, raw)
+	sorted := append([]string{}, ids...)
+	slices.Sort(sorted)
+	status, text := h.errorOf(outsider, "crew")
+	if want := plain + ". crew is a project, not an agent. Send to one of: " + strings.Join(sorted[:10], ", ") + ", and more"; status != 404 || text != want {
+		t.Fatalf("%d %q, want %q", status, text, want)
 	}
-	if status, _ := h.call("POST", "/v1/send", sender, model.SendBody{To: "nobody", Body: "x"}); status != 404 {
-		t.Fatalf("unknown: %d", status)
+	status, text = h.errorOf(tokens[0], "crew")
+	others := slices.DeleteFunc(slices.Clone(sorted), func(id string) bool { return id == ids[0] })
+	if want := plain + ". crew is a project, not an agent. Send to one of: " + strings.Join(others[:10], ", ") + ", and more"; status != 404 || text != want {
+		t.Fatalf("%d %q, want %q", status, text, want)
+	}
+	if status, text := h.errorOf(outsider, "all"); status != 404 || text != plain {
+		t.Fatalf("all: %d %q", status, text)
+	}
+}
+
+func TestTheHintIsLeftOutForAProjectHeldOnlyByTheSenderOrByDisconnectedAgentsAndForAnUnknownSender(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	_, outsider := h.registerSeed("outsider", nil)
+	_, soloToken := h.registerSeed("solo", map[string]string{"project": "solo"})
+	h.openStream(soloToken)
+	_, ghostToken := h.registerSeed("ghost", map[string]string{"project": "ghosts"})
+	h.openStream(ghostToken).cancel()
+	h.waitUntil("the ghost to disconnect", func() bool {
+		h.hub.mu.Lock()
+		defer h.hub.mu.Unlock()
+		return len(h.hub.streams) == 1
+	})
+	plain := model.ErrUnknownRecipient.Error()
+	for name, c := range map[string]struct{ token, to string }{
+		"only the sender": {soloToken, "solo"}, "only disconnected agents": {outsider, "ghosts"},
+	} {
+		if status, text := h.errorOf(c.token, c.to); status != 404 || text != plain {
+			t.Errorf("%s: %d %q", name, status, text)
+		}
+	}
+	if status, text := h.errorOf(outsider, "solo"); status != 404 || !strings.HasSuffix(text, "solo is a project, not an agent. Send to one of: "+h.idOf(soloToken)) {
+		t.Errorf("%d %q", status, text)
+	}
+}
+
+func (h *harness) idOf(token string) string {
+	h.t.Helper()
+	for _, each := range h.agents(token) {
+		if each.Connected {
+			return each.ID
+		}
+	}
+	h.t.Fatal("no connected agent")
+	return ""
+}
+
+func TestAnAttachCountsTheOtherConnectedHoldersOfTheCallersExactProject(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	_, first := h.registerSeed("a", map[string]string{"project": "crew"})
+	h.openStream(first)
+	_, second := h.registerSeed("b", map[string]string{"project": "crew"})
+	_, ghost := h.registerSeed("c", map[string]string{"project": "crew"})
+	h.openStream(ghost).cancel()
+	_, bare := h.registerSeed("d", nil)
+	h.waitUntil("the ghost to disconnect", func() bool {
+		h.hub.mu.Lock()
+		defer h.hub.mu.Unlock()
+		return len(h.hub.streams) == 1
+	})
+	peers := func(token string, request model.AttachRequest) int {
+		status, raw := h.call("POST", "/v1/attach", token, request)
+		var out model.AttachResponse
+		json.Unmarshal(raw, &out)
+		if status != 200 || !strings.Contains(string(raw), `"project_peers"`) {
+			t.Fatalf("%d %s", status, raw)
+		}
+		return out.ProjectPeers
+	}
+	if got := peers(second, model.AttachRequest{Model: "m"}); got != 1 {
+		t.Errorf("a project with one connected peer: %d", got)
+	}
+	if got := peers(first, model.AttachRequest{Model: "m"}); got != 0 {
+		t.Errorf("the caller is not counted: %d", got)
+	}
+	if got := peers(bare, model.AttachRequest{Model: "m"}); got != 0 {
+		t.Errorf("no project: %d", got)
+	}
+	if got := peers(bare, model.AttachRequest{Project: "crew"}); got != 1 {
+		t.Errorf("the project claimed in the same call: %d", got)
+	}
+}
+
+func TestStatusSetsAndClearsTheTaskStampsItWithTheClockAndKeepsTheTimeForTheSameText(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	id, token := h.registerSeed("a", nil)
+	set := func(body any) (int, model.StatusResponse) {
+		status, raw := h.call("POST", "/v1/status", token, body)
+		var out model.StatusResponse
+		json.Unmarshal(raw, &out)
+		return status, out
+	}
+	status, first := set(map[string]string{"task": "ship ADR 0160"})
+	if status != 200 || first.Task != "ship ADR 0160" || !first.TaskAt.Equal(h.now) {
+		t.Fatalf("set: %d %+v", status, first)
+	}
+	h.advance(time.Minute)
+	if status, same := set(map[string]string{"task": "ship ADR 0160"}); status != 200 || !same.TaskAt.Equal(first.TaskAt) {
+		t.Fatalf("the same text: %d %+v", status, same)
+	}
+	h.advance(time.Minute)
+	if status, changed := set(map[string]string{"task": "other"}); status != 200 || !changed.TaskAt.Equal(h.now) {
+		t.Fatalf("a change: %d %+v", status, changed)
+	}
+	if listed, _ := h.agent(token, id); listed.Task != "other" || !listed.TaskAt.Equal(h.now) {
+		t.Fatalf("the list: %+v", listed)
+	}
+	status, raw := h.call("POST", "/v1/status", token, map[string]string{"task": ""})
+	if status != 200 || string(bytes.TrimSpace(raw)) != `{"task":""}` {
+		t.Fatalf("clear: %d %s", status, raw)
+	}
+	_, rawList := h.call("GET", "/v1/agents", token, nil)
+	if strings.Contains(string(rawList), "task") {
+		t.Fatalf("a cleared task is listed: %s", rawList)
+	}
+}
+
+func TestStatusRefusesABodyThatIsNotExactlyAStringTaskAndATokenThatIsNotAnAgents(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	id, token := h.registerSeed("a", nil)
+	for name, body := range map[string]any{
+		"no task": map[string]any{}, "null": map[string]any{"task": nil}, "a number": map[string]any{"task": 5},
+		"an unknown field": map[string]any{"task": "x", "extra": 1}, "65 bytes": map[string]any{"task": strings.Repeat("a", 65)},
+		"a line break": map[string]any{"task": "a\nb"},
+	} {
+		if status, raw := h.call("POST", "/v1/status", token, body); status != 400 {
+			t.Errorf("%s: %d %s", name, status, raw)
+		}
+	}
+	if listed, _ := h.agent(token, id); listed.Task != "" {
+		t.Fatalf("a refused call set %q", listed.Task)
+	}
+	observer := h.registerObserver("tui")
+	if status, _ := h.call("POST", "/v1/status", observer, map[string]string{"task": "x"}); status != 403 {
+		t.Errorf("observer: %d", status)
+	}
+	for _, bad := range []string{"", "unknown", secret} {
+		if status, _ := h.call("POST", "/v1/status", bad, map[string]string{"task": "x"}); status != 401 {
+			t.Errorf("%q: %d", bad, status)
+		}
+	}
+}
+
+func TestARegistrationByIDClearsTheTask(t *testing.T) {
+	t.Parallel()
+	h := start(t)
+	token := h.registerVersioned("alpha", "0.2.0")
+	h.call("POST", "/v1/status", token, map[string]string{"task": "x"})
+	h.registerVersioned("alpha", "0.2.0")
+	if listed, _ := h.agent(h.registerVersioned("bravo", "0.2.0"), "alpha"); listed.Task != "" || !listed.TaskAt.IsZero() {
+		t.Fatalf("%+v", listed)
 	}
 }
 
@@ -896,22 +1057,22 @@ func TestAttachUpdatesTheClaimsAndNeedsAnAgentToken(t *testing.T) {
 	t.Parallel()
 	h := start(t)
 	handle, token := h.registerSeed("threnos", nil)
-	status, raw := h.call("POST", "/v1/attach", token, model.AttachRequest{Model: "claude-opus-5-5", Effort: "high", Label: "lead"})
+	status, raw := h.call("POST", "/v1/attach", token, model.AttachRequest{Model: "claude-opus-5-5", Effort: "high", Project: "lead"})
 	var out model.AttachResponse
 	json.Unmarshal(raw, &out)
-	if status != 200 || !reflect.DeepEqual(out.Updated, []string{"model", "effort", "label"}) || out.Challenge || out.Attached {
+	if status != 200 || !reflect.DeepEqual(out.Updated, []string{"model", "effort", "project"}) || out.Challenge || out.Attached {
 		t.Fatalf("%d %s", status, raw)
 	}
 	found, _ := h.agent(token, handle)
-	if found.Model != "claude-opus-5-5" || found.Effort != "high" || found.Label != "lead" {
+	if found.Model != "claude-opus-5-5" || found.Effort != "high" || found.Project != "lead" {
 		t.Fatalf("%+v", found)
 	}
 	for _, bad := range []string{"", "nope", secret} {
-		if status, _ := h.call("POST", "/v1/attach", bad, model.AttachRequest{Label: "x"}); status != 401 {
+		if status, _ := h.call("POST", "/v1/attach", bad, model.AttachRequest{Project: "x"}); status != 401 {
 			t.Errorf("token %q: %d", bad, status)
 		}
 	}
-	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{Label: "bad\nlabel"}); status != 400 {
+	if status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{Project: "bad\nlabel"}); status != 400 {
 		t.Fatalf("a label with a line break: %d", status)
 	}
 }
@@ -1082,11 +1243,11 @@ func TestAttachClaimsAreKeptWhenTheChallengeCannotBeDelivered(t *testing.T) {
 	t.Parallel()
 	h := start(t)
 	handle, token := h.registerSeed("tutor", nil)
-	status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Label: "lead"})
+	status, _ := h.call("POST", "/v1/attach", token, model.AttachRequest{CodexThread: threadID, Project: "lead"})
 	if status != 409 {
 		t.Fatalf("%d", status)
 	}
-	if found, _ := h.agent(token, handle); found.Label != "lead" {
+	if found, _ := h.agent(token, handle); found.Project != "lead" {
 		t.Fatalf("%+v", found)
 	}
 	if len(h.notesCopy()) == 0 {
@@ -1533,7 +1694,7 @@ func TestAnAgentPastTheGraceIsDroppedItsTokenAnswers401AndItsHandleMayBeIssuedAg
 	if status, _ := h.call("POST", "/v1/send", alpha, model.SendBody{To: "bravo", Body: "x"}); status != 404 {
 		t.Fatalf("a send to a dropped agent answered %d", status)
 	}
-	if status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{Name: "bravo", Harness: "codex"}); status != 200 {
+	if status, raw := h.call("POST", "/v1/register", secret, model.RegisterRequest{ID: "bravo", Harness: "codex"}); status != 200 {
 		t.Fatalf("the handle was not free: %d %s", status, raw)
 	}
 }
@@ -1579,58 +1740,41 @@ func TestAHandRegisteredAgentIsKeptByItsRequestsAndDroppedAfterTheGraceWithNone(
 	}
 }
 
-func TestALabelResolvesToTheConnectedAgentWhenAnOlderDisconnectedAgentInItsGraceSharesIt(t *testing.T) {
+func TestTheIDOfAnAgentInItsGraceAnswers409NotConnectedAndAForgottenIDAnswers404(t *testing.T) {
 	t.Parallel()
 	h := start(t)
 	sender := h.register("sender")
 	h.openStream(sender)
-	oldHandle, oldToken := h.registerSeed("old", map[string]string{"label": "tutor"})
+	oldID, oldToken := h.registerSeed("old", map[string]string{"project": "tutor"})
 	h.openStream(oldToken).cancel()
-	h.waitDisconnected(sender, oldHandle)
-	newHandle, newToken := h.registerSeed("new", map[string]string{"label": "tutor"})
-	stream := h.openStream(newToken)
-	delivery, result := h.deliveredSend(sender, stream, newToken, model.SendBody{To: "tutor", Body: "hello"})
-	if result.status != 200 || delivery.Message.To != newHandle {
-		t.Fatalf("%d %s %+v", result.status, result.raw, delivery.Message)
+	h.waitDisconnected(sender, oldID)
+	if status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: oldID, Body: "x"}); status != 409 || !strings.Contains(string(raw), "not connected") {
+		t.Fatalf("%d %s", status, raw)
 	}
-	if _, listed := h.agent(sender, oldHandle); !listed {
-		t.Fatal("the old agent should still be listed in its grace")
+	if status, _ := h.call("POST", "/v1/send", sender, model.SendBody{To: "tutor", Body: "x"}); status != 404 {
+		t.Fatalf("a project held only by a disconnected agent: %d", status)
+	}
+	h.advance(2*time.Minute + time.Nanosecond)
+	if status, _ := h.call("POST", "/v1/send", sender, model.SendBody{To: oldID, Body: "x"}); status != 404 {
+		t.Fatalf("a forgotten id: %d", status)
 	}
 }
 
-func TestALabelOrPrefixThatOnlyADisconnectedAgentMatchesAnswers409NotConnected(t *testing.T) {
-	t.Parallel()
-	h := start(t)
-	sender := h.register("sender")
-	h.openStream(sender)
-	oldHandle, oldToken := h.registerSeed("old", map[string]string{"label": "tutor"})
-	h.openStream(oldToken).cancel()
-	h.waitDisconnected(sender, oldHandle)
-	for _, to := range []string{"tutor", "tut", oldHandle} {
-		if status, raw := h.call("POST", "/v1/send", sender, model.SendBody{To: to, Body: "x"}); status != 409 || !strings.Contains(string(raw), "not connected") {
-			t.Fatalf("%s: %d %s", to, status, raw)
-		}
-	}
-	if status, _ := h.call("POST", "/v1/send", sender, model.SendBody{To: "nobody", Body: "x"}); status != 404 {
-		t.Fatalf("unknown: %d", status)
-	}
-}
-
-func TestAHandleIsNotIssuedWhileAPresentAgentHoldsItAndIsIssuedOnceItIsGone(t *testing.T) {
+func TestAnIDIsNotIssuedWhileAPresentAgentHoldsItAndIsIssuedOnceItIsGone(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex
-	suffixes := []string{"aaa", "aaa", "bbb", "aaa"}
+	draws := []string{"aaaa", "aaaa", "bbbb", "aaaa"}
 	h := startWith(t, func(c *Config) {
-		c.NewSuffix = func() string {
+		c.NewAgentID = func() string {
 			mu.Lock()
 			defer mu.Unlock()
-			next := suffixes[0]
-			suffixes = suffixes[1:]
+			next := draws[0]
+			draws = draws[1:]
 			return next
 		}
 	})
 	first, firstToken := h.registerSeed("tutor", nil)
-	if first != "tutor-aaa" {
+	if first != "aaaa" {
 		t.Fatal(first)
 	}
 	h.openStream(firstToken).cancel()
@@ -1640,14 +1784,14 @@ func TestAHandleIsNotIssuedWhileAPresentAgentHoldsItAndIsIssuedOnceItIsGone(t *t
 		return h.hub.streams[first] == nil
 	})
 	second, secondToken := h.registerSeed("tutor", nil)
-	if second != "tutor-bbb" {
-		t.Fatalf("a handle held by an agent in its grace was issued again: %s", second)
+	if second != "bbbb" {
+		t.Fatalf("an id held by an agent in its grace was issued again: %s", second)
 	}
 	h.advance(2*time.Minute + time.Nanosecond)
 	h.call("GET", "/v1/agents", secondToken, nil)
 	third, _ := h.registerSeed("tutor", nil)
-	if third != "tutor-aaa" {
-		t.Fatalf("a forgotten handle was not free: %s", third)
+	if third != "aaaa" {
+		t.Fatalf("a forgotten id was not free: %s", third)
 	}
 }
 
@@ -1703,7 +1847,7 @@ func TestAnObserverIsNeverListedAsAnAgent(t *testing.T) {
 	observer := h.registerObserver("tui")
 	for _, token := range []string{alpha, observer} {
 		listed := h.agents(token)
-		if len(listed) != 1 || listed[0].Name != "alpha" || !listed[0].Connected {
+		if len(listed) != 1 || listed[0].ID != "alpha" || !listed[0].Connected {
 			t.Fatalf("listed %+v", listed)
 		}
 	}
@@ -1730,7 +1874,7 @@ func TestAnObserverTokenIsRefusedOnEveryOtherRoute(t *testing.T) {
 		{"POST", "/v1/attach", model.AttachRequest{}},
 		{"POST", "/v1/deliveries/d-1/report", model.DeliveryReport{OK: true}},
 		{"GET", "/v1/log", nil},
-		{"POST", "/v1/register", model.RegisterRequest{Name: "charlie", Harness: "codex"}},
+		{"POST", "/v1/register", model.RegisterRequest{ID: "charlie", Harness: "codex"}},
 		{"POST", "/v1/observers", ObserverRequest{Kind: "tui"}},
 	}
 	for _, route := range routes {

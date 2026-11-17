@@ -29,6 +29,8 @@ type fakeHub struct {
 	attached       []model.AttachRequest
 	attachResponse model.AttachResponse
 	attachErr      error
+	statuses       []model.StatusRequest
+	statusErr      error
 	sendErr        error
 	agentsErr      error
 	agents         []model.AgentInfo
@@ -50,14 +52,19 @@ func (f *fakeHub) Attach(req model.AttachRequest) (model.AttachResponse, error) 
 	return f.attachResponse, f.attachErr
 }
 
+func (f *fakeHub) Status(req model.StatusRequest) (model.StatusResponse, error) {
+	f.statuses = append(f.statuses, req)
+	return model.StatusResponse{Task: req.Task}, f.statusErr
+}
+
 func (f *fakeHub) Agents() ([]model.AgentInfo, error) {
 	if f.agents != nil {
 		return f.agents, f.agentsErr
 	}
 	return []model.AgentInfo{
-		{Name: "bravo", Harness: "codex", Host: "mac", Connected: true, Model: "gpt-x"},
-		{Name: "alpha", Harness: "claude-code", Host: "linux", Connected: true},
-		{Name: "charlie", Harness: "codex", Host: "mac"},
+		{ID: "bravo", Harness: "codex", Host: "mac", Connected: true, Model: "gpt-x"},
+		{ID: "alpha", Harness: "claude-code", Host: "linux", Connected: true},
+		{ID: "charlie", Harness: "codex", Host: "mac"},
 	}, f.agentsErr
 }
 
@@ -343,7 +350,7 @@ func TestInitializeDefaultsTheVersionAndDescribesTheServer(t *testing.T) {
 	}
 }
 
-func TestToolsListIsExactlyRegisterAgentsAndSend(t *testing.T) {
+func TestToolsListIsExactlyRegisterAgentsSendAndStatus(t *testing.T) {
 	t.Parallel()
 	r := one(t, &fakeHub{}, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	required := map[string][]any{}
@@ -358,10 +365,10 @@ func TestToolsListIsExactlyRegisterAgentsAndSend(t *testing.T) {
 			t.Errorf("send still mentions all: %v", tool)
 		}
 	}
-	if len(required) != 3 {
+	if len(required) != 4 {
 		t.Fatalf("tools %v", required)
 	}
-	for _, name := range []string{"landline_register", "landline_agents", "landline_send"} {
+	for _, name := range []string{"landline_register", "landline_agents", "landline_send", "landline_status"} {
 		if _, ok := required[name]; !ok {
 			t.Fatalf("missing %s in %v", name, required)
 		}
@@ -1043,9 +1050,10 @@ func TestEachResponseIsOneLineAndServeEndsCleanlyOnEOF(t *testing.T) {
 
 func TestAttachPassesTheClaimsAndSaysWhatHappened(t *testing.T) {
 	t.Parallel()
-	hub := &fakeHub{attachResponse: model.AttachResponse{Updated: []string{"model", "label"}}}
-	text, isError := resultText(t, one(t, hub, call("landline_register", `{"model":"claude-opus-5-5","label":"lead"}`)))
-	if isError || text != "recorded model, label" || hub.attached[0].Model != "claude-opus-5-5" || hub.attached[0].Label != "lead" {
+	hub := &fakeHub{attachResponse: model.AttachResponse{ID: "a3f9", Updated: []string{"model", "project"}, ProjectPeers: 2}}
+	text, isError := resultText(t, one(t, hub, call("landline_register", `{"model":"claude-opus-5-5","project":"lead"}`)))
+	want := "you are a3f9. project: lead (as you gave it), shared with 2 other agents currently connected. task: none. Set one with landline_status when your goal is clear."
+	if isError || text != want || hub.attached[0].Model != "claude-opus-5-5" || hub.attached[0].Project != "lead" {
 		t.Fatalf("%q %+v", text, hub.attached)
 	}
 }
@@ -1069,7 +1077,7 @@ func TestAttachWithNothingToSayIsRefusedAndAHubErrorIsShown(t *testing.T) {
 	if r := one(t, &fakeHub{}, call("landline_register", `{}`)); r.Error == nil || r.Error.Code != -32602 {
 		t.Fatalf("%+v", r)
 	}
-	text, isError := resultText(t, one(t, &fakeHub{attachErr: errors.New("that code does not match")}, call("landline_register", `{"label":"x"}`)))
+	text, isError := resultText(t, one(t, &fakeHub{attachErr: errors.New("that code does not match")}, call("landline_register", `{"project":"x"}`)))
 	if !isError || !strings.Contains(text, "does not match") {
 		t.Fatalf("%q %v", text, isError)
 	}
@@ -1120,12 +1128,108 @@ func TestAnAgentThatHasNotRegisteredIsRemindedByEveryOtherTool(t *testing.T) {
 
 func TestTheReminderStopsAfterASuccessfulRegisterAndANoteOnAFailedOneDoesNot(t *testing.T) {
 	t.Parallel()
-	failed := exchange(t, &fakeHub{attachErr: errors.New("nope")}, call("landline_register", `{"label":"x"}`), call("landline_agents", `{}`))
+	failed := exchange(t, &fakeHub{attachErr: errors.New("nope")}, call("landline_register", `{"project":"x"}`), call("landline_agents", `{}`))
 	if !strings.Contains(lastBlock(failed[1]), "have not told Landline") {
 		t.Fatalf("a failed register silenced the reminder: %q", lastBlock(failed[1]))
 	}
-	ok := exchange(t, &fakeHub{}, call("landline_register", `{"label":"x"}`), call("landline_agents", `{}`))
+	ok := exchange(t, &fakeHub{}, call("landline_register", `{"project":"x"}`), call("landline_agents", `{}`))
 	if strings.Contains(lastBlock(ok[1]), "have not told Landline") {
 		t.Fatalf("the reminder survived a successful register: %q", lastBlock(ok[1]))
+	}
+}
+
+func TestStatusSetsTheTaskAndAnEmptyTaskClearsIt(t *testing.T) {
+	t.Parallel()
+	hub := &fakeHub{}
+	set, isError := resultText(t, one(t, hub, call("landline_status", `{"task":"menu bar app for ADR 0140"}`)))
+	if isError || !strings.HasPrefix(set, "task: menu bar app for ADR 0140") {
+		t.Fatalf("%q %v", set, isError)
+	}
+	cleared, _ := resultText(t, one(t, hub, call("landline_status", `{"task":""}`)))
+	if cleared != "task cleared" || len(hub.statuses) != 2 || hub.statuses[1].Task != "" {
+		t.Fatalf("%q %+v", cleared, hub.statuses)
+	}
+	for _, arguments := range []string{`{}`, `{"task":null}`, `{"task":5}`} {
+		if r := one(t, &fakeHub{}, call("landline_status", arguments)); r.Error == nil || r.Error.Code != -32602 {
+			t.Errorf("%s: %+v", arguments, r)
+		}
+	}
+	if len(hub.statuses) != 2 {
+		t.Fatalf("a refused call reached the hub: %+v", hub.statuses)
+	}
+}
+
+func TestTheRegisterLineSaysWhereTheProjectCameFromAndHowManyShareIt(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		peers   int
+		project string
+		given   bool
+		want    string
+	}{
+		"repository, none":  {0, "landline", false, "you are a3f9. project: landline (from your repository), shared with no other agent currently connected. task: none. Set one with landline_status when your goal is clear."},
+		"given, one":        {1, "landline", true, "you are a3f9. project: landline (as you gave it), shared with 1 other agent currently connected. task: none. Set one with landline_status when your goal is clear."},
+		"given, many":       {3, "landline", true, "you are a3f9. project: landline (as you gave it), shared with 3 other agents currently connected. task: none. Set one with landline_status when your goal is clear."},
+		"no project at all": {0, "", false, "you are a3f9. no project, so you are in no group. task: none. Set one with landline_status when your goal is clear."},
+	} {
+		hub := &fakeHub{attachResponse: model.AttachResponse{ID: "a3f9", ProjectPeers: c.peers}}
+		var out bytes.Buffer
+		options := Options{Project: func() (string, bool) { return c.project, c.given }}
+		if err := ServeWith(strings.NewReader(call("landline_register", `{"model":"m"}`)+"\n"), &out, hub, options); err != nil {
+			t.Fatal(err)
+		}
+		var r reply
+		json.Unmarshal(bytes.TrimSpace(out.Bytes()), &r)
+		if text, _ := resultText(t, r); text != c.want {
+			t.Errorf("%s:\n%q\nwant\n%q", name, text, c.want)
+		}
+	}
+}
+
+func TestAStatusCallDoesNotCountAsTheIntroduction(t *testing.T) {
+	t.Parallel()
+	replies := exchange(t, &fakeHub{}, call("landline_status", `{"task":"x"}`), call("landline_agents", `{}`))
+	for i, r := range replies {
+		if got := lastBlock(r); !strings.Contains(got, "You have not told Landline about yourself yet") || !strings.Contains(got, "landline_status") {
+			t.Errorf("reply %d has no reminder: %q", i, got)
+		}
+	}
+}
+
+func TestTheRegisterLineShowsTheTaskTheProcessSetAndForgetsItWhenClearedOrReRegistered(t *testing.T) {
+	t.Parallel()
+	hub := &fakeHub{attachResponse: model.AttachResponse{ID: "a3f9"}}
+	var out bytes.Buffer
+	lines := []string{
+		call("landline_register", `{"model":"m"}`),
+		call("landline_status", `{"task":"ship ADR 0160"}`),
+		call("landline_register", `{"model":"m"}`),
+		call("landline_status", `{"task":""}`),
+		call("landline_register", `{"model":"m"}`),
+		call("landline_status", `{"task":"again"}`),
+	}
+	if err := Serve(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, hub); err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, raw := range bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n")) {
+		var r reply
+		json.Unmarshal(raw, &r)
+		text, _ := resultText(t, r)
+		texts = append(texts, text)
+	}
+	none := "you are a3f9. no project, so you are in no group. task: none. Set one with landline_status when your goal is clear."
+	set := "you are a3f9. no project, so you are in no group. task: ship ADR 0160."
+	if texts[0] != none || texts[2] != set || texts[4] != none || texts[3] != "task cleared" {
+		t.Fatalf("%q", texts)
+	}
+	hub.attachResponse.ID = "b7c1"
+	var again bytes.Buffer
+	more := []string{call("landline_status", `{"task":"x"}`), call("landline_register", `{"model":"m"}`)}
+	if err := ServeWith(strings.NewReader(strings.Join(more, "\n")+"\n"), &again, hub, Options{ID: func() string { return "b7c1" }}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(again.String(), "task: x.") == false {
+		t.Fatalf("a task set before the first register is lost: %s", again.String())
 	}
 }

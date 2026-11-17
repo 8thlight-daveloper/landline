@@ -25,7 +25,7 @@ landline -h | --help
 - Flags may come before the command name: `landline --interval 1s agents --json`. `-h`, `--help`, and `help` print the
   usage on standard output and exit `0`. A bad `--interval` exits `2` with `the interval must be a duration such as 2s`.
   One below the floor exits `2` with `the interval is at least 500ms, not 100ms`, where `100ms` is the value given.
-- `landline agents` prints one tab-separated line per agent in the screen's order: handle, harness, host, state, and the
+- `landline agents` prints one tab-separated line per agent in the screen's order: id, harness, host, state, and the
   attribute text. `landline agents --json` prints one snapshot and exits `0`. When the switchboard cannot be reached,
   either prints the reason on standard error and exits `1`. A usage error exits `2`. Neither takes `--as`.
 - Every other command, such as `setup`, `claude`, `register`, `send`, `log`, `join`, and `server`, is handled by
@@ -35,11 +35,11 @@ The status line reads `error: <message> | switchboard <address> | refreshed <tim
 the last poll failed. `refreshing...` appears while a fetch runs, and `r` during a fetch says `already refreshing`.
 After a failed poll the screen keeps the previous list and marks its header `(stale)` until a poll succeeds. The table
 drops whole columns from the lowest priority first when the terminal is narrow (COMMIT, EFFORT, MODEL, BRANCH, FOLDER,
-LANDLINE, then HARNESS and LABEL), and `+N more` marks rows that do not fit the height. The first column is one cell
-with no heading. It shows `●` in green for a connected agent and `○` in faint text for a disconnected one, and it is
-never dropped. When the handle does not fit beside it, the handle shows its tail, cut as far as the width needs. A
-legend line, `● connected  ○ disconnected`, sits above the status line while rows show. It is not counted by `+N more`,
-and a short window drops it first, then the blank line above it, then the key line.
+LANDLINE, HARNESS, TASK, then PROJECT), and `+N more` marks rows that do not fit the height. The first column is one
+cell with no heading. It shows `●` in green for a connected agent and `○` in faint text for a disconnected one, and it
+is never dropped. The ID column follows after one space. When the id does not fit beside it, the id shows its tail, cut
+as far as the width needs. A legend line, `● connected  ○ disconnected`, sits above the status line while rows show. It
+is not counted by `+N more`, and a short window drops it first, then the blank line above it, then the key line.
 
 Text that does not come from an agent field is cleaned before it reaches the terminal, the same way agent fields are:
 control, line separator, paragraph separator, and format runes become a space, and invalid UTF-8 becomes U+FFFD. That
@@ -55,8 +55,10 @@ covers the switchboard address, every error on the status line, and every messag
   "hub": "http://127.0.0.1:8787",
   "agents": [
     {
-      "handle": "alpha",
-      "label": "lead",
+      "id": "alpha",
+      "project": "lead",
+      "task": "write the tests",
+      "task_at": "2026-11-16T09:15:30Z",
       "harness": "claude",
       "state": "connected",
       "landline_version": "0.9.0",
@@ -74,9 +76,10 @@ covers the switchboard address, every error on the status line, and every messag
 }
 ```
 
-Connected agents come first, then labelled before unlabelled, then by label, then by handle. Empty optional fields are
-left out. The COMMIT column shows the first 7 characters of the commit and `-dirty` when it has the mark, and needs 162
-columns. The JSON carries the full commit and the date. The snapshot holds no secret and no token.
+Connected agents come first, then with a project before those without, then by project, then by id. Empty optional
+fields, including `task` and `task_at`, are left out. `task_at` is an RFC 3339 UTC string. The COMMIT column shows the
+first 7 characters of the commit and `-dirty` when it has the mark, and needs 176 columns. The JSON carries the full
+commit and the date. The snapshot holds no secret and no token.
 
 ## How it finds the switchboard
 

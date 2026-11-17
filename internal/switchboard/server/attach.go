@@ -54,13 +54,13 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 		name  string
 		value string
 		field *string
-	}{{"model", body.Model, &agent.Model}, {"effort", body.Effort, &agent.Effort}, {"label", body.Label, &agent.Label}} {
+	}{{"model", body.Model, &agent.Model}, {"effort", body.Effort, &agent.Effort}, {"project", body.Project, &agent.Project}} {
 		if claim.value != "" {
 			*claim.field = claim.value
 			updated = append(updated, claim.name)
 		}
 	}
-	response := model.AttachResponse{Name: name, Updated: updated}
+	response := model.AttachResponse{ID: name, Updated: updated, ProjectPeers: s.projectPeersLocked(agent)}
 	var challengeText, challengeThread string
 	switch {
 	case body.CodexThread != "" && body.Code == "":
@@ -140,4 +140,55 @@ func (s *Server) takeChallengeSlot(name string) bool {
 	}
 	s.sent[name] = append(recent, now)
 	return true
+}
+
+func (s *Server) projectPeersLocked(caller model.Agent) int {
+	if caller.Project == "" {
+		return 0
+	}
+	peers := 0
+	for _, agent := range s.connectedLocked() {
+		if agent.ID != caller.ID && agent.Project == caller.Project {
+			peers++
+		}
+	}
+	return peers
+}
+
+func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.agentFor(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Task *string `json:"task"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Task == nil {
+		fail(w, http.StatusBadRequest, "task must be present and a string")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	agent, found := s.reg.Find(s.agents, id)
+	if !found {
+		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
+		return
+	}
+	if agent.Task != *body.Task {
+		agent.Task = *body.Task
+		agent.TaskAt = time.Time{}
+		if agent.Task != "" {
+			agent.TaskAt = s.cfg.Now()
+		}
+	}
+	updated, err := s.reg.Register(s.agents, agent, s.cfg.Now())
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.agents = updated
+	write(w, http.StatusOK, model.StatusResponse{Task: agent.Task, TaskAt: agent.TaskAt})
 }

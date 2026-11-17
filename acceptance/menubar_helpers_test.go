@@ -165,9 +165,9 @@ type fakeSwitchboard struct {
 	issued      int
 }
 
-func fakeAgent(handle string, connected bool, extra map[string]any) map[string]any {
+func fakeAgent(id string, connected bool, extra map[string]any) map[string]any {
 	entry := map[string]any{
-		"name": handle, "harness": "claude-code", "host": "mac", "session": "s-" + handle,
+		"id": id, "harness": "claude-code", "host": "mac", "session": "s-" + id,
 		"connected": connected, "last_seen": "2026-11-16T10:00:00Z",
 	}
 	for key, value := range extra {
@@ -293,7 +293,7 @@ func agentRow(title, marker string, fields ...string) []string {
 	for _, field := range fields {
 		lines = append(lines, "  "+field+disabledMark)
 	}
-	return append(lines, "  "+menuSeparator, "  Copy handle")
+	return append(lines, "  "+menuSeparator, "  Copy id")
 }
 
 func expectedMenu(icon string, head []string, sb switchboardItems, menubarLine string) string {

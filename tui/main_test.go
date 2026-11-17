@@ -18,7 +18,7 @@ func hub(t *testing.T) *httptest.Server {
 			w.Write([]byte(`{"token":"observer-token-xyz"}`))
 			return
 		}
-		w.Write([]byte(`[{"name":"alpha","harness":"claude","host":"mac","connected":true},{"name":"bravo","harness":"codex","host":"mac"}]`))
+		w.Write([]byte(`[{"id":"alpha","harness":"claude","host":"mac","connected":true},{"id":"bravo","harness":"codex","host":"mac"}]`))
 	}))
 	t.Cleanup(server.Close)
 	return server
@@ -42,12 +42,12 @@ func TestAgentsJSONPrintsOneSnapshot(t *testing.T) {
 	var view struct {
 		Screen string
 		Hub    string
-		Agents []struct{ Handle, State string }
+		Agents []struct{ ID, State string }
 	}
 	if err := json.Unmarshal([]byte(out), &view); err != nil {
 		t.Fatal(err)
 	}
-	if view.Screen != "agents" || view.Hub != server.URL || len(view.Agents) != 2 || view.Agents[0].Handle != "alpha" || view.Agents[1].State != "disconnected" {
+	if view.Screen != "agents" || view.Hub != server.URL || len(view.Agents) != 2 || view.Agents[0].ID != "alpha" || view.Agents[1].State != "disconnected" {
 		t.Fatalf("got %s", out)
 	}
 	for _, forbidden := range []string{secret, "observer-token"} {

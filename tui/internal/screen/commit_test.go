@@ -31,7 +31,7 @@ func viewOf(t *testing.T, agent hubclient.Agent) string {
 }
 
 func TestTheScreenShowsTheShortCommitAndNeitherTheFullCommitNorTheDate(t *testing.T) {
-	view := viewOf(t, decodedAgent(t, `{"name":"alpha","harness":"claude","host":"mac","connected":true,"landline_version":"0.1.0","landline_commit":"`+fullCommit+`","landline_date":"`+buildDate+`"}`))
+	view := viewOf(t, decodedAgent(t, `{"id":"alpha","harness":"claude","host":"mac","connected":true,"landline_version":"0.1.0","landline_commit":"`+fullCommit+`","landline_date":"`+buildDate+`"}`))
 	if !strings.Contains(view, "a1b2c3d") {
 		t.Fatalf("no short commit in\n%s", view)
 	}
@@ -43,22 +43,22 @@ func TestTheScreenShowsTheShortCommitAndNeitherTheFullCommitNorTheDate(t *testin
 }
 
 func TestTheScreenKeepsTheDirtyMarkAfterTheShortCommit(t *testing.T) {
-	view := viewOf(t, decodedAgent(t, `{"name":"alpha","harness":"claude","host":"mac","connected":true,"landline_commit":"`+fullCommit+`-dirty"}`))
+	view := viewOf(t, decodedAgent(t, `{"id":"alpha","harness":"claude","host":"mac","connected":true,"landline_commit":"`+fullCommit+`-dirty"}`))
 	if !strings.Contains(view, "a1b2c3d-dirty") || strings.Contains(view, fullCommit) {
 		t.Fatalf("got\n%s", view)
 	}
 }
 
 func TestTheScreenShowsNoCommitForAnAgentThatSentNone(t *testing.T) {
-	view := viewOf(t, decodedAgent(t, `{"name":"alpha","harness":"claude","host":"mac","connected":true,"landline_version":"0.1.0"}`))
+	view := viewOf(t, decodedAgent(t, `{"id":"alpha","harness":"claude","host":"mac","connected":true,"landline_version":"0.1.0"}`))
 	if strings.Contains(view, "dirty") || strings.Contains(view, "a1b2c3d") {
 		t.Fatalf("got\n%s", view)
 	}
 }
 
-func TestTheCommitColumnIsLastAndFirstAppearsAtWidthOneHundredFiftyOne(t *testing.T) {
-	agent := decodedAgent(t, `{"name":"agent00","harness":"claude","host":"mac","connected":true,"landline_commit":"`+fullCommit+`-dirty"}`)
-	for width, want := range map[int]bool{80: false, 149: false, 150: false, 151: true, 200: true} {
+func TestTheCommitColumnIsLastAndFirstAppearsAtWidthOneHundredSeventySix(t *testing.T) {
+	agent := decodedAgent(t, `{"id":"agent00","harness":"claude","host":"mac","connected":true,"landline_commit":"`+fullCommit+`-dirty"}`)
+	for width, want := range map[int]bool{80: false, 174: false, 175: false, 176: true, 200: true} {
 		view := rendered([]hubclient.Agent{agent}, width)
 		if got := strings.Contains(strings.Split(view, "\n")[0], "COMMIT"); got != want {
 			t.Errorf("width %d: COMMIT shown %v, want %v\n%s", width, got, want, view)
@@ -74,7 +74,7 @@ func TestTheShortCommitIsTheFirstSevenCharactersAndNotTheFirstSevenBytes(t *test
 		"éàüöíóúñç":       "éàüöíóú",
 		"éàüöíóúñç-dirty": "éàüöíóú-dirty",
 	} {
-		view := viewOf(t, decodedAgent(t, `{"name":"alpha","harness":"claude","host":"mac","connected":true,"landline_commit":"`+commit+`"}`))
+		view := viewOf(t, decodedAgent(t, `{"id":"alpha","harness":"claude","host":"mac","connected":true,"landline_commit":"`+commit+`"}`))
 		if !strings.Contains(view, want) || strings.Contains(view, "éàüöíóúñ") {
 			t.Errorf("%q: want %q in\n%s", commit, want, view)
 		}

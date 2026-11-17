@@ -13,8 +13,9 @@ const (
 )
 
 type Row struct {
-	Handle          string
-	Label           string
+	ID              string
+	Project         string
+	Task            string
 	Harness         string
 	Host            string
 	State           string
@@ -28,10 +29,10 @@ type Row struct {
 func (r Row) Connected() bool { return r.State == Connected }
 
 func (r Row) Title() string {
-	if r.Label != "" {
-		return r.Label
+	if r.Project != "" {
+		return r.Project + " " + r.ID
 	}
-	return r.Handle
+	return r.ID
 }
 
 func Build(agents []hubclient.Agent) []Row {
@@ -42,7 +43,7 @@ func Build(agents []hubclient.Agent) []Row {
 			state = Connected
 		}
 		rows = append(rows, Row{
-			Handle: clean.Text(agent.Name), Label: clean.Text(agent.Label), Harness: clean.Text(agent.Harness),
+			ID: clean.Text(agent.ID), Project: clean.Text(agent.Project), Task: clean.Text(agent.Task), Harness: clean.Text(agent.Harness),
 			Host: clean.Text(agent.Host), State: state, Model: clean.Text(agent.Model), Effort: clean.Text(agent.Effort),
 			Folder: clean.Text(agent.Folder), Branch: clean.Text(agent.Branch),
 			LandlineVersion: clean.Text(agent.LandlineVersion),
@@ -53,13 +54,13 @@ func Build(agents []hubclient.Agent) []Row {
 		if a.Connected() != b.Connected() {
 			return a.Connected()
 		}
-		if (a.Label == "") != (b.Label == "") {
-			return a.Label != ""
+		if (a.Project == "") != (b.Project == "") {
+			return a.Project != ""
 		}
-		if a.Label != b.Label {
-			return a.Label < b.Label
+		if a.Project != b.Project {
+			return a.Project < b.Project
 		}
-		return a.Handle < b.Handle
+		return a.ID < b.ID
 	})
 	return rows
 }

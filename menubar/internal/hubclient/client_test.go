@@ -25,7 +25,7 @@ type stubHub struct {
 }
 
 func newStubHub(secret string) *stubHub {
-	return &stubHub{secret: secret, valid: map[string]bool{}, agents: `[{"name":"alpha","harness":"claude","host":"mac","connected":true}]`}
+	return &stubHub{secret: secret, valid: map[string]bool{}, agents: `[{"id":"alpha","harness":"claude","host":"mac","connected":true}]`}
 }
 
 func (s *stubHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +64,7 @@ func TestAgentsRegistersAnObserverOnceAndPollsWithItsToken(t *testing.T) {
 	client := New(server.URL, "s3cret-s3cret-s3cret")
 	for range 3 {
 		agents, err := client.Agents()
-		if err != nil || len(agents) != 1 || agents[0].Name != "alpha" || !agents[0].Connected {
+		if err != nil || len(agents) != 1 || agents[0].ID != "alpha" || !agents[0].Connected {
 			t.Fatalf("got %v %v", agents, err)
 		}
 	}
@@ -139,7 +139,7 @@ func TestAgentsSaysWhenTheHubIsUnreachable(t *testing.T) {
 
 func TestAgentsDecodesEveryField(t *testing.T) {
 	stub := newStubHub("s3cret-s3cret-s3cret")
-	stub.agents = `[{"name":"bravo","harness":"codex","host":"mac","session":"s1","connected":false,"last_seen":"2026-11-12T10:00:00Z","folder":"/w","branch":"main","worktree":"wt","harness_version":"1.2","landline_version":"0.9","model":"m","effort":"high","label":"review"}]`
+	stub.agents = `[{"id":"bravo","harness":"codex","host":"mac","session":"s1","connected":false,"last_seen":"2026-11-12T10:00:00Z","folder":"/w","branch":"main","worktree":"wt","harness_version":"1.2","landline_version":"0.9","model":"m","effort":"high","project":"review","task":"menu bar app","task_at":"2026-11-16T09:15:30Z"}]`
 	server := httptest.NewServer(stub)
 	defer server.Close()
 	agents, err := New(server.URL, "s3cret-s3cret-s3cret").Agents()
@@ -147,9 +147,10 @@ func TestAgentsDecodesEveryField(t *testing.T) {
 		t.Fatal(agents, err)
 	}
 	a := agents[0]
-	if a.Name != "bravo" || a.Harness != "codex" || a.Host != "mac" || a.Session != "s1" || a.Connected || a.Folder != "/w" ||
+	if a.ID != "bravo" || a.Harness != "codex" || a.Host != "mac" || a.Session != "s1" || a.Connected || a.Folder != "/w" ||
 		a.Branch != "main" || a.Worktree != "wt" || a.HarnessVersion != "1.2" || a.LandlineVersion != "0.9" ||
-		a.Model != "m" || a.Effort != "high" || a.Label != "review" || a.LastSeen.IsZero() {
+		a.Model != "m" || a.Effort != "high" || a.Project != "review" || a.Task != "menu bar app" ||
+		!a.TaskAt.Equal(time.Date(2026, 11, 16, 9, 15, 30, 0, time.UTC)) || a.LastSeen.IsZero() {
 		t.Fatalf("got %+v", a)
 	}
 }
@@ -374,5 +375,15 @@ func TestTheClientUsesTheDefaultTransportAndHonoursHTTPProxy(t *testing.T) {
 	defer mu.Unlock()
 	if len(seen) == 0 || seen[0] != "POST http://hub.landline-proxy-test.example:8787/v1/observers" {
 		t.Fatalf("the request did not go through the proxy: %v", seen)
+	}
+}
+
+func TestTheOldKeysNameAndLabelAreNotAliasesForIDAndProject(t *testing.T) {
+	var agent Agent
+	if err := json.Unmarshal([]byte(`{"name":"x","label":"y","handle":"z"}`), &agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.ID != "" || agent.Project != "" {
+		t.Fatalf("an old key filled a new field: %+v", agent)
 	}
 }
