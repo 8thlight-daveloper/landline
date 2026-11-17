@@ -6,14 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
 
 const menubarVersion = "0.2.0"
-
-var rowTitleForm = regexp.MustCompile(`^(.+) \[(active|idle|disconnected)\]$`)
 
 func TestMenubarVersionPrintsOneLineWithItsOwnNameAndNoBanner(t *testing.T) {
 	cases := map[string]struct{ flags, want string }{
@@ -337,7 +334,7 @@ func TestMenuTextRegistersAgainOnA401AndShowsTheListFromTheNewToken(t *testing.T
 	fake.staleFirst = true
 	rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
 	got := rig.menu(t)
-	if !strings.HasPrefix(got, "icon: jack 1\n") || !strings.Contains(got, "\nalpha [active]\n") {
+	if !strings.HasPrefix(got, "icon: jack 1\n") || !strings.Contains(got, "\n\u25cf alpha\n") {
 		t.Fatalf("after a 401 the menu is:\n%s", got)
 	}
 	if fake.count("POST", "/v1/observers") < 2 {
@@ -376,7 +373,7 @@ func TestMenuTextReadsTheConfigFileWhenTheEnvironmentHasNoAddressAndNoSecretAndT
 	}
 	fromFile := newMenubarRig(t, flags, "", landlineNextToBinary)
 	writeConfig(fromFile, w.url, secret)
-	if got := fromFile.menu(t); !strings.HasPrefix(got, "icon: jack\n") || !strings.Contains(got, "\nalpha [disconnected]\n") || !strings.Contains(got, "Running at "+w.url) {
+	if got := fromFile.menu(t); !strings.HasPrefix(got, "icon: jack\n") || !strings.Contains(got, "\n\u25cb alpha\n") || !strings.Contains(got, "Running at "+w.url) {
 		t.Errorf("the config file was not used:\n%s", got)
 	}
 	envWins := newMenubarRig(t, flags, w.url, landlineNextToBinary)
@@ -555,17 +552,17 @@ func TestMenuTextAgainstARealSwitchboardListsConnectedFirstThenLabelThenHandleWi
 		if connected[agent.handle] {
 			marker = liveMarker
 		}
-		if rows[i] != title+" ["+marker+"]" {
-			t.Errorf("row %d is %q, want %q", i, rows[i], title+" ["+marker+"]")
+		if rows[i] != shapeFor(marker)+" "+title {
+			t.Errorf("row %d is %q, want %q", i, rows[i], shapeFor(marker)+" "+title)
 		}
 	}
-	block := rowBlock(lines, "mike [disconnected]")
+	block := rowBlock(lines, "\u25cb mike")
 	want := agentRow("mike", "disconnected", "Handle: kilo", "Harness: codex", "Host: mac", "Model: gpt-x", "Effort: low", "Folder: /srv/kilo-work", "Branch: release")
 	if strings.Join(block, "\n") != strings.Join(want, "\n") {
 		t.Errorf("the submenu of kilo is:\n%s\nwant:\n%s", strings.Join(block, "\n"), strings.Join(want, "\n"))
 	}
 	for _, handle := range []string{labelledLate, plainEarly} {
-		submenu := strings.Join(rowBlock(lines, titleOf(handle, agents)+" ["+liveMarker+"]"), "\n")
+		submenu := strings.Join(rowBlock(lines, "\u25cf "+titleOf(handle, agents)), "\n")
 		if !strings.Contains(submenu, "  Handle: "+handle+disabledMark+"\n") || !strings.Contains(submenu, "  Folder: ") || !strings.HasSuffix(submenu, "  Copy handle") {
 			t.Errorf("the submenu of %s lacks its fields:\n%s", handle, submenu)
 		}
@@ -749,6 +746,25 @@ func TestMenuTextShowsOnlyTheMenubarBuildFormsOfTheDecisionRecords(t *testing.T)
 		}
 		if strings.Contains(got, stampDate) {
 			t.Errorf("%s: the menu shows a date:\n%s", name, got)
+		}
+	}
+}
+
+func TestMenuTextRowShapesAreExactlyTheSolidAndTheHollowCircleAndTheTitleHasNoStateWord(t *testing.T) {
+	agents := []map[string]any{fakeAgent("alpha", true, nil), fakeAgent("bravo", false, nil)}
+	fake := newFakeSwitchboard(t, "127.0.0.1", agents, 200, fakeBuild(menubarVersion, "", ""))
+	got := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary).menu(t)
+	lines := menuLines(got)
+	if lines[1] != "\u25cf alpha" {
+		t.Errorf("the connected row is %q, want the solid circle U+25CF, a space, and the name", lines[1])
+	}
+	hollow := rowBlock(lines, "○ bravo")
+	if hollow == nil {
+		t.Fatalf("no row \"○ bravo\" (hollow circle U+25CB) in:\n%s", got)
+	}
+	for _, line := range lines {
+		if !strings.HasPrefix(line, " ") && (strings.Contains(line, "connected") || strings.Contains(line, "[")) && !strings.HasPrefix(line, "icon:") {
+			t.Errorf("a top level line carries a state word or a bracket: %q", line)
 		}
 	}
 }

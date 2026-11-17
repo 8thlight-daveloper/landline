@@ -112,6 +112,9 @@ func (s *Screen) addItems(items []model.Item, parent *systray.MenuItem) {
 		} else {
 			entry = parent.AddSubMenuItem(item.Title, "")
 		}
+		if image := icon.ForState(item.State); image != nil {
+			entry.SetIcon(image)
+		}
 		if item.Disabled {
 			entry.Disable()
 		}

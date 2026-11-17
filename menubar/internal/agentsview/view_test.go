@@ -32,9 +32,9 @@ func TestRowsComeConnectedFirstThenLabelledThenByLabelThenHandle(t *testing.T) {
 	}
 }
 
-func TestMarkerIsActiveForAConnectedAgentAndDisconnectedOtherwise(t *testing.T) {
+func TestStateIsConnectedForAConnectedAgentAndDisconnectedOtherwise(t *testing.T) {
 	rows := Build([]hubclient.Agent{agent("a", "", true), agent("b", "", false)})
-	if rows[0].Marker != Active || rows[1].Marker != Disconnected {
+	if rows[0].State != Connected || rows[1].State != Disconnected {
 		t.Fatalf("%+v", rows)
 	}
 	if Count(rows) != 1 {

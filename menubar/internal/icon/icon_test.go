@@ -2,6 +2,7 @@ package icon
 
 import (
 	"bytes"
+	"github.com/8thlight-daveloper/landline/menubar/internal/agentsview"
 	stdcolor "image/color"
 	"image/png"
 	"testing"
@@ -34,5 +35,26 @@ func TestTheMenuBarImagesAreBlackOnTransparentAndTheAboutImageIsBrandBlue(t *tes
 	}
 	if w, c := decode(t, About); w != 440 || c != (color{0x00, 0x71, 0xCE, 255}) {
 		t.Errorf("about %d %+v", w, c)
+	}
+}
+
+func TestEachStateGetsItsOwnImageAndAnyOtherStateGetsNone(t *testing.T) {
+	if !bytes.Equal(ForState(agentsview.Connected), Connected) || !bytes.Equal(ForState(agentsview.Disconnected), Disconnected) {
+		t.Fatal("a state got the wrong image")
+	}
+	if bytes.Equal(Connected, Disconnected) || len(Connected) == 0 || len(Disconnected) == 0 {
+		t.Fatal("the two images are not distinct and present")
+	}
+	if ForState("") != nil || ForState("active") != nil {
+		t.Fatal("a state that is not one of the two got an image")
+	}
+}
+
+func TestTheStateImagesAreThe32PixelSystemGreenAndMidGray(t *testing.T) {
+	if w, c := decode(t, Connected); w != 32 || c != (color{0x34, 0xC7, 0x59, 255}) {
+		t.Errorf("connected %d %+v", w, c)
+	}
+	if w, c := decode(t, Disconnected); w != 32 || c != (color{0x8E, 0x8E, 0x93, 255}) {
+		t.Errorf("disconnected %d %+v", w, c)
 	}
 }

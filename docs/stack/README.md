@@ -32,6 +32,7 @@ dependencies:
 | `github.com/charmbracelet/lipgloss`  | v1.1.0  | Styles for the screen's header, rows, and status line                           |
 | `github.com/charmbracelet/x/ansi`    | v0.10.1 | Display width and truncation that count escape sequences and wide characters    |
 | `github.com/mattn/go-isatty`         | v0.0.20 | Tells whether standard input and output are a terminal, before the screen opens |
+| `github.com/muesli/termenv`          | v0.16.0 | Sets the color profile in the screen's tests, which check the shape colors      |
 
 Their indirect dependencies are pinned in `tui/go.sum`. Change a version in `tui/go.mod`, run `go mod tidy` in `tui/`,
 and set the flake's `vendorHash` for `landline` to the hash that `nix build .#landline` reports.
@@ -67,6 +68,20 @@ and commit the result. A second run gives the same bytes, and the program's test
 | `jack-dimmed-22.png`   | 22     | Black at 40% alpha, transparent   | The menu bar image when the switchboard is down |
 | `jack-dimmed-44.png`   | 44     | Black at 40% alpha, transparent   | The dimmed image the app loads                  |
 | `jack-about-440.png`   | 440    | Brand blue `#0071CE`, transparent | The About panel icon, 40 times the grid         |
+
+The same run also draws the agent state images ([0150](../decisions/0150-agent-state-shows-as-an-icon.md)): a solid
+circle for `connected` and a ring for `disconnected`, on the pixel grid with no blurred pixel. They are colored, not
+template images, because the colors matter:
+
+| File                        | Pixels | Ink                           | Used for                                            |
+| --------------------------- | ------ | ----------------------------- | --------------------------------------------------- |
+| `state-connected-16.png`    | 16     | System green `#34C759`, solid | The 1x version, not loaded                          |
+| `state-connected-32.png`    | 32     | System green `#34C759`, solid | The image the app loads on a connected agent row    |
+| `state-disconnected-16.png` | 16     | Mid gray `#8E8E93`, ring      | The 1x version, not loaded                          |
+| `state-disconnected-32.png` | 32     | Mid gray `#8E8E93`, ring      | The image the app loads on a disconnected agent row |
+
+The library takes one image per item and shows it at 16 points, so the app loads the 32 pixel files through
+`MenuItem.SetIcon`. The menu model's agent row carries the state word, and `icon.ForState` picks the image from it.
 
 ### App bundle
 

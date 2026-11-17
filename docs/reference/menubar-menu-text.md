@@ -63,7 +63,8 @@ A reachable switchboard lists its agents in the order of the TUI: connected firs
 those without, then by label, then by handle. A row is a submenu.
 
 ```text
-<label, or the handle when there is no label> [<marker>]
+<shape> <label, or the handle when there is no label>
+  State: <state> (disabled)
   Handle: <handle> (disabled)
   Harness: <harness> (disabled)
   Host: <host> (disabled)
@@ -76,9 +77,13 @@ those without, then by label, then by handle. A row is a submenu.
   Copy handle
 ```
 
-- The marker comes from the same state values as the TUI (`agentsview`): `disconnected` for an agent that is listed and
-  not connected, and `active` for a connected agent. The state field of the TUI has no `idle` value today, so `idle`
-  appears only when that field says so.
+- The title starts with the shape of the state and a space: `●` (U+25CF) for a connected agent and `○` (U+25CB) for an
+  agent that is listed and not connected. The title has no bracketed state and no state word.
+- The submenu's first item is `State: <state>`, disabled, before `Handle`. The state is the word the switchboard reports
+  and `landline agents --json` prints, `connected` or `disconnected`, so a screen reader that cannot read a menu image
+  still reads the state. There is no `active` or `idle`.
+- Each row also carries an image of the state, a solid circle for connected and a ring for disconnected. `menu --text`
+  cannot show an image. The builder's unit test of state to image covers it.
 - A field the agent did not register is left out. The title line shows no folder and no branch.
 - `Copy handle` is the only enabled item of the submenu.
 - The count in the icon line is the number of connected agents. An agent that is not connected does not count.
@@ -136,9 +141,9 @@ so a smaller value exits `2` with the usage on standard error. A valid value cha
 
 ## What the text cannot show
 
-`menu --text` runs once and clicks nothing. The spawn of `landline server` and `landline setup` commands,
-`About Landline`, `Copy handle`, the slow-request backoff, the template image, and the Dock behavior are not reachable
-through it. The builder's own unit tests cover them.
+`menu --text` runs once and clicks nothing. The images on the agent rows, the spawn of `landline server` and
+`landline setup` commands, `About Landline`, `Copy handle`, the slow-request backoff, the template image, and the Dock
+behavior are not reachable through it. The builder's own unit tests cover them.
 
 ## Where the app looks for the switchboard
 
@@ -152,7 +157,8 @@ two connected agents and one that is not, with `landline` next to the app:
 
 ```text
 icon: jack 2
-amy-docs [active]
+● amy-docs
+  State: connected (disabled)
   Handle: alpha (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
@@ -160,13 +166,15 @@ amy-docs [active]
   Branch: main (disabled)
   ---
   Copy handle
-charlie [active]
+● charlie
+  State: connected (disabled)
   Handle: charlie (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
   ---
   Copy handle
-delta [disconnected]
+○ delta
+  State: disconnected (disabled)
   Handle: delta (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
@@ -303,6 +311,7 @@ An agent whose handle is `al<ESC>[31mpha<newline>br` shows as one line, with eac
 `<ESC>` is the escape character and `<newline>` is a line feed:
 
 ```text
-al [31mpha br [active]
+● al [31mpha br
+  State: connected (disabled)
   Handle: al [31mpha br (disabled)
 ```

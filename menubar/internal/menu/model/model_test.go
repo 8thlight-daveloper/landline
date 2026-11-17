@@ -33,11 +33,12 @@ func TestTextOfAReachableSwitchboardWithAgents(t *testing.T) {
 	in := local(true)
 	in.Switchboard = Switchboard{Known: true, Build: app()}
 	in.Agents = []agentsview.Row{
-		{Handle: "alpha", Label: "amy-docs", Harness: "claude-code", Host: "mac", Marker: agentsview.Active, Folder: "/work/docs", Branch: "main"},
-		{Handle: "delta", Harness: "claude-code", Host: "mac", Marker: agentsview.Disconnected},
+		{Handle: "alpha", Label: "amy-docs", Harness: "claude-code", Host: "mac", State: agentsview.Connected, Folder: "/work/docs", Branch: "main"},
+		{Handle: "delta", Harness: "claude-code", Host: "mac", State: agentsview.Disconnected},
 	}
 	want := `icon: jack 1
-amy-docs [active]
+● amy-docs
+  State: connected (disabled)
   Handle: alpha (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
@@ -45,7 +46,8 @@ amy-docs [active]
   Branch: main (disabled)
   ---
   Copy handle
-delta [disconnected]
+○ delta
+  State: disconnected (disabled)
   Handle: delta (disabled)
   Harness: claude-code (disabled)
   Host: mac (disabled)
@@ -96,7 +98,7 @@ Switchboard
 
 func TestAnUnreachableSwitchboardListsNoAgentsWhateverTheInputHolds(t *testing.T) {
 	in := local(false)
-	in.Agents = []agentsview.Row{{Handle: "alpha", Marker: agentsview.Active}}
+	in.Agents = []agentsview.Row{{Handle: "alpha", State: agentsview.Connected}}
 	if got := Build(in).Text(); strings.Contains(got, "alpha") || strings.HasPrefix(got, "icon: jack 1") {
 		t.Fatalf("got:\n%s", got)
 	}
@@ -171,11 +173,11 @@ func TestTheBuildLineSaysWhenTheCommitDiffersOnlyThen(t *testing.T) {
 func TestEveryLineIsOneLineAndLongValuesAreCut(t *testing.T) {
 	long := strings.Repeat("x", 5000)
 	in := local(true)
-	in.Agents = []agentsview.Row{{Handle: "alpha", Label: long, Folder: "/" + long, Marker: agentsview.Active}}
+	in.Agents = []agentsview.Row{{Handle: "alpha", Label: long, Folder: "/" + long, State: agentsview.Connected}}
 	in.Notice = "Failed: a\nb\x1b[2J"
 	got := Build(in).Text()
 	for _, l := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
-		if len([]rune(l)) > maxTitleRunes+len(disabledText)+len(" [disconnected]")+len(indent)+len("Folder: ") {
+		if len([]rune(l)) > maxTitleRunes+len(disabledText)+len("○ ")+len("State: disconnected")+len(indent)+len("Folder: ") {
 			t.Fatalf("a line is %d runes", len([]rune(l)))
 		}
 	}
@@ -186,7 +188,7 @@ func TestEveryLineIsOneLineAndLongValuesAreCut(t *testing.T) {
 
 func TestIconCountsConnectedAgentsOnly(t *testing.T) {
 	in := local(true)
-	in.Agents = []agentsview.Row{{Handle: "a", Marker: agentsview.Active}, {Handle: "b", Marker: agentsview.Disconnected}}
+	in.Agents = []agentsview.Row{{Handle: "a", State: agentsview.Connected}, {Handle: "b", State: agentsview.Disconnected}}
 	if got := Build(in).Icon; got != (Icon{Count: 1}) || got.CountText() != "1" {
 		t.Fatalf("%+v", got)
 	}
@@ -215,7 +217,7 @@ func TestLoopbackAcceptsLocalhostAndLoopbackIPsOnly(t *testing.T) {
 
 func TestTheActionsAreTheFixedCommandsAndNothingFromTheSwitchboard(t *testing.T) {
 	in := local(true)
-	in.Agents = []agentsview.Row{{Handle: "evil; rm -rf /", Marker: agentsview.Active}}
+	in.Agents = []agentsview.Row{{Handle: "evil; rm -rf /", State: agentsview.Connected}}
 	var runs [][]string
 	var walk func(items []Item)
 	walk = func(items []Item) {
@@ -243,7 +245,7 @@ func TestTheActionsAreTheFixedCommandsAndNothingFromTheSwitchboard(t *testing.T)
 
 func TestCopyHandleCopiesTheHandleAndNothingElse(t *testing.T) {
 	in := local(true)
-	in.Agents = []agentsview.Row{{Handle: "alpha", Label: "amy", Folder: "/f", Marker: agentsview.Active}}
+	in.Agents = []agentsview.Row{{Handle: "alpha", Label: "amy", Folder: "/f", State: agentsview.Connected}}
 	row := Build(in).Items[0]
 	copyItem := row.Children[len(row.Children)-1]
 	if copyItem.Title != "Copy handle" || copyItem.Action.Kind != Copy || copyItem.Action.Text != "alpha" {

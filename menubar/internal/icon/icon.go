@@ -1,6 +1,10 @@
 package icon
 
-import _ "embed"
+import (
+	_ "embed"
+
+	"github.com/8thlight-daveloper/landline/menubar/internal/agentsview"
+)
 
 var (
 	//go:embed jack-template-44.png
@@ -9,4 +13,18 @@ var (
 	Dimmed []byte
 	//go:embed jack-about-440.png
 	About []byte
+	//go:embed state-connected-32.png
+	Connected []byte
+	//go:embed state-disconnected-32.png
+	Disconnected []byte
 )
+
+func ForState(state string) []byte {
+	switch state {
+	case agentsview.Connected:
+		return Connected
+	case agentsview.Disconnected:
+		return Disconnected
+	}
+	return nil
+}

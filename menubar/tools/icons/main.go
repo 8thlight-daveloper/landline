@@ -108,19 +108,83 @@ var iconsetOutputs = []output{
 	{"icon_512x512@2x.png", 1024, brand},
 }
 
+var (
+	systemGreen = color.NRGBA{0x34, 0xC7, 0x59, 255}
+	midGray     = color.NRGBA{0x8E, 0x8E, 0x93, 255}
+)
+
+type stateOutput struct {
+	name   string
+	pixels int
+	hollow bool
+	ink    color.NRGBA
+}
+
+var stateOutputs = []stateOutput{
+	{"state-connected-16.png", 16, false, systemGreen},
+	{"state-connected-32.png", 32, false, systemGreen},
+	{"state-disconnected-16.png", 16, true, midGray},
+	{"state-disconnected-32.png", 32, true, midGray},
+}
+
+func renderState(pixels int, hollow bool, ink color.NRGBA) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, pixels, pixels))
+	outer := 5 * pixels / 8
+	inner := outer - pixels/4
+	for y := 0; y < pixels; y++ {
+		for x := 0; x < pixels; x++ {
+			dx, dy := 2*x+1-pixels, 2*y+1-pixels
+			squared := dx*dx + dy*dy
+			if squared <= outer*outer && (!hollow || squared > inner*inner) {
+				img.SetNRGBA(x, y, ink)
+			}
+		}
+	}
+	return img
+}
+
+func writePNG(path string, img *image.NRGBA) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	encodeErr := (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(file, img)
+	if closeErr := file.Close(); encodeErr == nil {
+		encodeErr = closeErr
+	}
+	return encodeErr
+}
+
+func generateStates(folder string) error {
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		return err
+	}
+	for _, each := range stateOutputs {
+		if err := writePNG(filepath.Join(folder, each.name), renderState(each.pixels, each.hollow, each.ink)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 const usage = "usage: icons <jack.svg> <output folder>\n       icons -iconset <jack.svg> <folder.iconset>"
 
 func main() {
 	args := os.Args[1:]
 	outs := outputs
-	if len(args) > 0 && args[0] == "-iconset" {
+	iconset := len(args) > 0 && args[0] == "-iconset"
+	if iconset {
 		args, outs = args[1:], iconsetOutputs
 	}
 	if len(args) != 2 {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
 	}
-	if err := generate(args[0], args[1], outs); err != nil {
+	err := generate(args[0], args[1], outs)
+	if err == nil && !iconset {
+		err = generateStates(args[1])
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "icons:", err)
 		os.Exit(1)
 	}
@@ -139,16 +203,8 @@ func generate(svgPath, folder string, outs []output) error {
 		return err
 	}
 	for _, each := range outs {
-		file, err := os.Create(filepath.Join(folder, each.name))
-		if err != nil {
+		if err := writePNG(filepath.Join(folder, each.name), d.render(each.pixels, each.ink)); err != nil {
 			return err
-		}
-		encodeErr := (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(file, d.render(each.pixels, each.ink))
-		if closeErr := file.Close(); encodeErr == nil {
-			encodeErr = closeErr
-		}
-		if encodeErr != nil {
-			return encodeErr
 		}
 	}
 	return nil

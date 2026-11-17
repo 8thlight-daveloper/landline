@@ -24,7 +24,7 @@ const (
 	menubarTimeout = 30 * time.Second
 	menuSeparator  = "---"
 	disabledMark   = " (disabled)"
-	liveMarker     = "active"
+	liveMarker     = "connected"
 )
 
 func releaseVersion(t *testing.T) string {
@@ -289,7 +289,7 @@ func indented(lines ...string) []string {
 }
 
 func agentRow(title, marker string, fields ...string) []string {
-	lines := []string{title + " [" + marker + "]"}
+	lines := []string{shapeFor(marker) + " " + title, "  State: " + marker + disabledMark}
 	for _, field := range fields {
 		lines = append(lines, "  "+field+disabledMark)
 	}
@@ -376,4 +376,11 @@ func assertNoCredentialsOnDisk(t *testing.T, rig menubarRig) {
 			return nil
 		})
 	}
+}
+
+func shapeFor(state string) string {
+	if state == "connected" {
+		return "\u25cf"
+	}
+	return "\u25cb"
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -90,6 +91,34 @@ func TestIconsetHoldsEveryNamedSizeInBrandBlue(t *testing.T) {
 		file.Close()
 		if err != nil || img.Bounds().Dx() != each.pixels {
 			t.Fatalf("%s: %v", each.name, err)
+		}
+	}
+}
+
+func TestStateImagesAreReproducibleAndTheSolidAndHollowDifferAtTheCentre(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	for _, folder := range []string{first, second} {
+		if err := generateStates(folder); err != nil {
+			t.Fatal(err)
+		}
+	}
+	centres := map[string]color.NRGBA{}
+	for _, each := range stateOutputs {
+		a, _ := os.ReadFile(filepath.Join(first, each.name))
+		b, _ := os.ReadFile(filepath.Join(second, each.name))
+		if !bytes.Equal(a, b) || len(a) == 0 {
+			t.Errorf("%s differs between runs", each.name)
+		}
+		img, err := png.Decode(bytes.NewReader(a))
+		if err != nil || img.Bounds().Dx() != each.pixels {
+			t.Fatalf("%s: %v", each.name, err)
+		}
+		centres[each.name] = color.NRGBAModel.Convert(img.At(each.pixels/2, each.pixels/2)).(color.NRGBA)
+	}
+	for _, pixels := range []string{"16", "32"} {
+		solid, hollow := centres["state-connected-"+pixels+".png"], centres["state-disconnected-"+pixels+".png"]
+		if solid != systemGreen || hollow.A != 0 {
+			t.Errorf("%s px: centre of solid %+v, of hollow %+v", pixels, solid, hollow)
 		}
 	}
 }

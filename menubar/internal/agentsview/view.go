@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	Active       = "active"
+	Connected    = "connected"
 	Disconnected = "disconnected"
 )
 
@@ -17,7 +17,7 @@ type Row struct {
 	Label           string
 	Harness         string
 	Host            string
-	Marker          string
+	State           string
 	Model           string
 	Effort          string
 	Folder          string
@@ -25,7 +25,7 @@ type Row struct {
 	LandlineVersion string
 }
 
-func (r Row) Connected() bool { return r.Marker != Disconnected }
+func (r Row) Connected() bool { return r.State == Connected }
 
 func (r Row) Title() string {
 	if r.Label != "" {
@@ -37,13 +37,13 @@ func (r Row) Title() string {
 func Build(agents []hubclient.Agent) []Row {
 	rows := make([]Row, 0, len(agents))
 	for _, agent := range agents {
-		marker := Disconnected
+		state := Disconnected
 		if agent.Connected {
-			marker = Active
+			state = Connected
 		}
 		rows = append(rows, Row{
 			Handle: clean.Text(agent.Name), Label: clean.Text(agent.Label), Harness: clean.Text(agent.Harness),
-			Host: clean.Text(agent.Host), Marker: marker, Model: clean.Text(agent.Model), Effort: clean.Text(agent.Effort),
+			Host: clean.Text(agent.Host), State: state, Model: clean.Text(agent.Model), Effort: clean.Text(agent.Effort),
 			Folder: clean.Text(agent.Folder), Branch: clean.Text(agent.Branch),
 			LandlineVersion: clean.Text(agent.LandlineVersion),
 		})
