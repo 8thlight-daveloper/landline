@@ -80,6 +80,9 @@ func withConfig(env Env) Env {
 		original = func(string) string { return "" }
 	}
 	saved := LoadConfig(env)
+	if env.processGetenv == nil {
+		env.processGetenv = original
+	}
 	env.Getenv = func(key string) string {
 		if value := original(key); value != "" {
 			return value

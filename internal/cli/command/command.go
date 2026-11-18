@@ -26,6 +26,18 @@ type Env struct {
 	Home      string
 	Host      string
 	Banner    func() string
+
+	processGetenv func(string) string
+}
+
+func (e Env) processEnvironment(key string) string {
+	if e.processGetenv != nil {
+		return e.processGetenv(key)
+	}
+	if e.Getenv == nil {
+		return ""
+	}
+	return e.Getenv(key)
 }
 
 type session struct {
@@ -40,7 +52,7 @@ const Usage = `usage: landline <command> [flags]
   agents    [--json] [--interval D]   list agents and whether each is connected. --json prints the screen's view
   setup     claude|codex [--remove]   add the Landline MCP server, landline-mcp, to a harness, once. --remove takes it out
   claude    [--project P] [-- args]   start Claude Code with the channel loaded
-  server    up|down|restart|status|install|join|log   run and find the switchboard
+  server    up|down|restart|rotate-secret|status|install|join|log   run and find the switchboard
 
   register  --id N --harness H [--host H] [--session S] [--project P]   needs LANDLINE_URL and LANDLINE_SECRET.
             A hand-registered id holds no delivery stream, so it can send but cannot receive

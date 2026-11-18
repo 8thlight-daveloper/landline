@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -24,6 +25,8 @@ const serverUsage = `landline server <command>
                     Without --addr it listens on 127.0.0.1:8787, or on the port in LANDLINE_PORT
   down              stop the switchboard that "up" started
   restart [flags]   stop that switchboard and start it again with the flags given. It keeps no agents, so each one registers again
+  rotate-secret [flags]   replace the secret and restart the switchboard with the flags given. The old secret stops working
+                    at once and every agent must register again
   status            say whether the switchboard is running
   log               print the message log
   join <address>    use a switchboard on another machine, with its secret from LANDLINE_SECRET or standard input
@@ -45,6 +48,8 @@ func runServer(args []string, env Env) int {
 		return serverDown(env, dataDir)
 	case "restart":
 		return serverRestart(args[1:], env, dataDir)
+	case "rotate-secret":
+		return serverRotateSecret(args[1:], env, dataDir)
 	case "status":
 		return serverStatus(env, dataDir)
 	case "install":
@@ -63,11 +68,12 @@ func isLocalURL(text string) bool {
 	if err != nil {
 		return false
 	}
-	switch name := parsed.Hostname(); {
-	case name == "localhost", name == "::1", strings.HasPrefix(name, "127."):
+	name := parsed.Hostname()
+	if name == "localhost" {
 		return true
 	}
-	return false
+	ip := net.ParseIP(name)
+	return ip != nil && ip.IsLoopback()
 }
 
 func newSecret() (string, error) {
@@ -171,7 +177,7 @@ func serverUp(args []string, env Env, dataDir string) int {
 	}
 	pid := child.Process.Pid
 	os.WriteFile(pidFile(dataDir), []byte(strconv.Itoa(pid)), 0o600)
-	child.Process.Release()
+	go child.Wait()
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		if raw, _ := os.ReadFile(outPath); strings.Contains(string(raw), "listening on") {

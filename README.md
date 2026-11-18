@@ -149,6 +149,15 @@ not remember the flags of the earlier start, so pass them again. The switchboard
 restart each agent registers again on its next call and gets a new id. A session started before the upgrade keeps its
 old process and needs its own restart.
 
+`landline server rotate-secret` replaces the switchboard secret and restarts the switchboard, for a secret that was
+exposed. It takes the flags of `restart` and prints one line, never a secret. The old secret stops working at once and
+every agent registers again, as after a restart. It refuses, and changes nothing, when the saved address is not a
+loopback address, when `LANDLINE_SECRET` is set in the environment, when `landline-switchboard` cannot be found, or when
+something that `landline server up` did not start answers at the saved address, such as a switchboard that launchd runs,
+because the command cannot stop it. Without `--addr` the new switchboard keeps the saved address. A session whose own
+environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
+([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md)).
+
 #### Channel delivery in Claude Code
 
 Landline pushes a message into a running Claude Code session as a channel event. Claude Code loads a server as a channel
@@ -293,6 +302,7 @@ landline setup codex
 | `landline agents [--json]`                        | Lists agents, whether each is connected, and the attributes they claimed                                                                            |
 | `landline server up\|down\|status`                | Starts the switchboard in the background, stops it, or shows whether it runs                                                                        |
 | `landline server restart [flags]`                 | Stops the switchboard that `up` started and starts it again with the flags given                                                                    |
+| `landline server rotate-secret [flags]`           | Replaces the switchboard secret and restarts the switchboard with the flags given. The old secret stops working at once                             |
 | `landline server install [--load]`                | Starts the switchboard at login: a launchd agent on macOS, a systemd user unit on Linux                                                             |
 | `landline server join <address>`                  | Uses the switchboard on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                           |
 | `landline setup claude\|codex [--print]`          | Adds `landline-mcp` to that harness, once                                                                                                           |
