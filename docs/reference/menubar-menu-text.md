@@ -40,6 +40,7 @@ Switchboard
   Start
   Stop
   Restart
+  Rotate secret…
   ---
   <switchboard build line> (disabled)
 Harnesses
@@ -55,7 +56,7 @@ Refresh
 Quit
 ```
 
-`Start`, `Stop`, and `Restart` each end in ` (disabled)` when they are disabled.
+`Start`, `Stop`, `Restart`, and `Rotate secret…` each end in ` (disabled)` when they are disabled.
 
 ## Agent rows
 
@@ -101,25 +102,28 @@ When the switchboard is unreachable there are no rows. The line `Switchboard unr
 Any failure to get the agent list is the unreachable state: a connection error, a `401` after one registration again, a
 `5xx`, a body that is not the JSON list, and a missing secret. The text is then the unreachable menu, with
 `icon: jack dimmed`, exit `0`, nothing on standard error, and no secret or token anywhere in the output. The build line
-is then `Switchboard (build unknown)`, and `Start`, `Stop`, and `Restart` follow the `Not running` rule.
+is then `Switchboard (build unknown)`, and `Start`, `Stop`, `Restart`, and `Rotate secret…` follow the `Not running`
+rule.
 
 ## The Switchboard submenu
 
 The first line is one of these, always disabled.
 
-| Condition                                                                 | First line                             |
-| ------------------------------------------------------------------------- | -------------------------------------- |
-| The address is not a loopback address                                     | `Remote switchboard at <address>`      |
-| Loopback, and `landline` is found neither next to the app nor on the path | `landline not found. Run just install` |
-| Loopback, and the switchboard answered                                    | `Running at <address>`                 |
-| Loopback, and the switchboard did not answer                              | `Not running`                          |
+| Condition                                                                       | First line                             |
+| ------------------------------------------------------------------------------- | -------------------------------------- |
+| The address is not this machine's                                               | `Remote switchboard at <address>`      |
+| This machine's, and `landline` is found neither next to the app nor on the path | `landline not found. Run just install` |
+| This machine's, and the switchboard answered                                    | `Running at <address>`                 |
+| This machine's, and the switchboard did not answer                              | `Not running`                          |
 
-The address is `LANDLINE_URL`, or the `url` of `~/.config/landline/config.json`. A loopback address has a host of
-`localhost`, or an IP address that is loopback, such as `127.0.0.1`, `127.0.0.2`, or `[::1]`. `landline` is looked for
-next to the app's own binary, then on the path.
+The address is `LANDLINE_URL`, or the `host` and `port` of `~/.config/landline/config.toml`, or the default `127.0.0.1`
+and port `8787` ([0190](../decisions/0190-one-toml-config-names-the-switchboard-by-host-and-port.md)). An address is
+this machine's when its host is `localhost`, a loopback IP such as `127.0.0.1`, `127.0.0.2`, or `[::1]`, or a name or IP
+that resolves to an address of one of the machine's network interfaces. A host that does not resolve is not this
+machine's. `landline` is looked for next to the app's own binary, then on the path.
 
-`Start` is enabled only when the first line is `Not running`. `Stop` and `Restart` are enabled only when it is
-`Running at <address>`. In every other case all three are disabled.
+`Start` is enabled only when the first line is `Not running`. `Stop`, `Restart`, and `Rotate secret…` are enabled only
+when it is `Running at <address>`. In every other case all four are disabled.
 
 The build line is one of these, always disabled.
 
@@ -155,8 +159,10 @@ behavior are not reachable through it. The builder's own unit tests cover them.
 
 ## Where the app looks for the switchboard
 
-`LANDLINE_URL` and `LANDLINE_SECRET` first, each on its own. When one is empty, the `url` or the `secret` of
-`~/.config/landline/config.json` stands in for it, as it does for the TUI.
+`LANDLINE_URL` and `LANDLINE_SECRET` first, each on its own. When one is empty, the `host` and `port`, or the `secret`,
+of `~/.config/landline/config.toml` stands in for it, as it does for the TUI. A machine with no `config.toml` reads an
+old `config.json` instead, and with neither file the address is `127.0.0.1` at `LANDLINE_PORT` or `8787`
+([0190](../decisions/0190-one-toml-config-names-the-switchboard-by-host-and-port.md)).
 
 ## Worked examples
 
@@ -199,6 +205,7 @@ Switchboard
   Start (disabled)
   Stop
   Restart
+  Rotate secret…
   ---
   Switchboard 0.2.0 (a1b2c3d) (disabled)
 Harnesses
@@ -224,6 +231,7 @@ Switchboard
   Start (disabled)
   Stop
   Restart
+  Rotate secret…
   ---
   Switchboard dev (disabled)
 Harnesses
@@ -251,6 +259,7 @@ Switchboard
   Start
   Stop (disabled)
   Restart (disabled)
+  Rotate secret… (disabled)
   ---
   Switchboard (build unknown) (disabled)
 Harnesses
@@ -266,8 +275,8 @@ Refresh
 Quit
 ```
 
-A switchboard on another machine, which does not answer. `Start`, `Stop`, and `Restart` are disabled whatever the
-answer:
+A switchboard on another machine, which does not answer. `Start`, `Stop`, `Restart`, and `Rotate secret…` are disabled
+whatever the answer:
 
 ```text
 icon: jack dimmed
@@ -279,6 +288,7 @@ Switchboard
   Start (disabled)
   Stop (disabled)
   Restart (disabled)
+  Rotate secret… (disabled)
   ---
   Switchboard (build unknown) (disabled)
 Harnesses
@@ -304,6 +314,7 @@ Switchboard
   Start (disabled)
   Stop (disabled)
   Restart (disabled)
+  Rotate secret… (disabled)
   ---
   Switchboard 0.2.0 (a1b2c3d) (disabled)
 Harnesses
