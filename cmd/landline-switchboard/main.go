@@ -40,7 +40,7 @@ func run(args []string) int {
 	}
 	values, err := command.FlagValues(args, command.SwitchboardFlags...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\nusage: %s [--addr A] [--log PATH] [--host H] [--keepalive D] [--delivery-timeout D] [--grace D]\n       %s version\n", name, err, name, name)
+		fmt.Fprintf(os.Stderr, "%s: %v\nusage: %s [--addr A] [--log PATH] [--host H] [--keepalive D] [--delivery-timeout D] [--grace D] [--invite-lifetime D] [--signature-window D]\n       %s version\n", name, err, name, name)
 		return 2
 	}
 	saved, err := command.ReadConfig(env)
@@ -79,8 +79,10 @@ func run(args []string) int {
 	switchboard, err := server.New(server.Config{
 		Secret: secret, Host: host,
 		KeepaliveInterval: timing.Keepalive, DeliveryTimeout: timing.DeliveryTimeout, Grace: timing.Grace,
-		Notify: command.NotifyToStderr,
-		Build:  server.BuildResponse{Version: version, Commit: commit, Date: date},
+		InviteLifetime: timing.InviteLifetime, SignatureWindow: timing.SignatureWindow,
+		MachinesPath: filepath.Join(filepath.Dir(logPath), "machines.json"),
+		Notify:       command.NotifyToStderr,
+		Build:        server.BuildResponse{Version: version, Commit: commit, Date: date},
 	}, log)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)

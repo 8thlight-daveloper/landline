@@ -19,7 +19,7 @@ const serverUsage = `landline server <command>
 
   up [flags]        start the switchboard in the background
                     Flags: --addr, --log, --host, and the timing flags --keepalive D, --delivery-timeout D and
-                    --grace D, which take durations such as 200ms or 15s.
+                    --grace D, --invite-lifetime D and --signature-window D, which take durations such as 200ms or 15s.
                     --grace is how long the switchboard keeps an agent after it was last seen, 2 minutes by default.
                     Without --addr it listens on the host and port saved in config.toml. Without a saved host it uses
                     127.0.0.1, and without a saved port the port in LANDLINE_PORT or 8787. It saves the address after it listens
@@ -27,9 +27,13 @@ const serverUsage = `landline server <command>
   restart [flags]   stop that switchboard and start it again with the flags given. It keeps no agents, so each one registers again
   rotate-secret [flags]   replace the secret and restart the switchboard with the flags given. The old secret stops working
                     at once and every agent must register again
+  invite --name N   make a code that lets another machine join as N, and print the join command for it
+  machines          list the machines that joined, with a fingerprint of each key
+  revoke N|--all    remove a machine, or every machine, and end its tokens and streams
   status            say whether the switchboard is running
   log               print the message log
-  join <host:port>  use a switchboard on another machine, with its secret from LANDLINE_SECRET or standard input
+  join <host:port> [--code C]   use a switchboard on another machine. With a code, it saves a key of its own. Without one,
+                    it saves the secret from LANDLINE_SECRET or standard input
   install [--load]  start the switchboard at login: a launchd agent on macOS and a systemd user unit on Linux
 `
 
@@ -52,6 +56,12 @@ func runServer(args []string, env Env) int {
 		return serverRotateSecret(args[1:], env, dataDir)
 	case "status":
 		return serverStatus(env, dataDir)
+	case "invite":
+		return serverInvite(args[1:], env)
+	case "machines":
+		return serverMachines(args[1:], env)
+	case "revoke":
+		return serverRevoke(args[1:], env)
 	case "install":
 		return serverInstall(args[1:], env, dataDir)
 	case "log":

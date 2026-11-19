@@ -14,9 +14,10 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "an agent token may not read the build")
 		return
 	}
-	if who == unknownCaller && !s.isSecret(r) {
-		fail(w, http.StatusUnauthorized, "missing or wrong switchboard secret")
-		return
+	if who == unknownCaller {
+		if _, ok := s.secretOrMachine(w, r); !ok {
+			return
+		}
 	}
 	write(w, http.StatusOK, s.cfg.Build)
 }

@@ -130,11 +130,11 @@ func TestMissingPiecesGiveClearErrors(t *testing.T) {
 	}
 }
 
-func TestRegisterWithNoSecretSaysWhichVariablesToSet(t *testing.T) {
+func TestRegisterWithNoCredentialSaysHowToGetOne(t *testing.T) {
 	t.Parallel()
 	var r run
 	env := Env{Stdin: strings.NewReader(""), Stdout: &r.out, Stderr: &r.err, ConfigDir: t.TempDir(), Getenv: func(string) string { return "" }}
-	if code := Run([]string{"register", "--id", "alpha", "--harness", "codex"}, env); code != 1 || !strings.Contains(r.err.String(), "set LANDLINE_URL and LANDLINE_SECRET") {
+	if code := Run([]string{"register", "--id", "alpha", "--harness", "codex"}, env); code != 1 || !strings.Contains(r.err.String(), "there is no switchboard credential") {
 		t.Fatalf("%d %q", code, r.err.String())
 	}
 }

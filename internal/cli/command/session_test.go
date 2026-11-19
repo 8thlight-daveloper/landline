@@ -402,13 +402,13 @@ func TestTheSessionSaysTheSwitchboardIsNotRunningWhenItCannotConnect(t *testing.
 	}
 }
 
-func TestTheSessionSaysThereIsNoSwitchboardSecret(t *testing.T) {
+func TestTheSessionSaysThereIsNoSwitchboardCredential(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
 	s, _ := newSession(t, srv, "")
 	_, err := s.Send(model.SendBody{To: "x", Body: "b"})
-	if err == nil || !strings.Contains(err.Error(), "there is no switchboard secret. Run: landline server up, or landline server join <host:port>") {
+	if err == nil || !strings.Contains(err.Error(), "there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET") {
 		t.Fatalf("%v", err)
 	}
 }

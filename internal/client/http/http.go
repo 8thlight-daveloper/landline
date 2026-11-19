@@ -33,6 +33,7 @@ const maxStreamLine = 2 << 20
 type Client struct {
 	URL       string
 	Token     string
+	Signer    *Signer
 	http      *nethttp.Client
 	streaming *nethttp.Client
 }
@@ -42,9 +43,15 @@ func New(url, token string) *Client {
 }
 
 func (c *Client) do(method, path string, in, out any) error {
+	return c.doWith(true, method, path, in, out)
+}
+
+func (c *Client) doWith(authorized bool, method, path string, in, out any) error {
 	var body io.Reader
+	var raw []byte
 	if in != nil {
-		raw, err := json.Marshal(in)
+		var err error
+		raw, err = json.Marshal(in)
 		if err != nil {
 			return err
 		}
@@ -54,7 +61,13 @@ func (c *Client) do(method, path string, in, out any) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
+	switch {
+	case !authorized:
+	case c.Signer != nil && signedRoute(method, path):
+		req.Header.Set("Authorization", c.Signer.Header(method, path, raw, time.Now()))
+	default:
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -163,4 +176,9 @@ func (c *Client) Stream(ctx context.Context, handle func(model.Delivery)) error 
 		return ctx.Err()
 	}
 	return scanner.Err()
+}
+
+func signedRoute(method, path string) bool {
+	base := strings.SplitN(path, "?", 2)[0]
+	return (method == "POST" && (base == "/v1/register" || base == "/v1/observers")) || (method == "GET" && (base == "/v1/log" || base == "/v1/build"))
 }

@@ -151,14 +151,14 @@ func (s *Session) register() error {
 	if saved.configProblem != nil {
 		return saved.configProblem
 	}
-	secret := saved.Getenv("LANDLINE_SECRET")
-	if secret == "" {
-		return errors.New("there is no switchboard secret. Run: landline server up, or landline server join <host:port>")
+	url := saved.Getenv("LANDLINE_URL")
+	hub, err := credentialClient(saved, url)
+	if err != nil {
+		return err
 	}
 	host := s.env.Host
 	identity := s.detect().With(Identity{Harness: HarnessFromClient(s.clientName, s.env.Getenv("AI_AGENT")), HarnessVersion: s.clientVersion}).With(s.overrides)
-	url := saved.Getenv("LANDLINE_URL")
-	out, err := client.New(url, secret).Register(model.RegisterRequest{
+	out, err := hub.Register(model.RegisterRequest{
 		Seed: identity.Seed, Harness: identity.Harness, Host: host, Session: s.env.Getenv("CLAUDE_CODE_SESSION_ID"),
 		Folder: identity.Folder, Branch: identity.Branch, Worktree: identity.Worktree, HarnessVersion: identity.HarnessVersion, LandlineVersion: identity.LandlineVersion,
 		LandlineCommit: identity.LandlineCommit, LandlineDate: identity.LandlineDate,

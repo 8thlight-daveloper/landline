@@ -98,15 +98,15 @@ func isTerminal(out any) bool {
 
 func connect(stderr io.Writer) (*hubclient.Client, int) {
 	home, _ := os.UserHomeDir()
-	address, secret, err := hubclient.Discover(os.Getenv, home)
+	address, credential, err := hubclient.DiscoverCredential(os.Getenv, home)
 	if err != nil {
 		return nil, fail(stderr, err.Error(), 1)
 	}
-	client := hubclient.New(address, secret)
-	client.RereadSecretWith(func() string {
-		_, fresh, err := hubclient.Discover(os.Getenv, home)
+	client := hubclient.NewWith(address, credential)
+	client.RereadCredentialWith(func() hubclient.Credential {
+		_, fresh, err := hubclient.DiscoverCredential(os.Getenv, home)
 		if err != nil {
-			return ""
+			return hubclient.Credential{}
 		}
 		return fresh
 	})

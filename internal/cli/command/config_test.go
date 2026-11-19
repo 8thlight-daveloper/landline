@@ -219,7 +219,7 @@ func TestJoinSavesHostPortAndSecretFromEitherFormAndRefusesBadOnes(t *testing.T)
 	}
 	var usage strings.Builder
 	bare := Env{ConfigDir: t.TempDir(), Stdout: &usage, Stderr: &usage, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
-	if code := Run([]string{"join"}, bare); code == 0 || !strings.Contains(usage.String(), "usage: landline server join <host:port>. The switchboard secret comes from") {
+	if code := Run([]string{"join"}, bare); code == 0 || !strings.Contains(usage.String(), "usage: landline server join <host:port> [--code <code>]. Without a code, the switchboard secret comes from") {
 		t.Errorf("bare join: %d %q", code, usage.String())
 	}
 	for secret, wanted := range map[string]string{"short": "at least 16 characters", "a-secret-with-a-\"-in-it": "cannot hold a quote"} {

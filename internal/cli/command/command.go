@@ -30,6 +30,7 @@ type Env struct {
 
 	processGetenv func(string) string
 	configProblem error
+	signer        *client.Signer
 }
 
 func (e Env) processEnvironment(key string) string {
@@ -146,11 +147,12 @@ func register(args []string, env Env) error {
 	if err := set.Parse(args); err != nil {
 		return err
 	}
-	url, secret := env.Getenv("LANDLINE_URL"), env.Getenv("LANDLINE_SECRET")
-	if url == "" || secret == "" {
-		return errors.New("set LANDLINE_URL and LANDLINE_SECRET")
+	url := env.Getenv("LANDLINE_URL")
+	hub, err := credentialClient(env, url)
+	if err != nil {
+		return err
 	}
-	out, err := client.New(url, secret).Register(model.RegisterRequest{
+	out, err := hub.Register(model.RegisterRequest{
 		ID: *id, Harness: *harness, Host: *host, Session: *sessionID, Project: *project,
 	})
 	if err != nil {
@@ -273,11 +275,11 @@ func logRead(args []string, env Env) error {
 	if err := set.Parse(args); err != nil {
 		return err
 	}
-	url, secret := env.Getenv("LANDLINE_URL"), env.Getenv("LANDLINE_SECRET")
-	if url == "" || secret == "" {
-		return errors.New("set LANDLINE_URL and LANDLINE_SECRET")
+	hub, err := credentialClient(env, env.Getenv("LANDLINE_URL"))
+	if err != nil {
+		return err
 	}
-	entries, err := client.New(url, secret).Log(*after)
+	entries, err := hub.Log(*after)
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	client "github.com/8thlight-daveloper/landline/internal/client/http"
 	"net"
 	"net/url"
 	"os"
@@ -41,9 +42,10 @@ func DefaultAddr(getenv func(string) string) (string, error) {
 }
 
 type Config struct {
-	Secret string
-	Host   string
-	Port   int
+	Secret  string
+	Host    string
+	Port    int
+	Machine string
 }
 
 func (c Config) Listen(getenv func(string) string) (host string, port int, err error) {
@@ -91,14 +93,17 @@ func parseConfig(path, text string) (Config, error) {
 		quoted := stringValue.FindStringSubmatch(value)
 		isNumber := wholeNumber.MatchString(value)
 		switch {
-		case key == "secret" || key == "host":
+		case key == "secret" || key == "host" || key == "machine":
 			if quoted == nil {
 				return Config{}, lineError(path, number, key+" must be text in quotes")
 			}
-			if key == "secret" {
+			switch key {
+			case "secret":
 				config.Secret = quoted[1]
-			} else {
+			case "host":
 				config.Host = quoted[1]
+			default:
+				config.Machine = quoted[1]
 			}
 		case key == "port":
 			port, convertErr := strconv.Atoi(value)
@@ -192,6 +197,9 @@ func SaveConfig(env Env, change Config) error {
 	if change.Port != 0 {
 		lines = setKey(lines, "port", strconv.Itoa(change.Port))
 	}
+	if change.Machine != "" {
+		lines = setKey(lines, "machine", `"`+change.Machine+`"`)
+	}
 	path := configPath(env)
 	temp := path + ".tmp"
 	os.Remove(temp)
@@ -260,6 +268,9 @@ func withConfig(env Env) Env {
 	if env.processGetenv == nil {
 		env.processGetenv = original
 	}
+	if problem == nil && env.processGetenv("LANDLINE_SECRET") == "" {
+		env.signer, problem = savedSigner(env, saved)
+	}
 	env.configProblem = problem
 	env.Getenv = func(key string) string {
 		if value := original(key); value != "" {
@@ -290,15 +301,31 @@ func HubURL(env Env) string {
 
 func join(args []string, env Env) error {
 	set := flags("join", env)
-	if err := set.Parse(args); err != nil {
+	code := new(string)
+	rest := []string{}
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--code" && i+1 < len(args):
+			*code = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--code="):
+			*code = strings.TrimPrefix(args[i], "--code=")
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	if err := set.Parse(rest); err != nil {
 		return err
 	}
 	if set.NArg() != 1 {
-		return errors.New("usage: landline server join <host:port>. The switchboard secret comes from LANDLINE_SECRET or standard input")
+		return errors.New("usage: landline server join <host:port> [--code <code>]. Without a code, the switchboard secret comes from LANDLINE_SECRET or standard input")
 	}
 	host, port, err := splitSwitchboardAddress(set.Arg(0))
 	if err != nil {
 		return err
+	}
+	if *code != "" {
+		return joinWithCode(env, host, port, *code)
 	}
 	secret := env.processEnvironment("LANDLINE_SECRET")
 	if secret == "" {
@@ -317,5 +344,59 @@ func join(args []string, env Env) error {
 		return err
 	}
 	fmt.Fprintf(env.Stdout, "joined the switchboard at %s. The address and secret are saved in %s, readable only by you\n", net.JoinHostPort(host, strconv.Itoa(port)), configPath(env))
+	return nil
+}
+
+func forgetSecretLine(env Env) error {
+	raw, err := os.ReadFile(configPath(env))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var kept []string
+	for _, line := range splitLines(string(raw)) {
+		trimmed := strings.TrimSpace(line)
+		if found := keyLine.FindStringSubmatch(trimmed); found != nil && found[1] == "secret" && !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	temporary := configPath(env) + ".tmp"
+	os.Remove(temporary)
+	if err := os.WriteFile(temporary, []byte(strings.Join(kept, "\n")+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(temporary, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, configPath(env))
+}
+
+func joinWithCode(env Env, host string, port int, code string) error {
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+	public, private, err := newMachineKey()
+	if err != nil {
+		return err
+	}
+	name, err := client.New("http://"+address, "").Redeem(code, public)
+	if err != nil {
+		var refused *client.StatusError
+		if errors.As(err, &refused) && refused.Message != "" {
+			return errors.New(refused.Message)
+		}
+		return err
+	}
+	if err := writeMachineKey(env, private); err != nil {
+		return err
+	}
+	if err := SaveConfig(env, Config{Host: host, Port: port, Machine: name}); err != nil {
+		return err
+	}
+	if err := forgetSecretLine(env); err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stdout, "joined the switchboard at %s as %s. The key is saved in %s, readable only by you\n", address, name, machineKeyPath(env))
 	return nil
 }

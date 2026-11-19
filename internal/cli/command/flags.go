@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-var SwitchboardFlags = []string{"--addr", "--log", "--host", "--keepalive", "--delivery-timeout", "--grace"}
+var SwitchboardFlags = []string{"--addr", "--log", "--host", "--keepalive", "--delivery-timeout", "--grace", "--invite-lifetime", "--signature-window"}
 
 func FlagValues(args []string, allowed ...string) (map[string]string, error) {
 	values := map[string]string{}
@@ -23,12 +23,12 @@ func FlagValues(args []string, allowed ...string) (map[string]string, error) {
 }
 
 type Timing struct {
-	Keepalive, DeliveryTimeout, Grace time.Duration
+	Keepalive, DeliveryTimeout, Grace, InviteLifetime, SignatureWindow time.Duration
 }
 
 func TimingFrom(values map[string]string) (Timing, error) {
 	var out Timing
-	for flag, target := range map[string]*time.Duration{"--keepalive": &out.Keepalive, "--delivery-timeout": &out.DeliveryTimeout, "--grace": &out.Grace} {
+	for flag, target := range map[string]*time.Duration{"--keepalive": &out.Keepalive, "--delivery-timeout": &out.DeliveryTimeout, "--grace": &out.Grace, "--invite-lifetime": &out.InviteLifetime, "--signature-window": &out.SignatureWindow} {
 		raw, given := values[flag]
 		if !given {
 			continue

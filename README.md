@@ -143,12 +143,13 @@ sessions still run an old binary after an upgrade. `just build` and `just instal
 the nix package reads them from the flake source, and a plain `go build` leaves them empty. `landline version` prints
 them for the installed binary.
 
-The file holds three keys, and you can edit it by hand. Comments and other keys are kept when Landline saves it:
+The file holds up to four keys, and you can edit it by hand. Comments and other keys are kept when Landline saves it:
 
 ```toml
 secret = "..."
 host = "127.0.0.1"
 port = 8787
+machine = "linux-box"                  # only on a machine that joined with an invite, which has no secret line
 ```
 
 `host` is a name or an IP address, with no scheme, and `port` is a number. One address says where the switchboard
@@ -301,20 +302,41 @@ switchboard prints a warning that it speaks plain HTTP. On the first machine, na
 landline server up --addr davelight-mbp:8787         # saves host and port in config.toml after it listens
 ```
 
-On the second machine:
+On the second machine, join with an invite. The first machine makes a code, and the second redeems it:
+
+```sh
+landline server invite --name linux-box              # first machine. Prints the join line below, with a code
+landline server join davelight-mbp:8787 --code K7M2-9QXA   # second machine
+landline setup claude
+```
+
+#### Joining with an invite
+
+The code is 8 characters, shown as `ABCD-EFGH`, good for 5 minutes and for one use. Five failed redeems cancel every
+open invite, and the count restarts after a good redeem or a cancel. `join --code` makes an Ed25519 key on the second
+machine, sends only the public half, and saves `machine.key` (mode `0600`) and `machine = "<name>"` in `config.toml`,
+with no `secret` line. From then on the machine signs each request, so a secret rotation does not lock it out. A client
+uses `LANDLINE_SECRET` first, then `machine.key`, then the secret in the file.
+
+`landline server machines` lists the machines, with a fingerprint of each key. `landline server revoke <name>` removes
+one and ends its agents. `invite`, `machines`, `revoke`, and `rotate-secret` refuse unless the saved host is this
+machine and always send the shared secret. A machine with no credential prints
+`there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET`
+([0200](docs/decisions/0200-a-machine-joins-with-an-invite-code-and-a-keypair-that-outlasts-secret-rotation.md)).
+
+To join with the secret instead, set it and run `join` without a code:
 
 ```sh
 export LANDLINE_SECRET=...                            # the switchboard's secret, from the first machine's config.toml
 landline server join davelight-mbp:8787               # or an IP address, or 127.0.0.1:8787 through an SSH tunnel
-landline setup claude
 ```
 
-`join` saves `host`, `port`, and the secret, and refuses an `https://` address because Landline speaks `http` only. The
-bind decides what a machine does, with no role key. `landline server up` on a machine whose saved host is another
-machine's fails with `cannot listen on`, and an edit of `host` in `config.toml` makes it host here. A Claude Code
-channel needs no inbound port, because the session dials out to the switchboard. A Codex session on the second machine
-needs only `landline setup codex` there, because its own `landline-mcp` process runs `codex queue` when the switchboard
-pushes a message:
+Without `--code`, `join` saves `host`, `port`, and the secret, and refuses an `https://` address because Landline speaks
+`http` only. The bind decides what a machine does, with no role key. `landline server up` on a machine whose saved host
+is another machine's fails with `cannot listen on`, and an edit of `host` in `config.toml` makes it host here. A Claude
+Code channel needs no inbound port, because the session dials out to the switchboard. A Codex session on the second
+machine needs only `landline setup codex` there, because its own `landline-mcp` process runs `codex queue` when the
+switchboard pushes a message:
 
 ```sh
 landline setup codex
@@ -330,7 +352,10 @@ landline setup codex
 | `landline server restart [flags]`                 | Stops the switchboard that `up` started and starts it again with the flags given                                                                    |
 | `landline server rotate-secret [flags]`           | Replaces the switchboard secret and restarts the switchboard with the flags given. The old secret stops working at once                             |
 | `landline server install [--load]`                | Starts the switchboard at login: a launchd agent on macOS, a systemd user unit on Linux                                                             |
-| `landline server join <host:port>`                | Uses the switchboard on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                           |
+| `landline server invite --name N`                 | Makes a 5 minute, single use invite code for a machine named N. Run on the switchboard's machine                                                    |
+| `landline server machines`                        | Lists joined machines with a key fingerprint and the date joined                                                                                    |
+| `landline server revoke <name>`                   | Removes a machine and ends its agents                                                                                                               |
+| `landline server join <host:port> [--code C]`     | Uses the switchboard on another machine. With a code it saves a machine key. Without one the secret comes from `LANDLINE_SECRET` or stdin           |
 | `landline setup claude\|codex [--print]`          | Adds `landline-mcp` to that harness, once                                                                                                           |
 | `landline setup claude\|codex --remove [--print]` | Takes `landline-mcp` out of that harness, and the unchanged Claude Code skill                                                                       |
 | `landline claude [flags] [-- args]`               | Starts Claude Code with the channel loaded. Flags: `--project`, `--model`, `--effort`                                                               |
@@ -341,9 +366,10 @@ landline setup codex
 | `landline-switchboard [flags]`                    | Serves in the foreground, which is what launchd and systemd run. Flags: `--addr`, `--log`, `--host`, `--keepalive`, `--delivery-timeout`, `--grace` |
 | `landline-mcp [flags]`                            | The MCP server a harness starts. It registers itself. Flags: `--channel`, `--project`, `--model`, `--effort`, `--folder`, `--branch`, `--as`        |
 
-`landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, and `--grace`, Go durations
-for the 15 second keepalive, the 20 second wait for a delivery report, and the 2 minute grace. `LANDLINE_PORT` changes
-the default port, 8787, for the switchboard and its clients.
+`landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, `--grace`,
+`--invite-lifetime`, and `--signature-window`, Go durations for the 15 second keepalive, the 20 second wait for a
+delivery report, the 2 minute grace, the 5 minute invite lifetime, and the 60 second signature window. `LANDLINE_PORT`
+changes the default port, 8787, for the switchboard and its clients.
 
 ## Not built yet
 

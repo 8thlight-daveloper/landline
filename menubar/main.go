@@ -66,15 +66,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, withUsage("landline-menubar: "+err.Error()), 2)
 	}
 	home, _ := os.UserHomeDir()
-	address, secret, err := hubclient.Discover(os.Getenv, home)
+	address, credential, err := hubclient.DiscoverCredential(os.Getenv, home)
 	if err != nil {
 		address = strings.TrimRight(os.Getenv("LANDLINE_URL"), "/")
 	}
-	client := hubclient.New(address, secret)
-	client.RereadSecretWith(func() string {
-		_, fresh, err := hubclient.Discover(os.Getenv, home)
+	client := hubclient.NewWith(address, credential)
+	client.RereadCredentialWith(func() hubclient.Credential {
+		_, fresh, err := hubclient.DiscoverCredential(os.Getenv, home)
 		if err != nil {
-			return ""
+			return hubclient.Credential{}
 		}
 		return fresh
 	})

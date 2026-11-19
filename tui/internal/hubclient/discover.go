@@ -14,9 +14,15 @@ import (
 const defaultPort = 8787
 
 func Discover(getenv func(string) string, home string) (address, secret string, err error) {
-	config, err := readSaved(filepath.Join(home, ".config", "landline"))
+	address, credential, err := DiscoverCredential(getenv, home)
+	return address, credential.Secret, err
+}
+
+func DiscoverCredential(getenv func(string) string, home string) (address string, credential Credential, err error) {
+	directory := filepath.Join(home, ".config", "landline")
+	config, err := readSaved(directory)
 	if err != nil {
-		return "", "", err
+		return "", Credential{}, err
 	}
 	address = getenv("LANDLINE_URL")
 	if address == "" {
@@ -29,15 +35,15 @@ func Discover(getenv func(string) string, home string) (address, secret string, 
 		}
 		address = "http://" + net.JoinHostPort(host, strconv.Itoa(port))
 	}
-	secret = getenv("LANDLINE_SECRET")
-	if secret == "" {
-		secret = config.Secret
+	credential, err = readCredential(directory, getenv, config)
+	if err != nil {
+		return "", Credential{}, err
 	}
 	address = strings.TrimRight(address, "/")
 	if err := CheckAddress(address); err != nil {
-		return "", "", err
+		return "", Credential{}, err
 	}
-	return address, secret, nil
+	return address, credential, nil
 }
 
 var errAddress = errors.New("the switchboard address must look like http://host:port, with no credentials, query, or fragment")

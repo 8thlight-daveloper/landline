@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/8thlight-daveloper/landline/internal/agent/registry"
+	machineregistry "github.com/8thlight-daveloper/landline/internal/machine/registry"
 	"github.com/8thlight-daveloper/landline/internal/message/router"
 	"github.com/8thlight-daveloper/landline/internal/model"
 )
@@ -45,22 +46,30 @@ type Config struct {
 	NewCode           func() string
 	Notify            func(string)
 	Build             BuildResponse
+	InviteLifetime    time.Duration
+	SignatureWindow   time.Duration
+	MachinesPath      string
+	NewRandom         func([]byte)
 }
 
 type Server struct {
-	cfg       Config
-	store     Store
-	reg       registry.Registry
-	rt        router.Router
-	mu        sync.Mutex
-	agents    []model.Agent
-	tokens    map[string]string
-	observers map[string]time.Time
-	seq       int64
-	attach    map[string]*attachChallenge
-	streams   map[string]*stream
-	pending   map[string]*pendingDelivery
-	sent      map[string][]time.Time
+	cfg           Config
+	store         Store
+	reg           registry.Registry
+	rt            router.Router
+	machines      machineregistry.Registry
+	mu            sync.Mutex
+	state         model.Machines
+	started       time.Time
+	machineTokens map[string]string
+	agents        []model.Agent
+	tokens        map[string]string
+	observers     map[string]time.Time
+	seq           int64
+	attach        map[string]*attachChallenge
+	streams       map[string]*stream
+	pending       map[string]*pendingDelivery
+	sent          map[string][]time.Time
 }
 
 type stream struct {
@@ -116,8 +125,14 @@ func New(cfg Config, store Store) (*Server, error) {
 	if cfg.Notify == nil {
 		cfg.Notify = func(string) {}
 	}
+	newMachineSettings(&cfg)
+	loaded, err := readMachines(cfg.MachinesPath)
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
-		cfg: cfg, store: store,
+		cfg: cfg, store: store, machines: newMachineRegistry(), started: cfg.Now(), machineTokens: map[string]string{},
+		state:  model.Machines{Active: loaded},
 		tokens: map[string]string{}, observers: map[string]time.Time{}, attach: map[string]*attachChallenge{},
 		streams: map[string]*stream{}, pending: map[string]*pendingDelivery{},
 		sent: map[string][]time.Time{},
@@ -146,6 +161,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/agents", s.list)
 	mux.HandleFunc("GET /v1/log", s.logRead)
 	mux.HandleFunc("GET /v1/build", s.build)
+	mux.HandleFunc("POST /v1/machines", s.invite)
+	mux.HandleFunc("PATCH /v1/machines", s.redeem)
+	mux.HandleFunc("GET /v1/machines", s.listMachines)
+	mux.HandleFunc("DELETE /v1/machines/{name}", s.revokeMachine)
+	mux.HandleFunc("DELETE /v1/machines", s.revokeAllMachines)
 	return s.expiring(mux)
 }
 
@@ -172,6 +192,7 @@ func (s *Server) expireLocked() {
 	for token, seen := range s.observers {
 		if now.Sub(seen) > s.cfg.Grace {
 			delete(s.observers, token)
+			delete(s.machineTokens, token)
 		}
 	}
 }
@@ -180,6 +201,7 @@ func (s *Server) forgetLocked(name string) {
 	for token, owner := range s.tokens {
 		if owner == name {
 			delete(s.tokens, token)
+			delete(s.machineTokens, token)
 		}
 	}
 	for id, waiting := range s.pending {
@@ -275,7 +297,8 @@ func (s *Server) agentFor(w http.ResponseWriter, r *http.Request) (string, bool)
 }
 
 func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
-	if !s.secretOnly(w, r) {
+	machine, ok := s.secretOrMachine(w, r)
+	if !ok {
 		return
 	}
 	var body ObserverRequest
@@ -291,6 +314,9 @@ func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
 	s.expireLocked()
 	token := s.cfg.NewToken()
 	s.observers[token] = s.cfg.Now()
+	if machine != "" {
+		s.machineTokens[token] = machine
+	}
 	write(w, http.StatusOK, ObserverResponse{Token: token})
 }
 
@@ -331,7 +357,8 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
-	if !s.secretOnly(w, r) {
+	machine, ok := s.secretOrMachine(w, r)
+	if !ok {
 		return
 	}
 	var body model.RegisterRequest
@@ -364,10 +391,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	for token, owner := range s.tokens {
 		if owner == id {
 			delete(s.tokens, token)
+			delete(s.machineTokens, token)
 		}
 	}
 	token := s.cfg.NewToken()
 	s.tokens[token] = id
+	if machine != "" {
+		s.machineTokens[token] = machine
+	}
 	write(w, http.StatusOK, model.RegisterResponse{ID: id, Token: token})
 }
 
@@ -691,7 +722,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logRead(w http.ResponseWriter, r *http.Request) {
-	if !s.secretOnly(w, r) {
+	if _, ok := s.secretOrMachine(w, r); !ok {
 		return
 	}
 	after := int64(intOf(r.URL.Query().Get("after")))

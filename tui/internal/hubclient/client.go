@@ -2,6 +2,7 @@ package hubclient
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +24,7 @@ const (
 
 var ErrControlSecret = errors.New("the switchboard secret contains a control character")
 
-var ErrNoSecret = errors.New("there is no switchboard secret. Set LANDLINE_SECRET or run landline server join")
+var ErrNoSecret = errors.New("there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET")
 
 type Client struct {
 	address string
@@ -32,6 +33,10 @@ type Client struct {
 	mu      sync.Mutex
 	token   string
 	reread  func() string
+
+	machine          string
+	key              ed25519.PrivateKey
+	rereadCredential func() Credential
 }
 
 func New(address, secret string) *Client {
@@ -43,6 +48,36 @@ func newWithTimeout(address, secret string, timeout time.Duration) *Client {
 }
 
 func (c *Client) Address() string { return c.address }
+
+func NewWith(address string, credential Credential) *Client {
+	client := New(address, credential.Secret)
+	client.machine, client.key = credential.Machine, credential.Key
+	return client
+}
+
+func (c *Client) RereadCredentialWith(reread func() Credential) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rereadCredential = reread
+}
+
+func (c *Client) currentCredential() Credential {
+	c.mu.Lock()
+	reread := c.rereadCredential
+	c.mu.Unlock()
+	if reread != nil {
+		if fresh := reread(); !fresh.empty() {
+			c.mu.Lock()
+			c.secret, c.machine, c.key = fresh.Secret, fresh.Machine, fresh.Key
+			c.mu.Unlock()
+		}
+	} else {
+		c.currentSecret()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return Credential{Secret: c.secret, Machine: c.machine, Key: c.key}
+}
 
 func (c *Client) RereadSecretWith(reread func() string) {
 	c.mu.Lock()
@@ -100,11 +135,11 @@ func (c *Client) currentToken() (string, error) {
 }
 
 func (c *Client) register() (string, error) {
-	secret := c.currentSecret()
-	if secret == "" {
+	credential := c.currentCredential()
+	if credential.empty() {
 		return "", ErrNoSecret
 	}
-	if strings.ContainsFunc(secret, unicode.IsControl) {
+	if credential.Key == nil && strings.ContainsFunc(credential.Secret, unicode.IsControl) {
 		return "", ErrControlSecret
 	}
 	body, _ := json.Marshal(map[string]string{"kind": "tui"})
@@ -112,7 +147,11 @@ func (c *Client) register() (string, error) {
 	if err != nil {
 		return "", errors.New("the switchboard address is not valid")
 	}
-	req.Header.Set("Authorization", "Bearer "+secret)
+	if credential.Key != nil {
+		req.Header.Set("Authorization", signedHeader(credential.Machine, credential.Key, http.MethodPost, "/v1/observers", body, time.Now()))
+	} else {
+		req.Header.Set("Authorization", "Bearer "+credential.Secret)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	raw, status, err := c.do(req)
 	if err != nil {

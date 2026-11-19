@@ -122,7 +122,7 @@ func TestAgentsReportsARefusedSecretWithoutPrintingIt(t *testing.T) {
 }
 
 func TestAgentsNeedsASecret(t *testing.T) {
-	if _, err := New("http://127.0.0.1:1", "").Agents(); err != ErrNoSecret || !strings.Contains(ErrNoSecret.Error(), "there is no switchboard secret") {
+	if _, err := New("http://127.0.0.1:1", "").Agents(); err != ErrNoSecret || !strings.Contains(ErrNoSecret.Error(), "there is no switchboard credential") {
 		t.Fatalf("got %v", err)
 	}
 }

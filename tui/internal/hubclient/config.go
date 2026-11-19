@@ -13,9 +13,10 @@ import (
 )
 
 type saved struct {
-	Secret string
-	Host   string
-	Port   int
+	Secret  string
+	Host    string
+	Port    int
+	Machine string
 }
 
 var (
@@ -53,14 +54,17 @@ func parseSaved(path, text string) (saved, error) {
 		quoted := stringValue.FindStringSubmatch(value)
 		isNumber := wholeNumber.MatchString(value)
 		switch {
-		case key == "secret" || key == "host":
+		case key == "secret" || key == "host" || key == "machine":
 			if quoted == nil {
 				return saved{}, fmt.Errorf("%s line %d: %s must be text in quotes", path, number+1, key)
 			}
-			if key == "secret" {
+			switch key {
+			case "secret":
 				config.Secret = quoted[1]
-			} else {
+			case "host":
 				config.Host = quoted[1]
+			default:
+				config.Machine = quoted[1]
 			}
 		case key == "port":
 			port, convertErr := strconv.Atoi(value)
