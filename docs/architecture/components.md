@@ -7,6 +7,7 @@ A driver does input and output.
 | -------------------- | -------- | ------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | `agent/registry`     | 1        | core   | Registers agents and looks one up by exact id                                                                                     |
 | `message/router`     | 1        | core   | Checks a send request, stamps the sender, and chooses the recipients                                                              |
+| `machine/registry`   | 1        | core   | Holds invites and machines as values, counts failed redeems, and checks a machine's signed request against a given time           |
 | `log/store`          | 2        | driver | Appends envelopes to a file and reads them back                                                                                   |
 | `wake/codex`         | 2        | driver | Queues a turn into a Codex session with `codex queue`                                                                             |
 | `client/http`        | 2        | driver | Calls the switchboard's HTTP API                                                                                                  |

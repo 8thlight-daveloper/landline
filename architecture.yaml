@@ -47,6 +47,9 @@ components:
   - name: message/router
     position: 1
     depends_on: []
+  - name: machine/registry
+    position: 1
+    depends_on: []
   - name: log/store
     position: 2
     depends_on: []
@@ -58,7 +61,7 @@ components:
     depends_on: []
   - name: switchboard/server
     position: 3
-    depends_on: [agent/registry, message/router]
+    depends_on: [agent/registry, message/router, machine/registry]
   - name: cli/command
     position: 3
     depends_on: [client/http]
