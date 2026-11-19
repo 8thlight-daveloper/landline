@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -16,9 +16,13 @@ func serverRotateSecret(args []string, env Env, dataDir string) int {
 		fmt.Fprintln(env.Stderr, name, err)
 		return 2
 	}
-	config := LoadConfig(env)
-	if config.URL != "" && !isLocalURL(config.URL) {
-		fmt.Fprintf(env.Stderr, "%s the saved switchboard address %s is not a loopback address. Rotate the secret on the machine where that switchboard runs, then run landline server join here again\n", name, config.URL)
+	config, err := ReadConfig(env)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, name, err)
+		return 1
+	}
+	if config.Host != "" && !IsThisMachines(config.Host) {
+		fmt.Fprintf(env.Stderr, "%s the saved switchboard host %s is not an address of this machine. Rotate the secret on the machine where that switchboard runs, then run landline server join here again\n", name, config.Host)
 		return 1
 	}
 	if env.processEnvironment("LANDLINE_SECRET") != "" {
@@ -52,8 +56,7 @@ func serverRotateSecret(args []string, env Env, dataDir string) int {
 	}
 	secret, err := newSecret()
 	if err == nil {
-		config.Secret = secret
-		err = SaveConfig(env, config)
+		err = SaveConfig(env, Config{Secret: secret})
 	}
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "%s the new secret was not saved: %v. The switchboard is stopped and %s keeps the old secret. Run landline server up to start it again\n", name, err, configPath(env))
@@ -72,27 +75,23 @@ func serverRotateSecret(args []string, env Env, dataDir string) int {
 }
 
 func rotationAddress(args []string, config Config, env Env) (string, error) {
-	if values, _ := FlagValues(args, SwitchboardFlags...); values["--addr"] != "" {
-		return withPort(values["--addr"])
+	values, _ := FlagValues(args, SwitchboardFlags...)
+	host, port, err := listenTarget(values["--addr"], config, env.Getenv)
+	if err != nil {
+		return "", err
 	}
-	if saved := savedAddress(config); saved != "" {
-		return withPort(saved)
-	}
-	return DefaultAddr(env.Getenv)
-}
-
-func withPort(address string) (string, error) {
-	if _, _, err := net.SplitHostPort(address); err != nil {
-		return "", fmt.Errorf("the address %q needs a port, as in 127.0.0.1:8787. Pass --addr host:port", address)
-	}
-	return address, nil
+	return net.JoinHostPort(host, strconv.Itoa(port)), nil
 }
 
 func savedAddress(config Config) string {
-	if parsed, err := url.Parse(config.URL); err == nil {
-		return parsed.Host
+	if config.Host == "" && config.Port == 0 {
+		return ""
 	}
-	return ""
+	port := config.Port
+	if port == 0 {
+		port = DefaultPort
+	}
+	return net.JoinHostPort(Or(config.Host, loopback), strconv.Itoa(port))
 }
 
 func addressAnswers(address string) bool {

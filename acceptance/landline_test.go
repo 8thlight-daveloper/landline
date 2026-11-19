@@ -147,14 +147,41 @@ func copyBinary(t *testing.T, source, dir string) string {
 	return target
 }
 
+var (
+	portsMu    sync.Mutex
+	portOwners = map[string]string{}
+)
+
+const portNote = "PORT NOTE: this test was given %s by freeAddr. freeAddr closes the port before the program under test binds it, " +
+	"so a process outside this test run can take it in between. If a failure above says \"address already in use\" or " +
+	"\"cannot listen\", that is the cause and not a product bug. Rerun to confirm."
+
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for attempt := 0; attempt < 50; attempt++ {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := l.Addr().String()
+		l.Close()
+		portsMu.Lock()
+		_, handedOut := portOwners[addr]
+		if !handedOut {
+			portOwners[addr] = t.Name()
+		}
+		portsMu.Unlock()
+		if !handedOut {
+			t.Cleanup(func() {
+				if t.Failed() {
+					t.Logf(portNote, addr)
+				}
+			})
+			return addr
+		}
 	}
-	defer l.Close()
-	return l.Addr().String()
+	t.Fatal("freeAddr: 50 ports in a row were already handed to other tests in this run")
+	return ""
 }
 
 func eventually(t *testing.T, what string, condition func() bool) {
@@ -198,12 +225,21 @@ func startHub(t *testing.T, bin, config, addr string, extra ...string) *world {
 	if err := hub.Start(); err != nil {
 		t.Fatal(err)
 	}
-	w.stop = func() { hub.Process.Kill(); hub.Wait() }
+	exited := make(chan struct{})
+	go func() { hub.Wait(); close(exited) }()
+	w.stop = func() { hub.Process.Kill(); <-exited }
 	t.Cleanup(w.stop)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if c, err := net.Dial("tcp", addr); err == nil {
-			c.Close()
+		select {
+		case <-exited:
+			if strings.Contains(stderr.String(), "address already in use") {
+				t.Fatalf("PORT COLLISION: the switchboard could not bind %s because another process holds it. No other test in this run was given that port, so a process outside this run took it after freeAddr closed it. This is a test environment race and not a product failure. Rerun to confirm.\nswitchboard said: %s", addr, stderr.String())
+			}
+			t.Fatalf("the hub exited before it listened: %s", stderr.String())
+		default:
+		}
+		if strings.Contains(stderr.String(), "listening on") {
 			return w
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -622,6 +658,7 @@ func runIn(t *testing.T, bin string, env []string, dir string, args ...string) (
 }
 
 func TestAMessageReachesAConnectedChannelAgentOnceWithTheMarkerFirstAndTheSendAnswersAfterTheReport(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	bravo := w.agent("bravo", "--channel")
@@ -641,6 +678,7 @@ func TestAMessageReachesAConnectedChannelAgentOnceWithTheMarkerFirstAndTheSendAn
 }
 
 func TestTwoChannelAgentsTalkAndAReplyComesBack(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	alpha, bravo := w.channelAgent("alpha"), w.channelAgent("bravo")
 	if got := w.must("", "agents"); !strings.Contains(got, "bravo\tclaude-code\tmac\tconnected") || !strings.Contains(got, "alpha\tclaude-code\tmac\tconnected") {
@@ -659,6 +697,7 @@ func TestTwoChannelAgentsTalkAndAReplyComesBack(t *testing.T) {
 }
 
 func TestAChannelAgentDeclaresTheChannelAndNeverThePermissionCapability(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("bravo")
 	p := w.startMCP(t.TempDir(), "--channel", "--as", "bravo")
@@ -669,6 +708,7 @@ func TestAChannelAgentDeclaresTheChannelAndNeverThePermissionCapability(t *testi
 }
 
 func TestASendToAnAgentWithNoOpenStreamAnswersNotConnectedAndTheMessageIsOnlyInTheLog(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	status, body := w.sendHTTP("alpha", "bravo", "nobody is listening")
@@ -688,6 +728,7 @@ func TestASendToAnAgentWithNoOpenStreamAnswersNotConnectedAndTheMessageIsOnlyInT
 }
 
 func TestAMessageSentBeforeTheSessionFinishesItsHandshakeIsRefusedAsNotConnected(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	p := w.startMCP(t.TempDir(), "--channel", "--as", "bravo")
@@ -705,6 +746,7 @@ func TestAMessageSentBeforeTheSessionFinishesItsHandshakeIsRefusedAsNotConnected
 }
 
 func TestAStoppedRecipientIsNotConnectedAndTheListShowsItDisconnected(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	bravo := w.channelAgent("bravo")
@@ -726,6 +768,7 @@ func TestAStoppedRecipientIsNotConnectedAndTheListShowsItDisconnected(t *testing
 }
 
 func TestTheAgentListMarksAnAgentConnectedWhileItsProcessRunsAndDisconnectedAfterItExits(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	if got := w.state("bravo"); got != "disconnected" {
@@ -742,6 +785,7 @@ func TestTheAgentListMarksAnAgentConnectedWhileItsProcessRunsAndDisconnectedAfte
 }
 
 func TestARecipientNamedAllIsRefusedAsUnknownAndNothingIsDelivered(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	bravo := w.channelAgent("bravo")
@@ -759,6 +803,7 @@ func TestARecipientNamedAllIsRefusedAsUnknownAndNothingIsDelivered(t *testing.T)
 }
 
 func TestAPlainMCPRecipientCannotReceiveAndTheSenderIsToldWhy(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	p := w.startMCP(t.TempDir(), "--as", "bravo")
@@ -784,6 +829,7 @@ func TestAPlainMCPRecipientCannotReceiveAndTheSenderIsToldWhy(t *testing.T) {
 }
 
 func TestACodexSessionIsProvenByAnswerThenReceivesMessagesThroughCodexQueue(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	codex, agentID := w.selfRegistered("tutor", "codex-mcp-client")
@@ -811,6 +857,7 @@ func TestACodexSessionIsProvenByAnswerThenReceivesMessagesThroughCodexQueue(t *t
 }
 
 func TestAWrongCodexProofCodeIsRefusedAndTheSessionStaysUnableToReceive(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	codex, agentID := w.selfRegistered("tutor", "codex-mcp-client")
@@ -831,6 +878,7 @@ func TestAWrongCodexProofCodeIsRefusedAndTheSessionStaysUnableToReceive(t *testi
 }
 
 func TestACodexChallengeFailureIsReportedAndNothingIsAttached(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	codex, _ := w.selfRegistered("tutor", "codex-mcp-client")
 	os.WriteFile(filepath.Join(w.config, "codex-fail"), nil, 0o600)
@@ -840,6 +888,7 @@ func TestACodexChallengeFailureIsReportedAndNothingIsAttached(t *testing.T) {
 }
 
 func TestACodexChallengeNeedsAnOpenStream(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	status, body := w.post("/v1/attach", w.token("alpha"), map[string]string{"codex_thread": threadOne})
@@ -849,6 +898,7 @@ func TestACodexChallengeNeedsAnOpenStream(t *testing.T) {
 }
 
 func TestAFailedCodexQueueIsReportedToTheSenderAndPrintedAndTheMessageStaysInTheLog(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	codex, agentID := w.selfRegistered("tutor", "codex-mcp-client")
@@ -869,6 +919,7 @@ func TestAFailedCodexQueueIsReportedToTheSenderAndPrintedAndTheMessageStaysInThe
 }
 
 func TestAnAgentCannotProveAThreadItWasNotToldTheCodeFor(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	victim, victimID := w.selfRegistered("victim", "codex-mcp-client")
@@ -925,6 +976,7 @@ func (w *world) watch() {
 }
 
 func TestWhenTheHubRestartsARunningMCPProcessRegistersAgainByItselfAndItsNewIDReachesItWhileTheOldIDAnswers404AndTheProjectIsNotAnAddress(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	first := startHub(t, bin, config, "")
 	first.register("alpha")
@@ -965,6 +1017,7 @@ func TestWhenTheHubRestartsARunningMCPProcessRegistersAgainByItselfAndItsNewIDRe
 }
 
 func TestAHubRestartForgetsEveryAgentAndATokenFromBeforeItIsToldToRegisterAgain(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	first := startHub(t, bin, config, "")
 	first.register("alpha", "bravo")
@@ -988,6 +1041,7 @@ func TestAHubRestartForgetsEveryAgentAndATokenFromBeforeItIsToldToRegisterAgain(
 }
 
 func TestTheLogKeepsItsMessagesAcrossAHubRestartAndNoStateFileIsEverWritten(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	first := startHub(t, bin, config, "")
 	first.register("alpha", "bravo")
@@ -1009,6 +1063,7 @@ func TestTheLogKeepsItsMessagesAcrossAHubRestartAndNoStateFileIsEverWritten(t *t
 }
 
 func TestTheSenderComesFromTheTokenAndARequestCannotNameAnother(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	stream := w.openStream("bravo", true)
@@ -1038,6 +1093,7 @@ func (s *rawStream) expectOnly(t *testing.T, text string) {
 }
 
 func TestTheStreamOpensAsAnEventStreamAndAReplacedStreamIsClosed(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	first := w.openStream("bravo", true)
@@ -1062,6 +1118,7 @@ func TestTheStreamOpensAsAnEventStreamAndAReplacedStreamIsClosed(t *testing.T) {
 }
 
 func TestASendAnswersOnlyAfterTheDeliveryIsReportedAndAFailureReportAnswers502(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo", "charlie")
 	stream := w.openStream("bravo", false)
@@ -1103,6 +1160,7 @@ func TestASendAnswersOnlyAfterTheDeliveryIsReportedAndAFailureReportAnswers502(t
 }
 
 func TestEveryKindOfMessageReachesAnAgentWithTheMarkerFirst(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	stream := w.openStream("bravo", true)
@@ -1116,6 +1174,7 @@ func TestEveryKindOfMessageReachesAnAgentWithTheMarkerFirst(t *testing.T) {
 }
 
 func TestALargeMessageReachesAChannelAgentWhole(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	bravo := w.channelAgent("bravo")
@@ -1127,6 +1186,7 @@ func TestALargeMessageReachesAChannelAgentWhole(t *testing.T) {
 }
 
 func TestTheHubRefusesToStartWithAShortSecret(t *testing.T) {
+	t.Parallel()
 	bin := build(t)
 	cmd := exec.Command(switchboardOf(bin), "--addr", freeAddr(t))
 	cmd.Env = append(isolatedEnv(t.TempDir()), "LANDLINE_SECRET=short")
@@ -1137,6 +1197,7 @@ func TestTheHubRefusesToStartWithAShortSecret(t *testing.T) {
 }
 
 func TestAWrongOrMissingHubSecretIsRefused(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.env = append(w.env, "LANDLINE_SECRET=not-the-hub-secret-at-all")
 	for _, args := range [][]string{{"register", "--id", "alpha", "--harness", "codex"}, {"log"}} {
@@ -1147,6 +1208,7 @@ func TestAWrongOrMissingHubSecretIsRefused(t *testing.T) {
 }
 
 func TestTheSessionFileHoldsOnlyATokenAndIsPrivate(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	path := filepath.Join(w.config, ".config", "landline", "session-alpha.json")
@@ -1161,6 +1223,7 @@ func TestTheSessionFileHoldsOnlyATokenAndIsPrivate(t *testing.T) {
 }
 
 func TestSelfSendAnOversizedBodyAnEmptyBodyAndAnUnknownRecipientAreRefusedForTheRightReasonAndNothingIsLogged(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	bravo := w.channelAgent("bravo")
@@ -1196,6 +1259,7 @@ func nonLoopbackAddress() string {
 }
 
 func TestTheHubListensOnTheLoopbackAddressOfLandlinePortAndNotOnOtherAddresses(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	_, port, _ := net.SplitHostPort(freeAddr(t))
 	hub := exec.Command(switchboardOf(bin))
@@ -1222,6 +1286,7 @@ func TestTheHubListensOnTheLoopbackAddressOfLandlinePortAndNotOnOtherAddresses(t
 }
 
 func TestAnInvalidLandlinePortMakesTheHubExitWithStatusTwoAndAMessage(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	for _, bad := range []string{"99999", "abc", "0", "-1"} {
 		cmd := exec.Command(switchboardOf(bin))
@@ -1307,6 +1372,7 @@ func logResults(output string) map[string]string {
 }
 
 func TestAnOpenStreamReceivesAKeepaliveCommentWithNoDeliveryAndStaysOpen(t *testing.T) {
+	t.Parallel()
 	w := startHub(t, build(t), t.TempDir(), "", "--keepalive", "200ms")
 	w.register("bravo")
 	stream := w.openRawLines("bravo")
@@ -1323,6 +1389,7 @@ func TestAnOpenStreamReceivesAKeepaliveCommentWithNoDeliveryAndStaysOpen(t *test
 }
 
 func TestASendWithNoDeliveryReportAnswers504AfterTheDeliveryTimeoutAndTheLogRecordsIt(t *testing.T) {
+	t.Parallel()
 	w := startHub(t, build(t), t.TempDir(), "", "--delivery-timeout", "500ms")
 	w.register("alpha", "bravo")
 	stream := w.openStream("bravo", false)
@@ -1343,6 +1410,7 @@ func TestASendWithNoDeliveryReportAnswers504AfterTheDeliveryTimeoutAndTheLogReco
 }
 
 func TestAnAgentThatStoppedShowsDisconnectedAtOnceThenIsForgottenAfterTheGraceAndItsTokenAnswers401AndItsIDAnswers404(t *testing.T) {
+	t.Parallel()
 	w := startHub(t, build(t), t.TempDir(), "", "--grace", "1s")
 	w.watch()
 	w.register("alpha")
@@ -1366,6 +1434,7 @@ func TestAnAgentThatStoppedShowsDisconnectedAtOnceThenIsForgottenAfterTheGraceAn
 }
 
 func TestAReconnectInsideTheGraceWithTheSameTokenKeepsTheID(t *testing.T) {
+	t.Parallel()
 	w := startHub(t, build(t), t.TempDir(), "", "--grace", "2s")
 	w.watch()
 	p, agentID := w.selfRegistered("tutor", "claude-code")
@@ -1384,6 +1453,7 @@ func TestAReconnectInsideTheGraceWithTheSameTokenKeepsTheID(t *testing.T) {
 }
 
 func TestAHandRegisteredNameIsForgottenOneGraceAfterItsLastRequest(t *testing.T) {
+	t.Parallel()
 	w := startHub(t, build(t), t.TempDir(), "", "--grace", "1s")
 	w.watch()
 	w.register("alpha")
@@ -1400,6 +1470,7 @@ func TestAHandRegisteredNameIsForgottenOneGraceAfterItsLastRequest(t *testing.T)
 }
 
 func TestARestartedSessionWithTheSameProjectLeavesOneConnectedAgentAndOnlyTheNewIDAnswers(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	first, firstID := w.selfRegistered("tutor", "claude-code", "--channel")
@@ -1428,6 +1499,7 @@ func TestARestartedSessionWithTheSameProjectLeavesOneConnectedAgentAndOnlyTheNew
 }
 
 func TestAStreamOpenedAgainWithTheSameTokenReplacesTheOldOneAndTheAgentStaysConnected(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	w.openStream("bravo", true)
@@ -1440,6 +1512,7 @@ func TestAStreamOpenedAgainWithTheSameTokenReplacesTheOldOneAndTheAgentStaysConn
 }
 
 func TestTheSixthCodexChallengeInTheWindowAnswers429AndSendsNothingOnTheStream(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	stream := w.openStream("alpha", true)
@@ -1460,6 +1533,7 @@ func TestTheSixthCodexChallengeInTheWindowAnswers429AndSendsNothingOnTheStream(t
 }
 
 func TestAnExitedSelfRegisteredProcessIsPlainlyNotConnectedWhileAHandRegisteredNameWithNoStreamGetsTheRestartHint(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	p, agentID := w.selfRegistered("tutor", "claude-code")
@@ -1476,6 +1550,7 @@ func TestAnExitedSelfRegisteredProcessIsPlainlyNotConnectedWhileAHandRegisteredN
 }
 
 func TestTheLogRecordsEachSendsResultAndALogWithoutResultLinesStillLoads(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	legacy := `{"seq":1,"id":"m-old","time":"2026-01-01T00:00:00Z","thread":"","from":"alpha","to":"bravo","kind":"message","body":"from before the change"}` + "\n"
 	if err := os.WriteFile(filepath.Join(config, "log.jsonl"), []byte(legacy), 0o600); err != nil {
@@ -1529,6 +1604,7 @@ func TestTheLogRecordsEachSendsResultAndALogWithoutResultLinesStillLoads(t *test
 }
 
 func TestTheHubWarnsWhenItIsAskedToListenBeyondLocalhost(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	hub := exec.Command(switchboardOf(bin), "--addr", "0.0.0.0:0", "--log", filepath.Join(config, "log.jsonl"))
 	hub.Env = append(isolatedEnv(config), "LANDLINE_SECRET="+secret)
@@ -1547,6 +1623,7 @@ func TestTheHubWarnsWhenItIsAskedToListenBeyondLocalhost(t *testing.T) {
 }
 
 func TestVersionAndHelp(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	release, _ := os.ReadFile("../VERSION")
 	if got := lastLine(w.must("", "version")); !strings.HasPrefix(got, "landline "+strings.TrimSpace(string(release))) {
@@ -1569,6 +1646,7 @@ func TestVersionAndHelp(t *testing.T) {
 }
 
 func TestLandlineWithNoTerminalPrintsTheUsageOnStandardErrorAndExitsTwoWhenItHasNoCommand(t *testing.T) {
+	t.Parallel()
 	bin := build(t)
 	env := isolatedEnv(t.TempDir())
 	for _, args := range [][]string{nil, {"--interval", "5s"}, {"--interval=5s"}, {"--interval", "100ms"}, {"bogus"}, {"bogus", "--as", "alpha"}} {
@@ -1584,6 +1662,7 @@ func showsUsage(text string) bool {
 }
 
 func TestTheRemovedCommandsAreRefusedWithExitTwoAndTheUsageAndStartNothing(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	addr := freeAddr(t)
 	for name, args := range map[string][]string{
@@ -1608,6 +1687,7 @@ func TestTheRemovedCommandsAreRefusedWithExitTwoAndTheUsageAndStartNothing(t *te
 }
 
 func TestTheSwitchboardHasNoHubMCPOrTUICommandAndAnUnknownCommandExitsTwoWithTheUsage(t *testing.T) {
+	t.Parallel()
 	bin := build(t)
 	env := isolatedEnv(t.TempDir())
 	for _, args := range [][]string{{"mcp"}, {"hub"}, {"tui"}, {"server", "run"}, {"bogus"}, {"agents"}} {
@@ -1622,6 +1702,7 @@ func TestTheSwitchboardHasNoHubMCPOrTUICommandAndAnUnknownCommandExitsTwoWithThe
 }
 
 func TestTheSwitchboardStartupLineSaysSwitchboardWhereItSaidHub(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	var line string
 	eventually(t, "the listening line", func() bool {
@@ -1640,6 +1721,7 @@ func TestTheSwitchboardStartupLineSaysSwitchboardWhereItSaidHub(t *testing.T) {
 }
 
 func TestTheRemovedCommandsAndFlagsAreRefused(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	for _, command := range []string{"inbox", "listen", "hook", "agentd"} {
@@ -1663,6 +1745,7 @@ func TestTheRemovedCommandsAndFlagsAreRefused(t *testing.T) {
 }
 
 func TestSecretOnlyEndpointsRefuseAgentTokensAndWrongSecretsAndTheSecretIsNotAnAgent(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	agent := w.token("alpha")
@@ -1703,6 +1786,7 @@ func TestSecretOnlyEndpointsRefuseAgentTokensAndWrongSecretsAndTheSecretIsNotAnA
 }
 
 func TestRegisteringANameAgainReplacesItsToken(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	w.openStream("bravo", true)
@@ -1717,6 +1801,7 @@ func TestRegisteringANameAgainReplacesItsToken(t *testing.T) {
 }
 
 func TestAHostileHeaderValueNeverReachesAnAgent(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	stream := w.openStream("bravo", true)
@@ -1738,6 +1823,7 @@ func TestAHostileHeaderValueNeverReachesAnAgent(t *testing.T) {
 }
 
 func TestFilesTheHubWritesArePrivateAndAFolderItCreatesToo(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	w := startHubIn(t, bin, config, filepath.Join(config, "data"))
 	w.register("alpha", "bravo")
@@ -1762,6 +1848,7 @@ func startHubIn(t *testing.T, bin, config, dir string) *world {
 }
 
 func TestAMessageThatEncodesToAHugeLogLineDoesNotStopTheHubRestarting(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	first := startHub(t, bin, config, "")
 	first.register("alpha")
@@ -1776,6 +1863,7 @@ func TestAMessageThatEncodesToAHugeLogLineDoesNotStopTheHubRestarting(t *testing
 }
 
 func TestARegistrationWithABadIDIsRefused(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	for _, name := range []string{"Alpha", "has space", "all", "x/../y", ""} {
 		out, err := w.run("", "register", "--id", name, "--harness", "codex")
@@ -1792,6 +1880,7 @@ func TestARegistrationWithABadIDIsRefused(t *testing.T) {
 }
 
 func TestTheHubNeverPrintsTheSecretATokenOrABody(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	stream := w.openStream("bravo", false)
@@ -1813,6 +1902,7 @@ func TestTheHubNeverPrintsTheSecretATokenOrABody(t *testing.T) {
 }
 
 func TestAReportedFailureCannotForgeALineOnTheHubTerminal(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	stream := w.openStream("bravo", false)
@@ -1836,6 +1926,7 @@ func TestAReportedFailureCannotForgeALineOnTheHubTerminal(t *testing.T) {
 }
 
 func TestTheLogFileHoldsEveryFieldOfAMessageWithSnakeCaseKeys(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	w.openStream("bravo", true)
@@ -1852,6 +1943,7 @@ func TestTheLogFileHoldsEveryFieldOfAMessageWithSnakeCaseKeys(t *testing.T) {
 }
 
 func TestLogShowsTheTextOfEveryMessageSoLostMailCanBeRecovered(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	w.must("", "agents")
@@ -1863,6 +1955,7 @@ func TestLogShowsTheTextOfEveryMessageSoLostMailCanBeRecovered(t *testing.T) {
 }
 
 func TestTheMCPToolListIsExactlyRegisterAgentsSendAndStatusAndTheInboxToolIsUnknown(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	p := w.startMCP(t.TempDir(), "--as", "alpha")
@@ -1887,6 +1980,7 @@ func TestTheMCPToolListIsExactlyRegisterAgentsSendAndStatusAndTheInboxToolIsUnkn
 }
 
 func TestAnMCPProcessRegistersItselfAndAnotherReachesItByIDAndNeitherTheProjectNorAnAmbiguousProjectIsAnAddress(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	dirOne, dirTwo, dirThree := filepath.Join(t.TempDir(), "demo-folder"), filepath.Join(t.TempDir(), "other-folder"), filepath.Join(t.TempDir(), "third")
 	for _, dir := range []string{dirOne, dirTwo, dirThree} {
@@ -1972,6 +2066,7 @@ func TestLandlineEnvironmentVariablesLeakedIntoTheTestProcessDoNotReachASpawnedM
 }
 
 func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConfig(t *testing.T) {
+	t.Parallel()
 	bin, home := build(t), t.TempDir()
 	env := isolatedEnv(home)
 	addr := freeAddr(t)
@@ -1980,13 +2075,12 @@ func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConf
 	if err != nil || !strings.Contains(out, "the switchboard is running") {
 		t.Fatalf("up: %v %s", err, out)
 	}
-	config := filepath.Join(home, ".config", "landline", "config.json")
+	config := filepath.Join(home, ".config", "landline", "config.toml")
 	info, statErr := os.Stat(config)
-	raw, _ := os.ReadFile(config)
-	var saved struct{ URL, Secret string }
-	json.Unmarshal(raw, &saved)
-	if statErr != nil || info.Mode().Perm() != 0o600 || saved.URL != "http://"+addr || len(saved.Secret) != 32 {
-		t.Fatalf("config %v %v %s", info, statErr, raw)
+	saved, _ := readTomlValues(t, config)
+	savedHost, savedPort := hostAndPort(t, addr)
+	if statErr != nil || info.Mode().Perm() != 0o600 || saved["host"] != savedHost || saved["port"] != savedPort || len(saved["secret"]) != 32 {
+		t.Fatalf("config %v %v %v", info, statErr, redacted(saved))
 	}
 	if again, _ := runIn(t, bin, env, home, "server", "up", "--addr", addr); !strings.Contains(again, "the switchboard is already running") {
 		t.Fatalf("a second up: %s", again)
@@ -2042,6 +2136,7 @@ func containsPath(text, path string) bool {
 }
 
 func TestServerInstallWritesTheLoginServiceFileWithoutTheSecretAndWithoutLoadingIt(t *testing.T) {
+	t.Parallel()
 	bin, home := build(t), t.TempDir()
 	env := isolatedEnv(home)
 	out, err := runIn(t, bin, env, home, "server", "install")
@@ -2078,27 +2173,14 @@ func TestServerInstallWritesTheLoginServiceFileWithoutTheSecretAndWithoutLoading
 	if !strings.Contains(out, "launchctl") && !strings.Contains(out, "systemctl") {
 		t.Fatalf("the load command was not printed: %s", out)
 	}
-	config, _ := os.ReadFile(filepath.Join(home, ".config", "landline", "config.json"))
+	config, _ := os.ReadFile(filepath.Join(home, ".config", "landline", "config.toml"))
 	if !strings.Contains(string(config), "secret") {
 		t.Fatalf("install did not create the hub secret: %s", config)
 	}
 }
 
-func TestServerJoinSavesAnotherMachinesHubAndServerUpRefusesToStartASecondHub(t *testing.T) {
-	bin, home := build(t), t.TempDir()
-	env := isolatedEnv(home)
-	cmd := exec.Command(bin, "server", "join", "http://tailnet-mac:8787")
-	cmd.Env, cmd.Dir = append(env, "LANDLINE_SECRET=a-long-enough-secret-1"), home
-	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "joined the switchboard at http://tailnet-mac:8787") {
-		t.Fatalf("join: %v %s", err, out)
-	}
-	out, err := runIn(t, bin, env, home, "server", "up", "--addr", freeAddr(t))
-	if err == nil || !strings.Contains(out, "this machine joined the switchboard at http://tailnet-mac:8787") || !strings.Contains(out, "to run a switchboard here instead") {
-		t.Fatalf("up after join: %v %s", err, out)
-	}
-}
-
 func TestSetupClaudeInstallsTheLandlineSkillThatTheUserRunsAsSlashLandlineRegister(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	fake := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/claude-args\"\n"
 	if err := os.WriteFile(filepath.Join(w.bindir, "claude"), []byte(fake), 0o755); err != nil {
@@ -2176,6 +2258,7 @@ func (w *world) agentLine(name string) string {
 }
 
 func TestASelfRegisteredMCPProcessShowsTheBinaryVersionAsLandlineVersionInTheListAndTheWireJSON(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	printed := strings.TrimSpace(w.must("", "version"))
 	version := strings.TrimPrefix(printed, "landline ")
@@ -2192,6 +2275,7 @@ func TestASelfRegisteredMCPProcessShowsTheBinaryVersionAsLandlineVersionInTheLis
 }
 
 func TestALandlineRegisterCallCannotSetTheLandlineVersion(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	version := strings.TrimPrefix(strings.TrimSpace(w.must("", "version")), "landline ")
 	p, agentID := w.selfRegistered("demo-folder", "claude-code")
@@ -2209,6 +2293,7 @@ func TestALandlineRegisterCallCannotSetTheLandlineVersion(t *testing.T) {
 }
 
 func TestAHandRegisteredNameShowsNoLandlineAttribute(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	if line := w.agentLine("alpha"); strings.Contains(line, "landline:") {
@@ -2280,6 +2365,7 @@ func (h *backgroundHub) openStream(name string) (*http.Response, error) {
 }
 
 func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndForgetsEverySession(t *testing.T) {
+	t.Parallel()
 	h := newBackgroundHub(t)
 	if out, err := h.run("server", "up", "--addr", h.addr); err != nil {
 		t.Fatalf("up: %v %s", err, out)
@@ -2316,6 +2402,7 @@ func TestServerRestartReplacesTheHubProcessAtTheSameAddressAndForgetsEverySessio
 }
 
 func TestServerRestartWithNoHubRunningJustStartsOne(t *testing.T) {
+	t.Parallel()
 	h := newBackgroundHub(t)
 	out, err := h.run("server", "restart", "--addr", h.addr)
 	if err != nil || !strings.Contains(out, "the switchboard is running") {
@@ -2327,6 +2414,7 @@ func TestServerRestartWithNoHubRunningJustStartsOne(t *testing.T) {
 }
 
 func TestServerRestartWithABadFlagExitsTwoAndLeavesTheRunningHubAlone(t *testing.T) {
+	t.Parallel()
 	h := newBackgroundHub(t)
 	if out, err := h.run("server", "up", "--addr", h.addr); err != nil {
 		t.Fatalf("up: %v %s", err, out)
@@ -2348,6 +2436,7 @@ func TestServerRestartWithABadFlagExitsTwoAndLeavesTheRunningHubAlone(t *testing
 }
 
 func TestServerRestartEndsAnOpenStreamAndANewStreamOpensAfterIt(t *testing.T) {
+	t.Parallel()
 	h := newBackgroundHub(t)
 	if out, err := h.run("server", "up", "--addr", h.addr); err != nil {
 		t.Fatalf("up: %v %s", err, out)
@@ -2409,6 +2498,7 @@ func (w *world) agentsBody(token string) string {
 }
 
 func TestAnObserverIsRegisteredWithTheSecretAndAKindThatFollowsTheFreeTextRules(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	status, body := w.post("/v1/observers", secret, map[string]string{"kind": "tui"})
@@ -2467,6 +2557,7 @@ func withoutLastSeen(t *testing.T, body string) []byte {
 }
 
 func TestAnObserverIsNeverAnAgentAndSeesTheSameListAnAgentSees(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.watch()
 	w.register("alpha")
@@ -2500,6 +2591,7 @@ func TestAnObserverIsNeverAnAgentAndSeesTheSameListAnAgentSees(t *testing.T) {
 }
 
 func TestAnObserverTokenReadsTheAgentListAndEveryOtherRouteAnswers403WithNothingSentOrLogged(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.watch()
 	_, agentID := w.selfRegistered("lead", "claude-code")
@@ -2546,6 +2638,7 @@ func TestAnObserverTokenReadsTheAgentListAndEveryOtherRouteAnswers403WithNothing
 }
 
 func TestAnObserverIsForgottenAfterTheGraceWithoutARequestAndRequestsInsideTheGraceKeepItAlive(t *testing.T) {
+	t.Parallel()
 	w := startHub(t, build(t), t.TempDir(), "", "--grace", "3s")
 	idle := w.registerObserver("tui")
 	busy := w.registerObserver("tui")
@@ -2565,6 +2658,7 @@ func TestAnObserverIsForgottenAfterTheGraceWithoutARequestAndRequestsInsideTheGr
 }
 
 func TestARefusedRequestOnEachRouteWithTheObserverTokenKeepsItAliveAndAnObserverWithNoRequestExpires(t *testing.T) {
+	t.Parallel()
 	w := startHub(t, build(t), t.TempDir(), "", "--grace", "3s")
 	routes := []struct {
 		name, method, path string
@@ -2624,6 +2718,7 @@ func TestARefusedRequestOnEachRouteWithTheObserverTokenKeepsItAliveAndAnObserver
 }
 
 func TestAHubRestartForgetsEveryObserver(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	first := startHub(t, bin, config, "")
 	observer := first.registerObserver("tui")
@@ -2746,6 +2841,7 @@ func projectOrderDiffersFromIDOrder(group []listedAgent) bool {
 }
 
 func TestLandlineAgentsJSONAgainstARealSwitchboardListsConnectedFirstThenWithAProjectThenProjectThenIDAndPrintsNoSecretOrToken(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("tango", "alpha")
 	w.registerWithProject("delta", "yankee")
@@ -2860,6 +2956,7 @@ func TestLandlineAgentsJSONAgainstARealSwitchboardListsConnectedFirstThenWithAPr
 }
 
 func TestLandlineAgentsFailsWithExitOneForAWrongSecretAndAnUnreachableSwitchboardWithoutEchoingTheSecret(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	wrong := "wrong-secret-0123456789-abcdef"
 	result := runBin(t, w.bin, withEnv(w.env, "LANDLINE_SECRET="+wrong), "agents", "--json")
@@ -2884,6 +2981,7 @@ func TestLandlineAgentsFailsWithExitOneForAWrongSecretAndAnUnreachableSwitchboar
 }
 
 func TestTheHubRefusesHostileAgentFieldsSoNothingRawCanReachTheAgentsOutput(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	hostile := "x\x1b[2J\x1b]0;owned\x07y"
@@ -2902,6 +3000,7 @@ func TestTheHubRefusesHostileAgentFieldsSoNothingRawCanReachTheAgentsOutput(t *t
 }
 
 func TestLandlineRefusesAnIntervalBelowTheFloorWithExitTwo(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	for _, args := range [][]string{{"--interval", "100ms", "agents", "--json"}, {"agents", "--json", "--interval", "100ms"}, {"agents", "--json", "--interval", "499ms"}} {
 		result := runBin(t, w.bin, w.env, args...)

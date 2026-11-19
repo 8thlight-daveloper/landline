@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/cli/command"
@@ -41,12 +43,17 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "%s: %v\nusage: %s [--addr A] [--log PATH] [--host H] [--keepalive D] [--delivery-timeout D] [--grace D]\n       %s version\n", name, err, name, name)
 		return 2
 	}
-	defaultAddr, err := command.DefaultAddr(os.Getenv)
+	saved, err := command.ReadConfig(env)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, name+":", err)
+		return 1
+	}
+	savedHost, savedPort, err := saved.Listen(os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
 		return 2
 	}
-	addr := command.Or(values["--addr"], defaultAddr)
+	addr := command.Or(values["--addr"], net.JoinHostPort(savedHost, strconv.Itoa(savedPort)))
 	timing, err := command.TimingFrom(values)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
@@ -63,7 +70,7 @@ func run(args []string) int {
 	defer log.Close()
 	secret := os.Getenv("LANDLINE_SECRET")
 	if secret == "" {
-		secret = command.LoadConfig(env).Secret
+		secret = saved.Secret
 	}
 	if secret == "" {
 		fmt.Fprintln(os.Stderr, name+": there is no secret. Run landline server up, or set LANDLINE_SECRET")
@@ -79,19 +86,58 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, name+":", err)
 		return 1
 	}
-	listener, err := net.Listen("tcp", addr)
+	listener, resolved, err := listenOn(addr)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		fmt.Fprintf(os.Stderr, "%s: cannot listen on %s: %v\n", name, addr, err)
 		return 1
 	}
 	fmt.Fprint(os.Stderr, command.BannerFor(os.Stderr))
-	fmt.Fprintf(os.Stderr, "%s listening on %s, host %q, log %s\n", name, listener.Addr(), host, logPath)
+	fmt.Fprintf(os.Stderr, "%s listening on %s, host %q, log %s%s\n", name, listener.Addr(), host, logPath, asGiven(addr, listener.Addr().String(), resolved))
 	srv := &http.Server{Handler: switchboard.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
 	if err := srv.Serve(listener); err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
 		return 1
 	}
 	return 0
+}
+
+func listenOn(addr string) (net.Listener, []net.IP, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || net.ParseIP(host) != nil {
+		listener, err := net.Listen("tcp", addr)
+		return listener, nil, err
+	}
+	resolved, err := net.LookupIP(host)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(resolved) == 0 {
+		return nil, nil, fmt.Errorf("lookup %s: no addresses", host)
+	}
+	chosen := resolved[0]
+	for _, ip := range resolved {
+		if ip.To4() != nil {
+			chosen = ip
+			break
+		}
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(chosen.String(), port))
+	return listener, resolved, err
+}
+
+func asGiven(addr, bound string, resolved []net.IP) string {
+	if addr == bound {
+		return ""
+	}
+	line := ", address as given " + addr
+	if len(resolved) == 0 {
+		return line
+	}
+	names := make([]string, len(resolved))
+	for i, ip := range resolved {
+		names[i] = ip.String()
+	}
+	return line + ", which resolves to " + strings.Join(names, ", ") + ". It bound " + bound
 }
 
 func warnIfExposed(addr string) {

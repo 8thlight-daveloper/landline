@@ -19,14 +19,15 @@ A driver does input and output.
 `agent/viewer` is the one component outside `internal/`. It is the set of screen packages under `tui/internal/`, in the
 `tui/` Go module. They hold their own small copies of the switchboard's JSON types and import no root package and no
 other component. They read the switchboard over HTTP with an observer token and read
-`$HOME/.config/landline/config.json` for its address and secret. They write the terminal and standard output, and no
-files.
+`$HOME/.config/landline/config.toml` for its host, port, and secret, and the old `config.json` when there is no
+`config.toml`. They write the terminal and standard output, and no files.
 
 `menubar/viewer` is the set of packages of the `menubar/` Go module, outside `internal/`, built on macOS only
 ([0140](../decisions/0140-a-macos-menu-bar-item-shows-agents-runs-the-switchboard-and-sets-up-harnesses.md)). Like
 `agent/viewer` it holds its own copies of the switchboard's JSON types and imports no root package and no other
 component. It reads the switchboard over HTTP with an observer token, including `GET /v1/build`, and reads
-`$HOME/.config/landline/config.json` for the address and secret. It runs `landline server up|down|restart` and
+`$HOME/.config/landline/config.toml` for the host, port, and secret, and the old `config.json` when there is no
+`config.toml`. It tests whether the host is this machine's, and runs `landline server up|down|restart|rotate-secret` and
 `landline setup claude|codex [--remove]` as child processes, and asks the login shell once for its `PATH`. It writes the
 menu bar, the About panel, and the clipboard, and no files.
 

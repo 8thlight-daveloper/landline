@@ -46,16 +46,19 @@ type Session struct {
 	busy     bool
 	notice   string
 	skip     bool
+	local    bool
+	isLocal  func(string) bool
 }
 
 func New(address string, app buildinfo.Build) *Session {
-	return &Session{address: address, app: app}
+	return &Session{address: address, app: app, isLocal: thisMachinesRemembered()}
 }
 
 func (s *Session) Apply(observed Observed) {
+	local := s.isLocal(s.address)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.observed = observed
+	s.observed, s.local = observed, local
 	switch {
 	case s.notice == "":
 	case s.skip:
@@ -91,7 +94,7 @@ func (s *Session) Menu() model.Menu {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return model.Build(model.Input{
-		Address: s.address, Reachable: s.observed.Reachable, Agents: s.observed.Agents,
+		Address: s.address, Local: s.local, Reachable: s.observed.Reachable, Agents: s.observed.Agents,
 		Switchboard: s.observed.Switchboard, App: s.app, LandlineFound: s.observed.LandlineFound,
 		Busy: s.busy, Notice: s.notice,
 	})

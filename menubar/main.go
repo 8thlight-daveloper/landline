@@ -71,6 +71,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		address = strings.TrimRight(os.Getenv("LANDLINE_URL"), "/")
 	}
 	client := hubclient.New(address, secret)
+	client.RereadSecretWith(func() string {
+		_, fresh, err := hubclient.Discover(os.Getenv, home)
+		if err != nil {
+			return ""
+		}
+		return fresh
+	})
 	app := buildinfo.Stamped(version, commit)
 	self, _ := os.Executable()
 	loginPath := resolver.Login(os.Getenv("SHELL"), os.Getenv("PATH"), resolver.LoginTimeout)

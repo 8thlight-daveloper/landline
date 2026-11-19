@@ -102,7 +102,15 @@ func connect(stderr io.Writer) (*hubclient.Client, int) {
 	if err != nil {
 		return nil, fail(stderr, err.Error(), 1)
 	}
-	return hubclient.New(address, secret), 0
+	client := hubclient.New(address, secret)
+	client.RereadSecretWith(func() string {
+		_, fresh, err := hubclient.Discover(os.Getenv, home)
+		if err != nil {
+			return ""
+		}
+		return fresh
+	})
+	return client, 0
 }
 
 func fail(stderr io.Writer, text string, code int) int {

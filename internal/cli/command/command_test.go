@@ -122,12 +122,20 @@ func TestMissingPiecesGiveClearErrors(t *testing.T) {
 		{[]string{"send", "--to", "bravo", "x"}, "say who you are"},
 		{[]string{"send", "--as", "alpha", "--to", "bravo", "x"}, "no session here"},
 		{[]string{"send", "--as", "../etc", "--to", "bravo", "x"}, "bad agent id"},
-		{[]string{"register", "--id", "alpha", "--harness", "codex"}, "LANDLINE_URL"},
 	} {
 		r := do(t, dir, "", "", c.args...)
 		if r.code != 1 || !strings.Contains(r.err.String(), c.want) {
 			t.Errorf("%v: %d %q", c.args, r.code, r.err.String())
 		}
+	}
+}
+
+func TestRegisterWithNoSecretSaysWhichVariablesToSet(t *testing.T) {
+	t.Parallel()
+	var r run
+	env := Env{Stdin: strings.NewReader(""), Stdout: &r.out, Stderr: &r.err, ConfigDir: t.TempDir(), Getenv: func(string) string { return "" }}
+	if code := Run([]string{"register", "--id", "alpha", "--harness", "codex"}, env); code != 1 || !strings.Contains(r.err.String(), "set LANDLINE_URL and LANDLINE_SECRET") {
+		t.Fatalf("%d %q", code, r.err.String())
 	}
 }
 

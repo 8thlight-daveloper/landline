@@ -387,3 +387,22 @@ func TestTheOldKeysNameAndLabelAreNotAliasesForIDAndProject(t *testing.T) {
 		t.Fatalf("an old key filled a new field: %+v", agent)
 	}
 }
+
+func TestAgentsReadsTheSavedSecretAgainWhenTheSwitchboardRefusesTheToken(t *testing.T) {
+	hub := newStubHub("old-secret-0123456789")
+	server := httptest.NewServer(hub)
+	defer server.Close()
+	saved := "old-secret-0123456789"
+	client := New(server.URL, saved)
+	client.RereadSecretWith(func() string { return saved })
+	if _, err := client.Agents(); err != nil {
+		t.Fatal(err)
+	}
+	hub.mu.Lock()
+	hub.secret, hub.valid = "new-secret-0123456789", map[string]bool{}
+	hub.mu.Unlock()
+	saved = "new-secret-0123456789"
+	if _, err := client.Agents(); err != nil {
+		t.Fatalf("after the saved secret changed: %v", err)
+	}
+}

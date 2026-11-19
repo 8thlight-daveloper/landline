@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,10 +17,16 @@ import (
 
 const savedSecret = "saved-secret-saved-secret-0001"
 
+func configFor(rawURL string) Config {
+	parsed, _ := url.Parse(rawURL)
+	port, _ := strconv.Atoi(parsed.Port())
+	return Config{Host: parsed.Hostname(), Port: port, Secret: savedSecret}
+}
+
 func rotate(t *testing.T, savedURL string, environment map[string]string, args ...string) (run, string) {
 	t.Helper()
 	dir := t.TempDir()
-	if err := SaveConfig(Env{ConfigDir: dir}, Config{URL: savedURL, Secret: savedSecret}); err != nil {
+	if err := SaveConfig(Env{ConfigDir: dir}, configFor(savedURL)); err != nil {
 		t.Fatal(err)
 	}
 	var r run
@@ -35,10 +42,10 @@ func rotate(t *testing.T, savedURL string, environment map[string]string, args .
 	return r, string(raw)
 }
 
-func TestRotateSecretRefusesASavedAddressThatIsNotLoopbackAndChangesNothing(t *testing.T) {
+func TestRotateSecretRefusesASavedHostThatIsNotThisMachinesAndChangesNothing(t *testing.T) {
 	t.Setenv("PATH", "")
 	r, file := rotate(t, "http://10.0.0.5:8787", nil)
-	if r.code != 1 || !strings.Contains(r.err.String(), "http://10.0.0.5:8787 is not a loopback address") || r.out.Len() != 0 {
+	if r.code != 1 || !strings.Contains(r.err.String(), "the saved switchboard host 10.0.0.5 is not an address of this machine") || r.out.Len() != 0 {
 		t.Fatalf("code %d, stdout %q, stderr %q", r.code, r.out.String(), r.err.String())
 	}
 	if !strings.Contains(file, savedSecret) {
@@ -83,7 +90,7 @@ func TestProcessEnvironmentSurvivesALaterWrapOfTheConfig(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
 	env := Env{Stdout: &out, ConfigDir: t.TempDir(), Getenv: func(string) string { return "" }}
-	if err := SaveConfig(env, Config{URL: "http://127.0.0.1:8787", Secret: savedSecret}); err != nil {
+	if err := SaveConfig(env, configFor("http://127.0.0.1:8787")); err != nil {
 		t.Fatal(err)
 	}
 	wrapped := withConfig(withConfig(env))
@@ -121,9 +128,9 @@ func newRotation(t *testing.T, savedURL string) *rotation {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("STUB_RECORD", record)
-	t.Setenv("STUB_CONFIG", filepath.Join(dir, "config.json"))
+	t.Setenv("STUB_CONFIG", filepath.Join(dir, "config.toml"))
 	t.Setenv("STUB_MODE", "")
-	if err := SaveConfig(Env{ConfigDir: dir}, Config{URL: savedURL, Secret: savedSecret}); err != nil {
+	if err := SaveConfig(Env{ConfigDir: dir}, configFor(savedURL)); err != nil {
 		t.Fatal(err)
 	}
 	r := &rotation{out: &bytes.Buffer{}, err: &bytes.Buffer{}, record: record}
@@ -157,7 +164,18 @@ func (r *rotation) running() bool {
 	return running
 }
 
-func (r *rotation) config() Config { return LoadConfig(r.env) }
+func (r *rotation) config() Config {
+	config, err := ReadConfig(r.env)
+	if err != nil {
+		panic(err)
+	}
+	return config
+}
+
+func (r *rotation) address() string {
+	config := r.config()
+	return net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
+}
 
 func (r *rotation) recorded(t *testing.T, name string) string {
 	t.Helper()
@@ -192,7 +210,7 @@ func TestRotateSecretStopsSavesAndStartsAndPrintsOneLineWithNoSecret(t *testing.
 		t.Fatalf("stdout %q, stderr %q", r.out.String(), r.err.String())
 	}
 	config := r.config()
-	if config.Secret == savedSecret || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(config.Secret) || config.URL != "http://"+address {
+	if config.Secret == savedSecret || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(config.Secret) || r.address() != address {
 		t.Fatalf("config after rotation: %+v", config)
 	}
 	if strings.Contains(r.out.String()+r.err.String(), config.Secret) || strings.Contains(r.out.String()+r.err.String(), savedSecret) {
@@ -230,7 +248,7 @@ func TestRotateSecretKeepsTheSavedAddressWhenNoAddrFlagIsGiven(t *testing.T) {
 	if code := r.run("rotate-secret"); code != 0 {
 		t.Fatalf("rotate: %d %s", code, r.err.String())
 	}
-	if r.config().URL != "http://127.0.0.1:48613" || !reflect.DeepEqual(strings.Fields(r.recorded(t, "args")), []string{"--addr", "127.0.0.1:48613"}) {
+	if r.address() != "127.0.0.1:48613" || !reflect.DeepEqual(strings.Fields(r.recorded(t, "args")), []string{"--addr", "127.0.0.1:48613"}) {
 		t.Fatalf("config %+v, arguments %q", r.config(), r.recorded(t, "args"))
 	}
 }
@@ -250,18 +268,18 @@ func TestRotateSecretRefusesWhenSomethingElseAnswersAtTheSavedAddressAndChangesN
 	}
 }
 
-func TestRotateSecretChecksTheLoopbackAddressBeforeTheEnvironmentAndLeavesARunningSwitchboardAlone(t *testing.T) {
+func TestRotateSecretChecksTheSavedHostBeforeTheEnvironmentAndLeavesARunningSwitchboardAlone(t *testing.T) {
 	r := newRotation(t, "http://127.0.0.1:48615")
 	if code := r.run("up", "--addr", "127.0.0.1:48615"); code != 0 {
 		t.Fatalf("up: %d %s", code, r.err.String())
 	}
 	before := r.pid(t)
 	environment := func(string) string { return "set-in-the-environment" }
-	if err := SaveConfig(r.env, Config{URL: "http://10.0.0.5:8787", Secret: savedSecret}); err != nil {
+	if err := SaveConfig(r.env, configFor("http://10.0.0.5:8787")); err != nil {
 		t.Fatal(err)
 	}
 	r.env.Getenv = environment
-	if code := r.run("rotate-secret"); code != 1 || !strings.Contains(r.err.String(), "not a loopback address") || strings.Contains(r.err.String(), "LANDLINE_SECRET") {
+	if code := r.run("rotate-secret"); code != 1 || !strings.Contains(r.err.String(), "not an address of this machine") || strings.Contains(r.err.String(), "LANDLINE_SECRET") {
 		t.Fatalf("code %d, stderr %q", code, r.err.String())
 	}
 	if r.pid(t) != before || r.config().Secret != savedSecret {
@@ -366,16 +384,13 @@ func TestRotateSecretWhoseOldSwitchboardWillNotStopFailsAndKeepsTheOldSecret(t *
 	}
 }
 
-func TestRotateSecretRefusesAnAddressWithNoPortBeforeStoppingAnything(t *testing.T) {
-	r := newRotation(t, "http://localhost")
+func TestRotateSecretRefusesAnAddrFlagWithNoPortBeforeStoppingAnything(t *testing.T) {
+	r := newRotation(t, "http://127.0.0.1:48621")
 	if code := r.run("up", "--addr", "127.0.0.1:48621"); code != 0 {
 		t.Fatalf("up: %d %s", code, r.err.String())
 	}
 	before := r.pid(t)
-	if err := SaveConfig(r.env, Config{URL: "http://localhost", Secret: savedSecret}); err != nil {
-		t.Fatal(err)
-	}
-	if code := r.run("rotate-secret"); code == 0 || !strings.Contains(r.err.String(), "needs a port") {
+	if code := r.run("rotate-secret", "--addr", "localhost"); code == 0 || !strings.Contains(r.err.String(), "needs a port") {
 		t.Fatalf("code %d, stderr %q", code, r.err.String())
 	}
 	if r.pid(t) != before || r.config().Secret != savedSecret {
@@ -383,14 +398,24 @@ func TestRotateSecretRefusesAnAddressWithNoPortBeforeStoppingAnything(t *testing
 	}
 }
 
-func TestIsLocalURLAcceptsLoopbackAddressesAndLocalhostOnly(t *testing.T) {
+func TestAHostIsThisMachinesWhenItIsLocalhostALoopbackIPOrResolvesToAnInterfaceAddress(t *testing.T) {
 	t.Parallel()
-	for url, want := range map[string]bool{
-		"http://127.0.0.1:8787": true, "http://127.9.9.9:1": true, "http://localhost:8787": true, "http://[::1]:8787": true,
-		"http://127.example.com:8787": false, "http://10.0.0.5:8787": false, "http://example.com": false, "http://": false,
+	for host, want := range map[string]bool{
+		"127.0.0.1": true, "127.9.9.9": true, "localhost": true, "LOCALHOST": true, "::1": true,
+		"192.0.2.1": false, "tailnet-mac.invalid": false, "": false,
 	} {
-		if got := isLocalURL(url); got != want {
-			t.Errorf("isLocalURL(%q) = %v, want %v", url, got, want)
+		if got := IsThisMachines(host); got != want {
+			t.Errorf("IsThisMachines(%q) = %v, want %v", host, got, want)
 		}
+	}
+	var own string
+	addrs, _ := net.InterfaceAddrs()
+	for _, each := range addrs {
+		if ip, ok := each.(*net.IPNet); ok && ip.IP.To4() != nil && !ip.IP.IsLoopback() {
+			own = ip.IP.String()
+		}
+	}
+	if own != "" && !IsThisMachines(own) {
+		t.Errorf("IsThisMachines(%q) is false for an address of an interface", own)
 	}
 }

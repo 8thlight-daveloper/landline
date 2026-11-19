@@ -7,6 +7,7 @@ import (
 )
 
 func TestLandlineAgentsTextAndJSONKeepTheWordsConnectedAndDisconnectedAndShowNoShapeOrOtherWord(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("bravo")
 	live := w.selfRegisteredWithProject("a-x", "")

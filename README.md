@@ -76,7 +76,7 @@ go install github.com/8thlight-daveloper/landline/cmd/landline-mcp@latest
 ## Quick start on one machine
 
 Start the switchboard once. It runs in the background, saves its address and a generated secret in
-`~/.config/landline/config.json` (readable only by you), and listens on localhost only:
+`~/.config/landline/config.toml` (readable only by you), and listens on localhost only:
 
 ```sh
 landline server up
@@ -143,6 +143,21 @@ sessions still run an old binary after an upgrade. `just build` and `just instal
 the nix package reads them from the flake source, and a plain `go build` leaves them empty. `landline version` prints
 them for the installed binary.
 
+The file holds three keys, and you can edit it by hand. Comments and other keys are kept when Landline saves it:
+
+```toml
+secret = "..."
+host = "127.0.0.1"
+port = 8787
+```
+
+`host` is a name or an IP address, with no scheme, and `port` is a number. One address says where the switchboard
+listens and where every client connects. A missing file or a missing key means `127.0.0.1` at `LANDLINE_PORT` or `8787`.
+`landline server up` binds `host:port` and saves them only after it listens. When the machine does not own the address,
+or the port is taken, it prints `cannot listen on <host>:<port>` and exits `1`. An old `config.json` is read when there
+is no `config.toml`, and the first save replaces it
+([0190](docs/decisions/0190-one-toml-config-names-the-switchboard-by-host-and-port.md)).
+
 `landline server status`, `landline server log`, and `landline server down` look in on the switchboard and stop it.
 `landline server restart` stops it and starts it again, for example after `just install` replaces the binary. It does
 not remember the flags of the earlier start, so pass them again. The switchboard keeps no agents on disk, so after a
@@ -151,11 +166,12 @@ old process and needs its own restart.
 
 `landline server rotate-secret` replaces the switchboard secret and restarts the switchboard, for a secret that was
 exposed. It takes the flags of `restart` and prints one line, never a secret. The old secret stops working at once and
-every agent registers again, as after a restart. It refuses, and changes nothing, when the saved address is not a
-loopback address, when `LANDLINE_SECRET` is set in the environment, when `landline-switchboard` cannot be found, or when
-something that `landline server up` did not start answers at the saved address, such as a switchboard that launchd runs,
-because the command cannot stop it. Without `--addr` the new switchboard keeps the saved address. A session whose own
-environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
+every agent registers again, as after a restart. It refuses, and changes nothing, when the saved host is not this
+machine's (`localhost`, a loopback IP, or a name or IP that resolves to an address of one of its interfaces), when
+`LANDLINE_SECRET` is set in the environment, when `landline-switchboard` cannot be found, or when something that
+`landline server up` did not start answers at the saved address, such as a switchboard that launchd runs, because the
+command cannot stop it. Without `--addr` the new switchboard keeps the saved address. A session whose own environment
+sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
 ([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md)).
 
 #### Channel delivery in Claude Code
@@ -235,8 +251,8 @@ no command prints the usage on standard error and exits `2`.
 
 `landline` is built in the `tui/` module, which holds the terminal framework and imports the root module's code. It
 finds the switchboard the way the other commands do: `LANDLINE_URL` and `LANDLINE_SECRET`, then the address and secret
-that `landline server up` or `landline server join` saved, then `http://127.0.0.1:8787` (`LANDLINE_PORT` changes the
-port). See [tui/README.md](tui/README.md).
+that `landline server up` or `landline server join` saved in `config.toml`, then `127.0.0.1` at port `8787`
+(`LANDLINE_PORT` changes the port). See [tui/README.md](tui/README.md).
 
 ## Menu bar item (macOS)
 
@@ -247,8 +263,10 @@ observer of kind `menubar`. It polls every 5 seconds (`--interval D`, at least 5
 
 - `Switchboard` shows `Running at <address>` or `Not running`, and `Start`, `Stop`, and `Restart` run
   `landline server up`, `down`, and `restart`. It finds `landline` next to its own binary, then on the path of your
-  login shell. When the address is not a loopback address the three items are disabled. The submenu also shows the
-  switchboard's build and says when its commit differs from the app's. `Restart` gives every agent a new id.
+  login shell. `Rotate secret…` asks first, then runs `landline server rotate-secret`. When the address is not this
+  machine's the four items are disabled and the submenu says `Remote switchboard at <address>`. The submenu also shows
+  the switchboard's build and says when its commit differs from the app's. `Restart` and `Rotate secret…` give every
+  agent a new id.
 - `Harnesses` runs `landline setup claude|codex`, and the same with `--remove`. The menu does not check whether Landline
   is registered, so both items are always there.
 - `About Landline` opens the standard About panel with the version and a link to the project.
@@ -266,7 +284,7 @@ Launchpad. `just install-app /Applications` installs the bundle into another fol
 rebuilds and replaces it. The bundle is signed ad hoc and has no Dock icon. An app started from Spotlight has no shell
 environment, so `landline` must be on your login shell's `PATH`. `~/.local/bin` is there only when your shell profile
 adds it. Add the app as a login item by hand, or start the binary from a terminal. It finds the switchboard the way
-`landline` does, from `LANDLINE_URL` and `LANDLINE_SECRET`, then `~/.config/landline/config.json`.
+`landline` does, from `LANDLINE_URL` and `LANDLINE_SECRET`, then `~/.config/landline/config.toml`.
 `landline-menubar menu --text` prints the menu as text and exits, as
 [the menu text](docs/reference/menubar-menu-text.md) defines. See
 [0140](docs/decisions/0140-a-macos-menu-bar-item-shows-agents-runs-the-switchboard-and-sets-up-harnesses.md). The
@@ -276,19 +294,27 @@ project's GitHub address is in the About panel, so a move of the repository chan
 ## Two hosts
 
 There is one switchboard, and every machine uses it. Keep it on localhost and reach it through an SSH tunnel, or let it
-listen on a private network address such as a Tailscale one, which prints the warning that it speaks plain HTTP. On the
-second machine:
+listen on a private network address such as a Tailscale one. Traffic on a tailnet is already encrypted, and the
+switchboard prints a warning that it speaks plain HTTP. On the first machine, name the address once:
 
 ```sh
-ssh -N -L 8787:127.0.0.1:8787 <the first machine>     # or use the private network address
-export LANDLINE_SECRET=...                            # the switchboard's secret, from the first machine's config.json
-landline server join http://127.0.0.1:8787
+landline server up --addr davelight-mbp:8787         # saves host and port in config.toml after it listens
+```
+
+On the second machine:
+
+```sh
+export LANDLINE_SECRET=...                            # the switchboard's secret, from the first machine's config.toml
+landline server join davelight-mbp:8787               # or an IP address, or 127.0.0.1:8787 through an SSH tunnel
 landline setup claude
 ```
 
-A machine that joined a switchboard never starts one of its own. A Claude Code channel needs no inbound port, because
-the session dials out to the switchboard. A Codex session on the second machine needs only `landline setup codex` there,
-because its own `landline-mcp` process runs `codex queue` when the switchboard pushes a message:
+`join` saves `host`, `port`, and the secret, and refuses an `https://` address because Landline speaks `http` only. The
+bind decides what a machine does, with no role key. `landline server up` on a machine whose saved host is another
+machine's fails with `cannot listen on`, and an edit of `host` in `config.toml` makes it host here. A Claude Code
+channel needs no inbound port, because the session dials out to the switchboard. A Codex session on the second machine
+needs only `landline setup codex` there, because its own `landline-mcp` process runs `codex queue` when the switchboard
+pushes a message:
 
 ```sh
 landline setup codex
@@ -304,7 +330,7 @@ landline setup codex
 | `landline server restart [flags]`                 | Stops the switchboard that `up` started and starts it again with the flags given                                                                    |
 | `landline server rotate-secret [flags]`           | Replaces the switchboard secret and restarts the switchboard with the flags given. The old secret stops working at once                             |
 | `landline server install [--load]`                | Starts the switchboard at login: a launchd agent on macOS, a systemd user unit on Linux                                                             |
-| `landline server join <address>`                  | Uses the switchboard on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                           |
+| `landline server join <host:port>`                | Uses the switchboard on another machine. The secret comes from `LANDLINE_SECRET` or stdin                                                           |
 | `landline setup claude\|codex [--print]`          | Adds `landline-mcp` to that harness, once                                                                                                           |
 | `landline setup claude\|codex --remove [--print]` | Takes `landline-mcp` out of that harness, and the unchanged Claude Code skill                                                                       |
 | `landline claude [flags] [-- args]`               | Starts Claude Code with the channel loaded. Flags: `--project`, `--model`, `--effort`                                                               |

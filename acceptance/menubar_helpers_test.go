@@ -309,6 +309,7 @@ func expectedMenu(icon string, head []string, sb switchboardItems, menubarLine s
 		enabledOrDisabled("Start", sb.start),
 		enabledOrDisabled("Stop", sb.stop),
 		enabledOrDisabled("Restart", sb.restart),
+		enabledOrDisabled("Rotate secret…", sb.restart),
 		menuSeparator,
 		sb.build+disabledMark,
 	)...)

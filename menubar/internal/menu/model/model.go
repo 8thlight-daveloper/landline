@@ -1,10 +1,7 @@
 package model
 
 import (
-	"net"
-	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/8thlight-daveloper/landline/menubar/internal/agentsview"
 	"github.com/8thlight-daveloper/landline/menubar/internal/buildinfo"
@@ -36,6 +33,9 @@ type Action struct {
 	Text string
 	Args []string
 	Done string
+
+	Confirm       string
+	ConfirmAccept string
 }
 
 type Item struct {
@@ -64,6 +64,7 @@ type Switchboard struct {
 
 type Input struct {
 	Address       string
+	Local         bool
 	Reachable     bool
 	Agents        []agentsview.Row
 	Switchboard   Switchboard
@@ -123,8 +124,8 @@ func agentItem(row agentsview.Row) Item {
 }
 
 func switchboardItems(in Input) []Item {
-	local := Loopback(in.Address)
-	start, stop, restart := serverActions()
+	local := in.Local
+	start, stop, restart, rotate := serverActions()
 	canRun := local && in.LandlineFound && !in.Busy
 	return []Item{
 		disabled(firstLine(in, local)),
@@ -132,15 +133,19 @@ func switchboardItems(in Input) []Item {
 		runItem("Start", start, canRun && !in.Reachable),
 		runItem("Stop", stop, canRun && in.Reachable),
 		runItem("Restart", restart, canRun && in.Reachable),
+		runItem("Rotate secret…", rotate, canRun && in.Reachable),
 		separator(),
 		disabled(buildLine(in)),
 	}
 }
 
-func serverActions() (start, stop, restart Action) {
+const rotateQuestion = "Rotate the switchboard secret? The switchboard restarts and every agent must register again."
+
+func serverActions() (start, stop, restart, rotate Action) {
 	return Action{Kind: Run, Args: []string{"server", "up"}},
 		Action{Kind: Run, Args: []string{"server", "down"}},
-		Action{Kind: Run, Args: []string{"server", "restart"}}
+		Action{Kind: Run, Args: []string{"server", "restart"}},
+		Action{Kind: Run, Args: []string{"server", "rotate-secret"}, Confirm: rotateQuestion, ConfirmAccept: "Rotate"}
 }
 
 func firstLine(in Input, local bool) string {
@@ -178,19 +183,6 @@ func harnessItems(busy bool) []Item {
 		)
 	}
 	return items
-}
-
-func Loopback(address string) bool {
-	parsed, err := url.Parse(address)
-	if err != nil {
-		return false
-	}
-	host := parsed.Hostname()
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func line(text string) string {

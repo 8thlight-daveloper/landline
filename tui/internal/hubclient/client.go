@@ -31,6 +31,7 @@ type Client struct {
 	http    *http.Client
 	mu      sync.Mutex
 	token   string
+	reread  func() string
 }
 
 func New(address, secret string) *Client {
@@ -43,13 +44,29 @@ func newWithTimeout(address, secret string, timeout time.Duration) *Client {
 
 func (c *Client) Address() string { return c.address }
 
+func (c *Client) RereadSecretWith(reread func() string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reread = reread
+}
+
+func (c *Client) currentSecret() string {
+	c.mu.Lock()
+	reread := c.reread
+	c.mu.Unlock()
+	if reread != nil {
+		if fresh := reread(); fresh != "" {
+			c.mu.Lock()
+			c.secret = fresh
+			c.mu.Unlock()
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.secret
+}
+
 func (c *Client) Agents() ([]Agent, error) {
-	if c.secret == "" {
-		return nil, ErrNoSecret
-	}
-	if strings.ContainsFunc(c.secret, unicode.IsControl) {
-		return nil, ErrControlSecret
-	}
 	token, err := c.currentToken()
 	if err != nil {
 		return nil, err
@@ -83,12 +100,19 @@ func (c *Client) currentToken() (string, error) {
 }
 
 func (c *Client) register() (string, error) {
+	secret := c.currentSecret()
+	if secret == "" {
+		return "", ErrNoSecret
+	}
+	if strings.ContainsFunc(secret, unicode.IsControl) {
+		return "", ErrControlSecret
+	}
 	body, _ := json.Marshal(map[string]string{"kind": "tui"})
 	req, err := http.NewRequest(http.MethodPost, c.address+"/v1/observers", bytes.NewReader(body))
 	if err != nil {
 		return "", errors.New("the switchboard address is not valid")
 	}
-	req.Header.Set("Authorization", "Bearer "+c.secret)
+	req.Header.Set("Authorization", "Bearer "+secret)
 	req.Header.Set("Content-Type", "application/json")
 	raw, status, err := c.do(req)
 	if err != nil {

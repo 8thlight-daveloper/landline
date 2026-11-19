@@ -1,11 +1,9 @@
 package hubclient
 
 import (
-	"encoding/json"
 	"errors"
 	"net"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,22 +13,21 @@ import (
 
 const defaultPort = 8787
 
-type saved struct {
-	URL    string `json:"url"`
-	Secret string `json:"secret"`
-}
-
 func Discover(getenv func(string) string, home string) (address, secret string, err error) {
-	var config saved
-	if raw, err := os.ReadFile(filepath.Join(home, ".config", "landline", "config.json")); err == nil {
-		json.Unmarshal(raw, &config)
+	config, err := readSaved(filepath.Join(home, ".config", "landline"))
+	if err != nil {
+		return "", "", err
 	}
 	address = getenv("LANDLINE_URL")
 	if address == "" {
-		address = config.URL
-	}
-	if address == "" {
-		address = "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(portFrom(getenv)))
+		host, port := config.Host, config.Port
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		if port == 0 {
+			port = portFrom(getenv)
+		}
+		address = "http://" + net.JoinHostPort(host, strconv.Itoa(port))
 	}
 	secret = getenv("LANDLINE_SECRET")
 	if secret == "" {

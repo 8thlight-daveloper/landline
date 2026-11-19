@@ -26,6 +26,7 @@ func lonelyLandline(t *testing.T) (bin string, env []string, home string) {
 }
 
 func TestLandlineAgentsTextIsOneTabSeparatedLinePerRowInTheScreensOrderAndMatchesTheJSONRows(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("tango")
 	w.registerWithProject("delta", "yankee")
@@ -84,6 +85,7 @@ func TestLandlineAgentsTextIsOneTabSeparatedLinePerRowInTheScreensOrderAndMatche
 }
 
 func TestLandlineAgentsReadsTheListWithAnObserverTokenAndRegistersNoAgentAndTakesNoAs(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	before, _ := os.ReadDir(filepath.Join(w.config, ".config", "landline"))
@@ -103,6 +105,7 @@ func TestLandlineAgentsReadsTheListWithAnObserverTokenAndRegistersNoAgentAndTake
 }
 
 func TestLandlineAgentsNeedsTheSecretAndAnAgentSessionFileIsNotEnough(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	var kept []string
@@ -120,6 +123,7 @@ func TestLandlineAgentsNeedsTheSecretAndAnAgentSessionFileIsNotEnough(t *testing
 }
 
 func TestSetupPrintsTheAbsolutePathOfLandlineMCPWithTheArgumentsLandlineMCPHadAndPrefersTheOneNextToItself(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	decoys := t.TempDir()
 	decoy := filepath.Join(decoys, mcpName)
@@ -146,6 +150,7 @@ func TestSetupPrintsTheAbsolutePathOfLandlineMCPWithTheArgumentsLandlineMCPHadAn
 }
 
 func TestSetupFindsLandlineMCPOnThePathWhenItIsNotNextToLandline(t *testing.T) {
+	t.Parallel()
 	bin, env, _ := lonelyLandline(t)
 	elsewhere := copyBinary(t, mcpOf(build(t)), t.TempDir())
 	result := runBin(t, bin, withEnv(env, pathWith(filepath.Dir(elsewhere))), "setup", "claude", "--print")
@@ -155,6 +160,7 @@ func TestSetupFindsLandlineMCPOnThePathWhenItIsNotNextToLandline(t *testing.T) {
 }
 
 func TestSetupExitsOneNamingLandlineMCPAndJustInstallWhenItIsMissing(t *testing.T) {
+	t.Parallel()
 	bin, env, home := lonelyLandline(t)
 	for _, args := range [][]string{{"setup", "claude"}, {"setup", "codex"}} {
 		result := runBin(t, bin, env, args...)
@@ -168,6 +174,7 @@ func TestSetupExitsOneNamingLandlineMCPAndJustInstallWhenItIsMissing(t *testing.
 }
 
 func TestSetupWarnsAboutANixStorePathOnlyWhenLandlineMCPIsThere(t *testing.T) {
+	t.Parallel()
 	bin, env, _ := lonelyLandline(t)
 	store := filepath.Join(t.TempDir(), "nix", "store", "abc123-landline", "bin")
 	inStore := copyBinary(t, mcpOf(build(t)), store)
@@ -183,6 +190,7 @@ func TestSetupWarnsAboutANixStorePathOnlyWhenLandlineMCPIsThere(t *testing.T) {
 }
 
 func TestServerUpRestartAndInstallExitOneNamingTheSwitchboardAndJustInstallWhenItIsMissing(t *testing.T) {
+	t.Parallel()
 	bin, env, home := lonelyLandline(t)
 	addr := freeAddr(t)
 	for _, args := range [][]string{{"server", "up", "--addr", addr}, {"server", "restart", "--addr", addr}, {"server", "install"}} {
@@ -206,6 +214,7 @@ func TestServerUpRestartAndInstallExitOneNamingTheSwitchboardAndJustInstallWhenI
 }
 
 func TestServerUpFindsTheSwitchboardOnThePathWhenItIsNotNextToLandline(t *testing.T) {
+	t.Parallel()
 	bin, env, home := lonelyLandline(t)
 	elsewhere := copyBinary(t, switchboardOf(build(t)), t.TempDir())
 	env = withEnv(env, pathWith(filepath.Dir(elsewhere), "/usr/bin", "/bin"))
@@ -222,6 +231,7 @@ func TestServerUpFindsTheSwitchboardOnThePathWhenItIsNotNextToLandline(t *testin
 }
 
 func TestServerInstallRefusesASwitchboardInTheNixStoreAndNotALandlineThatIsThere(t *testing.T) {
+	t.Parallel()
 	root := build(t)
 	store := filepath.Join(t.TempDir(), "nix", "store", "abc123-landline", "bin")
 
@@ -244,6 +254,7 @@ func TestServerInstallRefusesASwitchboardInTheNixStoreAndNotALandlineThatIsThere
 }
 
 func TestServerDownAndStatusIgnoreAPidInTheSwitchboardPidFileThatIsNotTheSwitchboard(t *testing.T) {
+	t.Parallel()
 	h := newBackgroundHub(t)
 	data := filepath.Join(h.home, ".local", "share", "landline")
 	if err := os.MkdirAll(data, 0o700); err != nil {
@@ -269,6 +280,7 @@ func TestServerDownAndStatusIgnoreAPidInTheSwitchboardPidFileThatIsNotTheSwitchb
 }
 
 func TestLandlineClaudePrintsTheChannelLaunchWithTheServerNamedLandline(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	result := runBin(t, w.bin, w.env, "claude", "--project", "lead", "--print")
 	if result.code != 0 || strings.TrimSpace(result.stdout) != "LANDLINE_PROJECT=lead claude --dangerously-load-development-channels server:landline" {

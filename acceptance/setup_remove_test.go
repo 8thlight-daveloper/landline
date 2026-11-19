@@ -73,6 +73,7 @@ func (r harnessRig) installSkill(t *testing.T) []byte {
 }
 
 func TestSetupRemoveRunsTheHarnessesOwnRemoveCommandAndNothingElse(t *testing.T) {
+	t.Parallel()
 	for harness, want := range map[string]string{
 		"claude": "mcp\nremove\n--scope\nuser\nlandline\n",
 		"codex":  "mcp\nremove\nlandline\n",
@@ -93,6 +94,7 @@ func TestSetupRemoveRunsTheHarnessesOwnRemoveCommandAndNothingElse(t *testing.T)
 }
 
 func TestSetupRemoveExitsWithTheStatusOfTheHarnessCommand(t *testing.T) {
+	t.Parallel()
 	for _, harness := range []string{"claude", "codex"} {
 		for _, code := range []string{"1", "3", "42"} {
 			rig := newHarnessRig(t)
@@ -106,6 +108,7 @@ func TestSetupRemoveExitsWithTheStatusOfTheHarnessCommand(t *testing.T) {
 }
 
 func TestSetupClaudeRemoveDeletesTheSkillFileThatSetupInstalledAndTheEmptyFolderAndKeepsTheSkillsFolder(t *testing.T) {
+	t.Parallel()
 	rig := newHarnessRig(t)
 	rig.installSkill(t)
 	result := rig.run(t, "setup", "claude", "--remove")
@@ -127,6 +130,7 @@ func TestSetupClaudeRemoveDeletesTheSkillFileThatSetupInstalledAndTheEmptyFolder
 }
 
 func TestSetupClaudeRemoveKeepsTheLandlineFolderWhenSomethingElseIsInIt(t *testing.T) {
+	t.Parallel()
 	rig := newHarnessRig(t)
 	rig.installSkill(t)
 	notes := filepath.Join(rig.skillDir(), "notes.txt")
@@ -146,6 +150,7 @@ func TestSetupClaudeRemoveKeepsTheLandlineFolderWhenSomethingElseIsInIt(t *testi
 }
 
 func TestSetupClaudeRemoveKeepsAnySkillFileThatDiffersEvenByOneByteSaysSoOnStandardOutputAndExitsZero(t *testing.T) {
+	t.Parallel()
 	original := newHarnessRig(t).installSkill(t)
 	edits := map[string][]byte{
 		"an appended line":       append(append([]byte{}, original...), []byte("\nmy own note\n")...),
@@ -178,6 +183,7 @@ func TestSetupClaudeRemoveKeepsAnySkillFileThatDiffersEvenByOneByteSaysSoOnStand
 }
 
 func TestSetupClaudeRemoveWithNoSkillFileExitsZeroAndCreatesNothing(t *testing.T) {
+	t.Parallel()
 	rig := newHarnessRig(t)
 	result := rig.run(t, "setup", "claude", "--remove")
 	if result.code != 0 {
@@ -192,6 +198,7 @@ func TestSetupClaudeRemoveWithNoSkillFileExitsZeroAndCreatesNothing(t *testing.T
 }
 
 func TestSetupCodexRemoveLeavesTheClaudeSkillAlone(t *testing.T) {
+	t.Parallel()
 	rig := newHarnessRig(t)
 	skill := rig.installSkill(t)
 	result := rig.run(t, "setup", "codex", "--remove")
@@ -204,6 +211,7 @@ func TestSetupCodexRemoveLeavesTheClaudeSkillAlone(t *testing.T) {
 }
 
 func TestSetupRemovePrintShowsTheHarnessCommandInEitherArgumentOrderAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	for harness, want := range map[string]string{
 		"claude": "claude mcp remove --scope user landline\n",
 		"codex":  "codex mcp remove landline\n",
@@ -226,6 +234,7 @@ func TestSetupRemovePrintShowsTheHarnessCommandInEitherArgumentOrderAndChangesNo
 }
 
 func TestSetupRemoveRefusesAnyOtherArgumentAndAnUnknownHarnessWithExitTwoAndTheUsageAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	for name, args := range map[string][]string{
 		"an extra word":       {"setup", "claude", "--remove", "extra"},
 		"an extra flag":       {"setup", "claude", "--remove", "--force"},
@@ -265,6 +274,7 @@ func TestSetupRemoveRefusesAnyOtherArgumentAndAnUnknownHarnessWithExitTwoAndTheU
 }
 
 func TestSetupUsageNamesRemoveAndSetupWithoutItStillAddsAndInstallsTheSkill(t *testing.T) {
+	t.Parallel()
 	rig := newHarnessRig(t)
 	result := rig.run(t, "setup", "claude")
 	if result.code != 0 {
@@ -285,6 +295,7 @@ func TestSetupUsageNamesRemoveAndSetupWithoutItStillAddsAndInstallsTheSkill(t *t
 }
 
 func TestSetupClaudeRemoveDeletesTheUnchangedSkillEvenWhenTheHarnessCommandFailsAndStillExitsWithItsStatus(t *testing.T) {
+	t.Parallel()
 	rig := newHarnessRig(t)
 	rig.installSkill(t)
 	rig.failWith(t, "claude", "3")
@@ -298,6 +309,7 @@ func TestSetupClaudeRemoveDeletesTheUnchangedSkillEvenWhenTheHarnessCommandFails
 }
 
 func TestSetupClaudeRemoveKeepsAnEditedSkillWhenTheHarnessCommandFails(t *testing.T) {
+	t.Parallel()
 	rig := newHarnessRig(t)
 	rig.installSkill(t)
 	edited := []byte("my own skill\n")
@@ -315,6 +327,7 @@ func TestSetupClaudeRemoveKeepsAnEditedSkillWhenTheHarnessCommandFails(t *testin
 }
 
 func TestSetupRemoveWithTheHarnessNotOnThePathExitsOneNamingItAndClaudeStillCleansTheSkill(t *testing.T) {
+	t.Parallel()
 	for _, harness := range []string{"claude", "codex"} {
 		rig := newHarnessRig(t)
 		skill := rig.installSkill(t)

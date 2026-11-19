@@ -13,7 +13,7 @@ const commit = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 func app() buildinfo.Build { return buildinfo.Build{Version: "0.2.0", Commit: commit} }
 
 func local(reachable bool) Input {
-	return Input{Address: "http://127.0.0.1:8787", Reachable: reachable, App: app(), LandlineFound: true}
+	return Input{Address: "http://127.0.0.1:8787", Local: true, Reachable: reachable, App: app(), LandlineFound: true}
 }
 
 const tail = `Harnesses
@@ -62,6 +62,7 @@ Switchboard
   Start (disabled)
   Stop
   Restart
+  Rotate secret…
   ---
   Switchboard 0.2.0 (a1b2c3d) (disabled)
 ` + tail
@@ -90,6 +91,7 @@ Switchboard
   Start
   Stop (disabled)
   Restart (disabled)
+  Rotate secret… (disabled)
   ---
   Switchboard (build unknown) (disabled)
 ` + tail
@@ -106,12 +108,12 @@ func TestAnUnreachableSwitchboardListsNoAgentsWhateverTheInputHolds(t *testing.T
 	}
 }
 
-func TestARemoteSwitchboardDisablesAllThreeServerItems(t *testing.T) {
+func TestARemoteSwitchboardDisablesAllFourServerItems(t *testing.T) {
 	for _, reachable := range []bool{false, true} {
 		in := local(reachable)
-		in.Address = "http://tailnet-mac:8787"
+		in.Address, in.Local = "http://tailnet-mac:8787", false
 		got := Build(in).Text()
-		for _, want := range []string{"  Remote switchboard at http://tailnet-mac:8787 (disabled)\n", "  Start (disabled)\n", "  Stop (disabled)\n", "  Restart (disabled)\n"} {
+		for _, want := range []string{"  Remote switchboard at http://tailnet-mac:8787 (disabled)\n", "  Start (disabled)\n", "  Stop (disabled)\n", "  Restart (disabled)\n", "  Rotate secret… (disabled)\n"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("reachable %v lacks %q:\n%s", reachable, want, got)
 			}
@@ -123,7 +125,7 @@ func TestWhenLandlineIsMissingTheServerItemsAreDisabledAndTheHarnessItemsStayEna
 	in := local(true)
 	in.LandlineFound = false
 	got := Build(in).Text()
-	for _, want := range []string{"  landline not found. Run just install (disabled)\n", "  Start (disabled)\n", "  Stop (disabled)\n", "  Restart (disabled)\n", "  Set up Claude Code\n"} {
+	for _, want := range []string{"  landline not found. Run just install (disabled)\n", "  Start (disabled)\n", "  Stop (disabled)\n", "  Restart (disabled)\n", "  Rotate secret… (disabled)\n", "  Set up Claude Code\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q:\n%s", want, got)
 		}
@@ -135,7 +137,7 @@ func TestANoticeReplacesTheFirstLineAndBusyDisablesEveryRunItem(t *testing.T) {
 	in.Notice = "Failed: boom"
 	in.Busy = true
 	got := Build(in).Text()
-	for _, want := range []string{"  Failed: boom (disabled)\n", "  Stop (disabled)\n", "  Restart (disabled)\n", "  Set up Claude Code (disabled)\n", "  Remove from Codex (disabled)\n"} {
+	for _, want := range []string{"  Failed: boom (disabled)\n", "  Stop (disabled)\n", "  Restart (disabled)\n", "  Rotate secret… (disabled)\n", "  Set up Claude Code (disabled)\n", "  Remove from Codex (disabled)\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lacks %q:\n%s", want, got)
 		}
@@ -202,19 +204,32 @@ func TestIconCountsConnectedAgentsOnly(t *testing.T) {
 	}
 }
 
-func TestLoopbackAcceptsLocalhostAndLoopbackIPsOnly(t *testing.T) {
-	yes := []string{"http://localhost:8787", "http://LOCALHOST", "http://127.0.0.1:1", "http://127.9.9.9", "http://[::1]:8787"}
-	no := []string{"", "http://tailnet-mac:8787", "http://10.0.0.5:8787", "http://localhost.evil.test:1", "http://0.0.0.0:1", "://bad"}
-	for _, a := range yes {
-		if !Loopback(a) {
-			t.Errorf("%q should be loopback", a)
+func TestRotateSecretAsksFirstAndRunsTheCommandWithNoFlags(t *testing.T) {
+	var rotate Item
+	for _, item := range Build(local(true)).Items[0].Children {
+		if item.Title == "Rotate secret…" {
+			rotate = item
 		}
 	}
-	for _, a := range no {
-		if Loopback(a) {
-			t.Errorf("%q should not be loopback", a)
+	if rotate.Disabled || strings.Join(rotate.Action.Args, " ") != "server rotate-secret" || rotate.Action.Kind != Run {
+		t.Fatalf("%+v", rotate)
+	}
+	if rotate.Action.Confirm != "Rotate the switchboard secret? The switchboard restarts and every agent must register again." || rotate.Action.ConfirmAccept != "Rotate" {
+		t.Fatalf("%+v", rotate.Action)
+	}
+}
+
+func TestOnlyRotateSecretAsksBeforeItRuns(t *testing.T) {
+	var walk func(items []Item)
+	walk = func(items []Item) {
+		for _, item := range items {
+			if (item.Action.Confirm != "") != (item.Title == "Rotate secret…") {
+				t.Errorf("%q has the confirmation %q", item.Title, item.Action.Confirm)
+			}
+			walk(item.Children)
 		}
 	}
+	walk(Build(local(true)).Items)
 }
 
 func TestTheActionsAreTheFixedCommandsAndNothingFromTheSwitchboard(t *testing.T) {
@@ -232,7 +247,7 @@ func TestTheActionsAreTheFixedCommandsAndNothingFromTheSwitchboard(t *testing.T)
 	}
 	walk(Build(in).Items)
 	want := []string{
-		"server up", "server down", "server restart",
+		"server up", "server down", "server restart", "server rotate-secret",
 		"setup claude", "setup claude --remove", "setup codex", "setup codex --remove",
 	}
 	if len(runs) != len(want) {

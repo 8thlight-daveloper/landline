@@ -88,6 +88,7 @@ func (w *world) agentEntry(id string) map[string]any {
 }
 
 func TestARegistrationBySeedAnswersAnIDOfFourLowercaseHexCharactersThatNoOtherListedAgentHoldsAndTheSeedNeverShapesIt(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	body := map[string]string{"seed": "landline-menubar", "harness": "claude-code", "host": "mac", "project": "landline", "folder": "landline-menubar"}
 	status, text := w.post("/v1/register", secret, body)
@@ -134,6 +135,7 @@ func TestARegistrationBySeedAnswersAnIDOfFourLowercaseHexCharactersThatNoOtherLi
 }
 
 func TestARegistrationNeedsExactlyOneOfAnIDAndASeedAndRefusesTheOldKeys(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	base := func(extra map[string]string) map[string]string {
 		body := map[string]string{"harness": "claude-code", "host": "mac"}
@@ -168,6 +170,7 @@ func TestARegistrationNeedsExactlyOneOfAnIDAndASeedAndRefusesTheOldKeys(t *testi
 }
 
 func TestAHandRegisteredIDAndProjectAreRecordedAsGivenAndTheRegisterCommandTakesOnlyTheNewFlags(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.must("", "register", "--id", "alpha", "--project", "landline", "--harness", "claude-code", "--host", "mac")
 	w.must("", "register", "--id", strings.Repeat("b", 32), "--harness", "claude-code", "--host", "mac")
@@ -202,6 +205,7 @@ func TestAHandRegisteredIDAndProjectAreRecordedAsGivenAndTheRegisterCommandTakes
 }
 
 func TestTheMCPProcessRefusesTheOldLabelFlagAndIgnoresTheOldEnvironmentVariable(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	result := runBin(t, mcpOf(w.bin), w.env, "--label", "lead")
 	if result.code == 0 || strings.TrimSpace(result.stderr) == "" {
@@ -227,6 +231,7 @@ func TestTheMCPProcessRefusesTheOldLabelFlagAndIgnoresTheOldEnvironmentVariable(
 }
 
 func TestAnOldKeyOnAttachIsRefusedWith400AndRecordsNothing(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	for name, body := range map[string]map[string]string{"label": {"label": "lead"}, "name": {"name": "x"}, "handle": {"handle": "x"}, "label with model": {"model": "m", "label": "lead"}} {
@@ -256,6 +261,7 @@ func TestAnOldKeyOnAttachIsRefusedWith400AndRecordsNothing(t *testing.T) {
 }
 
 func TestAMessageHeaderAndTheLogUseIDsAndTheProjectAndNeverCarryTheTask(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.connectedWithProject("alpha", "web")
 	w.register("bravo")
@@ -284,6 +290,7 @@ func TestAMessageHeaderAndTheLogUseIDsAndTheProjectAndNeverCarryTheTask(t *testi
 }
 
 func TestASendTakesAnExactIDAndNothingElseAndAProjectGetsTheHintOnlyOnTheUnknownRecipient404(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.connectedWithProject("alpha", "web")
 	w.connectedWithProject("bravo", "web")
@@ -339,6 +346,7 @@ func TestASendTakesAnExactIDAndNothingElseAndAProjectGetsTheHintOnlyOnTheUnknown
 }
 
 func TestTheHintListsAtMostTenSortedIDsAndSaysAndMoreAfterTheTenthOnlyWhenThereAreOthers(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.connectedWithProject("sender", "elsewhere")
 	ids := func(n int) string {
@@ -365,6 +373,7 @@ func TestTheHintListsAtMostTenSortedIDsAndSaysAndMoreAfterTheTenthOnlyWhenThereA
 }
 
 func TestTheHintLeavesOutHoldersThatHaveDisconnected(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("sender")
 	one, oneID := w.selfRegistered("crew", "claude-code")
@@ -401,6 +410,7 @@ func (w *world) tryStatus(token string, raw string) (int, string) {
 }
 
 func TestStatusNeedsAnAgentTokenAndANonEmptyBodyWithOneStringFieldNamedTask(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	observer := w.registerObserver("tui")
@@ -472,6 +482,7 @@ func TestStatusNeedsAnAgentTokenAndANonEmptyBodyWithOneStringFieldNamedTask(t *t
 }
 
 func TestStatusSetsTheTaskAnswersItWithTheTimeTheSwitchboardStampedAndListsItOnlyWhileItIsSet(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha", "bravo")
 	before := time.Now().Add(-2 * time.Second)
@@ -530,6 +541,7 @@ func TestStatusSetsTheTaskAnswersItWithTheTimeTheSwitchboardStampedAndListsItOnl
 }
 
 func TestARegistrationByIDClearsTheTaskAndTheSwitchboardForgetsItWithTheAgent(t *testing.T) {
+	t.Parallel()
 	w := startHub(t, build(t), t.TempDir(), "", "--grace", "5s")
 	w.register("alpha", "bravo")
 	if status, text := w.setTask("alpha", "first goal"); status != 200 {
@@ -560,6 +572,7 @@ func TestARegistrationByIDClearsTheTaskAndTheSwitchboardForgetsItWithTheAgent(t 
 }
 
 func TestAHubRestartForgetsEveryTaskAndTheRunningProcessRegistersAgainWithNone(t *testing.T) {
+	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	first := startHub(t, bin, config, "")
 	first.register("alpha")
@@ -592,6 +605,7 @@ func TestAHubRestartForgetsEveryTaskAndTheRunningProcessRegistersAgainWithNone(t
 }
 
 func TestTheTaskShowsAfterTheProjectInTheAttributeTextAndInTheJSONRowsOfLandlineAgentsAndTheTool(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.registerWithProject("alpha", "landline")
 	w.register("bravo")
@@ -639,6 +653,7 @@ func TestTheTaskShowsAfterTheProjectInTheAttributeTextAndInTheJSONRowsOfLandline
 }
 
 func TestAnAttachAnswersTheNumberOfOtherConnectedAgentsWithTheCallersExactProjectEvenWhenZero(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.connectedWithProject("alpha", "p1")
 	w.connectedWithProject("bravo", "p1")
@@ -681,6 +696,7 @@ func TestAnAttachAnswersTheNumberOfOtherConnectedAgentsWithTheCallersExactProjec
 }
 
 func TestTheCodexChallengeAnswerCarriesProjectPeersToo(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.connectedWithProject("alpha", "p1")
 	w.connectedWithProject("bravo", "p1")
@@ -695,6 +711,7 @@ func TestTheCodexChallengeAnswerCarriesProjectPeersToo(t *testing.T) {
 }
 
 func TestAnAttachAfterAPeerDisconnectsDoesNotCountItAndTheGraceDoesNotCountEither(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	_, oneID := w.selfRegistered("crew", "claude-code")
 	two, twoID := w.selfRegistered("crew", "claude-code")
@@ -707,6 +724,7 @@ func TestAnAttachAfterAPeerDisconnectsDoesNotCountItAndTheGraceDoesNotCountEithe
 }
 
 func TestTheRegisterToolSaysWhatItRecordedWhereTheProjectCameFromHowManyShareItAndHowToSetATask(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	line := func(id, project, origin, shared string) string {
 		return "you are " + id + ". project: " + project + " (" + origin + "), shared with " + shared + ". task: none. Set one with landline_status when your goal is clear."
@@ -781,6 +799,7 @@ func TestTheRegisterToolSaysWhatItRecordedWhereTheProjectCameFromHowManyShareItA
 }
 
 func TestARepositoryGivesTheProjectItsNameAndAFlagOrAnArgumentOverridesIt(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	repo := newGitRepos(t)
 	for name, c := range map[string]struct{ dir, want string }{
@@ -874,6 +893,7 @@ func newGitRepos(t *testing.T) gitRepos {
 }
 
 func TestTheStatusToolSetsAndClearsTheTaskAndReportsExactlyWhatItDid(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	p, id := w.selfRegistered("demo-folder", "claude-code")
 	if got := p.tool("landline_status", `{"task":"menu bar app for ADR 0140"}`); got != "task: menu bar app for ADR 0140" {
@@ -927,6 +947,7 @@ func toolTexts(t *testing.T, reply map[string]any) []string {
 }
 
 func TestTheUnregisteredReminderNamesTheStatusToolAndNoStatusCallCountsAsTheIntroduction(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	dir := filepath.Join(t.TempDir(), "demo-folder")
 	os.MkdirAll(dir, 0o755)
@@ -955,6 +976,7 @@ func TestTheUnregisteredReminderNamesTheStatusToolAndNoStatusCallCountsAsTheIntr
 }
 
 func TestTheToolDescriptionsAndTheInstructionsUseTheNewWordsAndTheStatusToolIsDescribed(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	p := w.startMCP(t.TempDir())
 	handshake := p.handshake("claude-code", "2.1.296")
@@ -1050,6 +1072,7 @@ func TestTheToolDescriptionsAndTheInstructionsUseTheNewWordsAndTheStatusToolIsDe
 }
 
 func TestTheAgentListAndTheRegisterAndAttachAnswersCarryOnlyTheNewKeys(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.registerWithProject("alpha", "landline")
 	status, text := w.post("/v1/register", secret, map[string]string{"id": "bravo", "harness": "claude-code", "host": "mac", "project": "landline"})
@@ -1080,6 +1103,7 @@ func TestTheAgentListAndTheRegisterAndAttachAnswersCarryOnlyTheNewKeys(t *testin
 }
 
 func TestARepeatedRegisterCallInARepositoryKeepsSayingTheProjectCameFromTheRepository(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	repo := newGitRepos(t)
 	p := w.startMCP(repo.sub)
@@ -1093,6 +1117,7 @@ func TestARepeatedRegisterCallInARepositoryKeepsSayingTheProjectCameFromTheRepos
 }
 
 func TestARegisterCallDoesNotClearOrChangeTheTask(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	p, id := w.selfRegistered("demo-folder", "claude-code")
 	if got := p.tool("landline_status", `{"task":"keep this goal"}`); got != "task: keep this goal" {
@@ -1110,6 +1135,7 @@ func TestARegisterCallDoesNotClearOrChangeTheTask(t *testing.T) {
 }
 
 func TestTheRegisterLineShowsTheTaskTheProcessSetAndSaysNoneAgainAfterAClear(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	p, id := w.selfRegistered("demo-folder", "claude-code")
 	if got := p.tool("landline_status", `{"task":"x y"}`); got != "task: x y" {

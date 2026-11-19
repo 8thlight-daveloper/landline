@@ -28,6 +28,7 @@ type Env struct {
 	Banner    func() string
 
 	processGetenv func(string) string
+	configProblem error
 }
 
 func (e Env) processEnvironment(key string) string {
@@ -60,11 +61,12 @@ const Usage = `usage: landline <command> [flags]
   send      --as N --to X [--thread T] [--kind K] [--reply-to ID] <body, or - for stdin>
             --to takes the id of one agent, as "landline agents" lists it. The agent must be connected, or the send fails
   log       [--after SEQ]
-  join      <switchboard address>   save a switchboard address and its secret, for a switchboard on another machine
+  join      <host:port>   save a switchboard address and its secret, for a switchboard on another machine
   version   print the version and the build
 
 --as defaults to LANDLINE_AS. The switchboard address and secret come from LANDLINE_URL and LANDLINE_SECRET, or from the file
-that "landline join" and "landline server up" save, readable only by you.
+that "landline server join" and "landline server up" save, readable only by you. The file is ~/.config/landline/config.toml.
+It holds secret, host, and port. Without it the address is 127.0.0.1 at LANDLINE_PORT or 8787.
 `
 
 func Run(args []string, env Env) int {
@@ -76,6 +78,10 @@ func Run(args []string, env Env) int {
 	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
 		showUsage(env, env.Stdout)
 		return 0
+	}
+	if readsConfig(args) && env.configProblem != nil {
+		fmt.Fprintln(env.Stderr, "landline:", env.configProblem)
+		return 1
 	}
 	var err error
 	switch args[0] {
@@ -102,6 +108,16 @@ func Run(args []string, env Env) int {
 		return 1
 	}
 	return 0
+}
+
+func readsConfig(args []string) bool {
+	switch args[0] {
+	case "register", "log", "join":
+		return true
+	case "server":
+		return len(args) > 1 && args[1] != "down" && args[1] != "log" && args[1] != "join"
+	}
+	return false
 }
 
 func showUsage(env Env, out io.Writer) {

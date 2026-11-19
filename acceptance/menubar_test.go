@@ -13,6 +13,7 @@ import (
 const menubarVersion = "0.2.0"
 
 func TestMenubarVersionPrintsOneLineWithItsOwnNameAndNoBanner(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct{ flags, want string }{
 		"clean":                {flagsFor(menubarVersion, stampCommit, stampDate), "landline-menubar 0.2.0 (commit " + stampCommit + ", built " + stampDate + ")"},
 		"dirty":                {flagsFor(menubarVersion, stampCommit+routeDirtyTag, ""), "landline-menubar 0.2.0 (commit " + stampCommit + routeDirtyTag + ")"},
@@ -31,6 +32,7 @@ func TestMenubarVersionPrintsOneLineWithItsOwnNameAndNoBanner(t *testing.T) {
 }
 
 func TestMenubarVersionNeedsNoSwitchboardNoSecretAndNoConfigFile(t *testing.T) {
+	t.Parallel()
 	rig := newMenubarRig(t, flagsFor(menubarVersion, stampCommit, stampDate), "", landlineMissing)
 	result := rig.run(t, "version")
 	if result.code != 0 || !strings.HasPrefix(result.stdout, "landline-menubar "+menubarVersion) {
@@ -39,6 +41,7 @@ func TestMenubarVersionNeedsNoSwitchboardNoSecretAndNoConfigFile(t *testing.T) {
 }
 
 func TestMenubarHelpPrintsTheUsageOnStandardOutputAndExitsZero(t *testing.T) {
+	t.Parallel()
 	rig := newMenubarRig(t, defaultFlags(t), "", landlineMissing)
 	for _, args := range [][]string{{"-h"}, {"--help"}} {
 		result := rig.run(t, args...)
@@ -54,6 +57,7 @@ func TestMenubarHelpPrintsTheUsageOnStandardOutputAndExitsZero(t *testing.T) {
 }
 
 func TestMenubarRefusesAnUnknownCommandAndUnknownFlagsWithExitTwoAndTheUsageOnStandardError(t *testing.T) {
+	t.Parallel()
 	rig := newMenubarRig(t, defaultFlags(t), deadAddress(t), landlineMissing)
 	for _, args := range [][]string{{"bogus"}, {"menu", "--bogus"}, {"--bogus"}, {"agents"}} {
 		result := rig.run(t, args...)
@@ -64,6 +68,7 @@ func TestMenubarRefusesAnUnknownCommandAndUnknownFlagsWithExitTwoAndTheUsageOnSt
 }
 
 func TestMenubarIntervalHasAFloorOfFiveHundredMillisecondsAndMustBeADuration(t *testing.T) {
+	t.Parallel()
 	rig := newMenubarRig(t, defaultFlags(t), deadAddress(t), landlineMissing)
 	for _, args := range [][]string{
 		{"--interval", "100ms", "menu", "--text"},
@@ -97,6 +102,7 @@ func TestMenubarIntervalHasAFloorOfFiveHundredMillisecondsAndMustBeADuration(t *
 }
 
 func TestMenuTextWithNoSwitchboardListeningIsAStateAndNotAnError(t *testing.T) {
+	t.Parallel()
 	address := deadAddress(t)
 	rig := newMenubarRig(t, defaultFlags(t), address, landlineNextToBinary)
 	result := rig.run(t, "menu", "--text")
@@ -107,6 +113,7 @@ func TestMenuTextWithNoSwitchboardListeningIsAStateAndNotAnError(t *testing.T) {
 }
 
 func TestMenuTextAgainstARealSwitchboardWithNoAgentsShowsTheMarkWithNoCountAndTheBuildsOfBothSides(t *testing.T) {
+	t.Parallel()
 	flags := flagsFor(menubarVersion, stampCommit, stampDate)
 	w := startHub(t, buildStamped(t, menubarVersion, stampCommit, stampDate), t.TempDir(), "")
 	rig := newMenubarRig(t, flags, w.url, landlineNextToBinary)
@@ -117,6 +124,7 @@ func TestMenuTextAgainstARealSwitchboardWithNoAgentsShowsTheMarkWithNoCountAndTh
 }
 
 func TestMenuTextShowsTheVersionOnlyBuildsOfAReleaseAndDevForAnUnstampedSwitchboardAndApp(t *testing.T) {
+	t.Parallel()
 	released := startHub(t, build(t), t.TempDir(), "")
 	rig := newMenubarRig(t, defaultFlags(t), released.url, landlineNextToBinary)
 	want := expectedMenu("jack", nil, localSwitchboard(released.url, true, switchboardBuildLine(releaseVersion(t), "")), menubarBuildLine(releaseVersion(t), ""))
@@ -132,6 +140,7 @@ func TestMenuTextShowsTheVersionOnlyBuildsOfAReleaseAndDevForAnUnstampedSwitchbo
 }
 
 func TestMenuTextSaysTheSwitchboardDiffersFromTheAppWhenTheCommitsDifferAndOnlyThen(t *testing.T) {
+	t.Parallel()
 	otherCommit := strings.Repeat("f", 40)
 	w := startHub(t, buildStamped(t, menubarVersion, stampCommit, stampDate), t.TempDir(), "")
 	rig := newMenubarRig(t, flagsFor(menubarVersion, otherCommit, stampDate), w.url, landlineNextToBinary)
@@ -146,6 +155,7 @@ func TestMenuTextSaysTheSwitchboardDiffersFromTheAppWhenTheCommitsDifferAndOnlyT
 }
 
 func TestMenuTextAgainstAFakeSwitchboardShowsDirtyCommitsDevAnd404AsUnknown(t *testing.T) {
+	t.Parallel()
 	flags := flagsFor(menubarVersion, stampCommit, stampDate)
 	cases := map[string]struct {
 		status int
@@ -171,6 +181,7 @@ func TestMenuTextAgainstAFakeSwitchboardShowsDirtyCommitsDevAnd404AsUnknown(t *t
 }
 
 func TestMenuTextTreatsAnAnswerOfNoBuildAsUnknownAndKeepsTheRestOfTheMenuExactly(t *testing.T) {
+	t.Parallel()
 	fake := newFakeSwitchboard(t, "127.0.0.1", []any{}, http.StatusNotFound, map[string]string{"error": "not found"})
 	rig := newMenubarRig(t, flagsFor(menubarVersion, stampCommit, stampDate), fake.url, landlineNextToBinary)
 	want := expectedMenu("jack", nil, localSwitchboard(fake.url, true, "Switchboard (build unknown)"), menubarBuildLine(menubarVersion, stampCommit))
@@ -180,6 +191,7 @@ func TestMenuTextTreatsAnAnswerOfNoBuildAsUnknownAndKeepsTheRestOfTheMenuExactly
 }
 
 func TestMenuTextSanitizesBuildTextFromAHostileSwitchboardAndCutsTheCommitAfterCleaning(t *testing.T) {
+	t.Parallel()
 	version := "0.2.0\x1b[2J\nFAKE"
 	commit := "a1\u2028b\x1b3d4e5f60718293a4b5c6d7e8f9012345678-dirty"
 	fake := newFakeSwitchboard(t, "127.0.0.1", []any{}, 200, fakeBuild(version, commit, "2026\n-11\x1b[2J"))
@@ -213,6 +225,7 @@ func fixedAgents() []map[string]any {
 }
 
 func TestMenuTextListsAgentRowsInTheScreensOrderWithTheirFieldsAndNoFolderOrBranchOnTheRow(t *testing.T) {
+	t.Parallel()
 	fake := newFakeSwitchboard(t, "127.0.0.1", fixedAgents(), 200, fakeBuild(menubarVersion, stampCommit, stampDate))
 	rig := newMenubarRig(t, flagsFor(menubarVersion, stampCommit, stampDate), fake.url, landlineNextToBinary)
 	var head []string
@@ -235,6 +248,7 @@ func TestMenuTextListsAgentRowsInTheScreensOrderWithTheirFieldsAndNoFolderOrBran
 }
 
 func TestMenuTextCountsOnlyConnectedAgentsAndShowsNoCountWhenNoneIsConnected(t *testing.T) {
+	t.Parallel()
 	flags := defaultFlags(t)
 	none := newFakeSwitchboard(t, "127.0.0.1", []map[string]any{fakeAgent("echo", false, nil), fakeAgent("delta", false, nil)}, 200, fakeBuild(menubarVersion, "", ""))
 	if got := newMenubarRig(t, flags, none.url, landlineNextToBinary).menu(t); !strings.HasPrefix(got, "icon: jack\n") {
@@ -255,6 +269,7 @@ func TestMenuTextCountsOnlyConnectedAgentsAndShowsNoCountWhenNoneIsConnected(t *
 }
 
 func TestMenuTextSanitizesEveryFieldOfAHostileAgentTheWayTheScreenDoes(t *testing.T) {
+	t.Parallel()
 	hostile := func(name string) string { return name + "\x1b[31m\nX\r\t\u2028\u2029\u202e\u200b\x07\x00end" }
 	fields := map[string]any{
 		"harness": hostile("harness"), "host": hostile("host"), "model": hostile("model"), "effort": hostile("effort"),
@@ -278,6 +293,7 @@ func TestMenuTextSanitizesEveryFieldOfAHostileAgentTheWayTheScreenDoes(t *testin
 }
 
 func TestMenuTextKeepsEveryAgentOnItsOwnLinesWhateverTheLengthOfItsValues(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("x", 5000)
 	agents := []map[string]any{fakeAgent("alpha", true, map[string]any{"project": long, "task": long, "folder": "/" + long, "model": long, "branch": long})}
 	fake := newFakeSwitchboard(t, "127.0.0.1", agents, 200, fakeBuild(menubarVersion, "", ""))
@@ -294,6 +310,7 @@ func TestMenuTextKeepsEveryAgentOnItsOwnLinesWhateverTheLengthOfItsValues(t *tes
 }
 
 func TestMenuTextRegistersAnObserverOfKindMenubarAndPollsWithItsTokenAndNeverTheSecret(t *testing.T) {
+	t.Parallel()
 	fake := newFakeSwitchboard(t, "127.0.0.1", fixedAgents(), 200, fakeBuild(menubarVersion, stampCommit, stampDate))
 	rig := newMenubarRig(t, flagsFor(menubarVersion, stampCommit, stampDate), fake.url, landlineNextToBinary)
 	result := rig.run(t, "menu", "--text")
@@ -330,6 +347,7 @@ func TestMenuTextRegistersAnObserverOfKindMenubarAndPollsWithItsTokenAndNeverThe
 }
 
 func TestMenuTextRegistersAgainOnA401AndShowsTheListFromTheNewToken(t *testing.T) {
+	t.Parallel()
 	fake := newFakeSwitchboard(t, "127.0.0.1", []map[string]any{fakeAgent("alpha", true, nil)}, 200, fakeBuild(menubarVersion, "", ""))
 	fake.staleFirst = true
 	rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
@@ -358,6 +376,7 @@ func TestMenuTextRegistersAgainOnA401AndShowsTheListFromTheNewToken(t *testing.T
 }
 
 func TestMenuTextReadsTheConfigFileWhenTheEnvironmentHasNoAddressAndNoSecretAndTheEnvironmentWinsOtherwise(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	flags := defaultFlags(t)
@@ -366,8 +385,11 @@ func TestMenuTextReadsTheConfigFileWhenTheEnvironmentHasNoAddressAndNoSecretAndT
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		raw, _ := json.Marshal(map[string]string{"url": url, "secret": fileSecret})
-		if err := os.WriteFile(filepath.Join(dir, "config.json"), raw, 0o600); err != nil {
+		host, port := "", ""
+		if url != "" {
+			host, port = hostAndPort(t, url)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(tomlFor(host, port, fileSecret)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -399,6 +421,7 @@ func unreachableMenu(t *testing.T, url string) string {
 }
 
 func TestMenuTextTreatsEveryFailureToGetTheAgentListAsTheUnreachableState(t *testing.T) {
+	t.Parallel()
 	type failure struct {
 		prepare func(f *fakeSwitchboard)
 		secret  string
@@ -431,6 +454,7 @@ func TestMenuTextTreatsEveryFailureToGetTheAgentListAsTheUnreachableState(t *tes
 }
 
 func TestMenuTextWithNoSecretAtAllIsTheUnreachableState(t *testing.T) {
+	t.Parallel()
 	fake := newFakeSwitchboard(t, "127.0.0.1", []map[string]any{fakeAgent("alpha", true, nil)}, 200, fakeBuild(menubarVersion, "", ""))
 	rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
 	rig.env = withEnv(rig.env, "LANDLINE_SECRET=")
@@ -441,6 +465,7 @@ func TestMenuTextWithNoSecretAtAllIsTheUnreachableState(t *testing.T) {
 }
 
 func TestMenuTextTreatsAFailureOfTheBuildRouteAloneAsAnUnknownBuildAndChangesNothingElse(t *testing.T) {
+	t.Parallel()
 	agents := []map[string]any{fakeAgent("alpha", true, nil), fakeAgent("echo", false, nil)}
 	cases := map[string]struct {
 		status int
@@ -469,6 +494,7 @@ func TestMenuTextTreatsAFailureOfTheBuildRouteAloneAsAnUnknownBuildAndChangesNot
 }
 
 func TestMenuTextShowsDiffersOnlyWhenBothCommitsAreNonEmptyAndDiffer(t *testing.T) {
+	t.Parallel()
 	other := strings.Repeat("e", 40)
 	cases := map[string]struct {
 		appFlags string
@@ -494,6 +520,7 @@ func TestMenuTextShowsDiffersOnlyWhenBothCommitsAreNonEmptyAndDiffer(t *testing.
 }
 
 func TestMenuTextAgainstARealSwitchboardListsConnectedFirstThenProjectThenIDWithMarkersAndTheCount(t *testing.T) {
+	t.Parallel()
 	menubarBinary(t, defaultFlags(t))
 	w := start(t)
 	w.registerWithProject("delta", "yankee")
@@ -581,6 +608,7 @@ func TestMenuTextAgainstARealSwitchboardListsConnectedFirstThenProjectThenIDWith
 }
 
 func TestMenuTextShowsAClearedTaskAsNoTaskLineAndAChangedTaskAsTheNewText(t *testing.T) {
+	t.Parallel()
 	menubarBinary(t, defaultFlags(t))
 	w := start(t)
 	id := w.selfRegisteredWithProject("task-x", "demo")
@@ -628,6 +656,7 @@ func rowBlock(lines []string, title string) []string {
 }
 
 func TestMenuTextTwiceAgainstTheSameStatePrintsIdenticalBytes(t *testing.T) {
+	t.Parallel()
 	menubarBinary(t, defaultFlags(t))
 	w := start(t)
 	w.registerWithProject("delta", "yankee")
@@ -646,6 +675,7 @@ func TestMenuTextTwiceAgainstTheSameStatePrintsIdenticalBytes(t *testing.T) {
 }
 
 func TestMenuTextEnablesStartAloneWhenUnreachableAndStopAndRestartWhenReachableWhereverLandlineIsFound(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	flags := defaultFlags(t)
 	dead := deadAddress(t)
@@ -664,6 +694,7 @@ func TestMenuTextEnablesStartAloneWhenUnreachableAndStopAndRestartWhenReachableW
 }
 
 func TestMenuTextDisablesStartStopAndRestartAndSaysToRunJustInstallWhenLandlineIsNeitherNextToTheBinaryNorOnThePath(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	flags := defaultFlags(t)
 	dead := deadAddress(t)
@@ -683,14 +714,15 @@ func remoteItemsFor(address string) switchboardItems {
 	return switchboardItems{first: "Remote switchboard at " + address, build: "Switchboard (build unknown)"}
 }
 
-func TestMenuTextTreatsAnAddressThatIsNotLoopbackAsARemoteSwitchboardWithAllThreeServerItemsDisabled(t *testing.T) {
+func TestMenuTextTreatsAnAddressThatIsNotThisMachinesAsARemoteSwitchboardWithAllThreeServerItemsDisabled(t *testing.T) {
+	t.Parallel()
 	flags := defaultFlags(t)
-	var closed []string
-	if ip := nonLoopbackAddress(); ip != "" {
-		closed = append(closed, "http://"+net.JoinHostPort(ip, freePort(t)))
+	remotes := []string{
+		"http://[2001:db8::10]:8787",
+		"http://" + net.JoinHostPort(unownedAddress, "8787"),
+		"http://" + net.JoinHostPort(unresolvableHost, "8787"),
 	}
-	literal := "http://[2001:db8::10]:8787"
-	for _, remote := range closed {
+	for _, remote := range remotes {
 		want := expectedMenu("jack dimmed", unreachableHead(), remoteItemsFor(remote), menubarBuildLine(releaseVersion(t), ""))
 		for _, where := range []landlineAt{landlineNextToBinary, landlineOnPath, landlineMissing} {
 			if got := newMenubarRig(t, flags, remote, where).menu(t); got != want {
@@ -698,12 +730,31 @@ func TestMenuTextTreatsAnAddressThatIsNotLoopbackAsARemoteSwitchboardWithAllThre
 			}
 		}
 	}
-	want := expectedMenu("jack dimmed", unreachableHead(), remoteItemsFor(literal), menubarBuildLine(releaseVersion(t), ""))
-	if got := newMenubarRig(t, flags, literal, landlineNextToBinary).menu(t); got != want {
-		t.Errorf("%s:\n%s\nwant:\n%s", literal, got, want)
+}
+
+func TestMenuTextTreatsAnAddressOfThisMachineThatIsNotLoopbackAsLocalAndEnablesStartWhenNothingAnswers(t *testing.T) {
+	t.Parallel()
+	own := nonLoopbackAddress()
+	if own == "" {
+		t.Skip("this machine has no non-loopback IPv4 address")
 	}
-	if len(closed) == 0 {
-		t.Log("this machine has no non-loopback IPv4 address, so only the documentation-range literal ran")
+	flags := defaultFlags(t)
+	address := "http://" + net.JoinHostPort(own, freePort(t))
+	want := expectedMenu("jack dimmed", unreachableHead(), localSwitchboard(address, false, "Switchboard (build unknown)"), menubarBuildLine(releaseVersion(t), ""))
+	for _, where := range []landlineAt{landlineNextToBinary, landlineOnPath} {
+		if got := newMenubarRig(t, flags, address, where).menu(t); got != want {
+			t.Errorf("%s, landline at %d:\n%s\nwant:\n%s", address, where, got, want)
+		}
+	}
+}
+
+func TestMenuTextTreatsAHostNameThatResolvesToAnAddressOfThisMachineAsLocal(t *testing.T) {
+	t.Parallel()
+	name := ownNamedHost(t)
+	address := "http://" + net.JoinHostPort(name, freePort(t))
+	want := expectedMenu("jack dimmed", unreachableHead(), localSwitchboard(address, false, "Switchboard (build unknown)"), menubarBuildLine(releaseVersion(t), ""))
+	if got := newMenubarRig(t, defaultFlags(t), address, landlineNextToBinary).menu(t); got != want {
+		t.Errorf("%s:\n%s\nwant:\n%s", address, got, want)
 	}
 }
 
@@ -714,6 +765,7 @@ func freePort(t *testing.T) string {
 }
 
 func TestMenuTextTreatsLocalhostAndIPv6LoopbackAndATrailingSlashAsLocal(t *testing.T) {
+	t.Parallel()
 	flags := defaultFlags(t)
 	for _, address := range []string{"http://localhost:" + freePort(t), "http://[::1]:" + freePort(t), "http://127.0.0.2:" + freePort(t)} {
 		got := newMenubarRig(t, flags, address, landlineNextToBinary).menu(t)
@@ -726,12 +778,13 @@ func TestMenuTextTreatsLocalhostAndIPv6LoopbackAndATrailingSlashAsLocal(t *testi
 	got := newMenubarRig(t, flags, fake.url+"/", landlineNextToBinary).menu(t)
 	hostPort := strings.TrimPrefix(fake.url, "http://")
 	if !strings.HasPrefix(got, "icon: jack\n") || !strings.Contains(got, "\n  Running at http://"+hostPort) ||
-		!strings.Contains(got, "\n  Start"+disabledMark+"\n  Stop\n  Restart\n") {
+		!strings.Contains(got, "\n  Start"+disabledMark+"\n  Stop\n  Restart\n  Rotate secret…\n") {
 		t.Errorf("a trailing slash made the switchboard look remote or unreachable:\n%s", got)
 	}
 }
 
 func TestMenuTextFindsLandlineOnThePathThatTheLoginShellPrintsWhenItsOwnPathIsEmpty(t *testing.T) {
+	t.Parallel()
 	dead := deadAddress(t)
 	flags := defaultFlags(t)
 	withLandline := t.TempDir()
@@ -764,6 +817,7 @@ func TestMenuTextFindsLandlineOnThePathThatTheLoginShellPrintsWhenItsOwnPathIsEm
 }
 
 func TestMenuTextShowsOnlyTheMenubarBuildFormsOfTheDecisionRecords(t *testing.T) {
+	t.Parallel()
 	dead := deadAddress(t)
 	cases := map[string]struct{ flags, line string }{
 		"clean":       {flagsFor(menubarVersion, stampCommit, stampDate), "Menubar 0.2.0 (a1b2c3d)"},
@@ -783,6 +837,7 @@ func TestMenuTextShowsOnlyTheMenubarBuildFormsOfTheDecisionRecords(t *testing.T)
 }
 
 func TestMenuTextRowShapesAreExactlyTheSolidAndTheHollowCircleAndTheTitleHasNoStateWord(t *testing.T) {
+	t.Parallel()
 	agents := []map[string]any{fakeAgent("alpha", true, nil), fakeAgent("bravo", false, nil)}
 	fake := newFakeSwitchboard(t, "127.0.0.1", agents, 200, fakeBuild(menubarVersion, "", ""))
 	got := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary).menu(t)
@@ -802,6 +857,7 @@ func TestMenuTextRowShapesAreExactlyTheSolidAndTheHollowCircleAndTheTitleHasNoSt
 }
 
 func TestMenuTextShowsAnAgentWithATaskAndNoProjectAsItsIDAloneWithAStateIDAndTaskSubmenu(t *testing.T) {
+	t.Parallel()
 	agents := []map[string]any{fakeAgent("alpha", true, map[string]any{"task": "docs only"})}
 	fake := newFakeSwitchboard(t, "127.0.0.1", agents, 200, fakeBuild(menubarVersion, "", ""))
 	got := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary).menu(t)
@@ -812,5 +868,68 @@ func TestMenuTextShowsAnAgentWithATaskAndNoProjectAsItsIDAloneWithAStateIDAndTas
 	}
 	if strings.Contains(got, "Project:") {
 		t.Errorf("an agent with no project shows a Project line:\n%s", got)
+	}
+}
+
+func TestMenuTextReadsConfigTomlWithCommentsBlankLinesAndUnknownKeys(t *testing.T) {
+	t.Parallel()
+	w := start(t)
+	host, port := hostAndPort(t, w.addr)
+	rig := newMenubarRig(t, defaultFlags(t), "", landlineNextToBinary)
+	writeConfigFile(t, rig.home, "config.toml", "# by hand\n\nextra = \"x\"\nsecret = \""+secret+"\"\nhost = \""+host+"\"\n\n# the port\nport = "+port+"\n")
+	if got := rig.menu(t); !strings.HasPrefix(got, "icon: jack\n") || !strings.Contains(got, "Running at "+w.url) {
+		t.Errorf("the config file with comments and an unknown key was not read:\n%s", got)
+	}
+}
+
+func TestMenuTextReadsAnOldConfigJSONWhenNoConfigTomlExistsAndPrefersConfigTomlWhenBothExist(t *testing.T) {
+	t.Parallel()
+	w := start(t)
+	host, port := hostAndPort(t, w.addr)
+	onlyJSON := newMenubarRig(t, defaultFlags(t), "", landlineNextToBinary)
+	writeConfigFile(t, onlyJSON.home, "config.json", `{"url":"`+w.url+`","secret":"`+secret+`"}`)
+	if got := onlyJSON.menu(t); !strings.HasPrefix(got, "icon: jack\n") || !strings.Contains(got, "Running at "+w.url) {
+		t.Errorf("config.json was not read:\n%s", got)
+	}
+	both := newMenubarRig(t, defaultFlags(t), "", landlineNextToBinary)
+	writeConfigFile(t, both.home, "config.toml", tomlFor(host, port, secret))
+	writeConfigFile(t, both.home, "config.json", `{"url":"`+deadAddress(t)+`","secret":"`+strings.Repeat("c", 32)+`"}`)
+	if got := both.menu(t); !strings.HasPrefix(got, "icon: jack\n") || !strings.Contains(got, "Running at "+w.url) {
+		t.Errorf("config.toml did not win over config.json:\n%s", got)
+	}
+}
+
+func TestMenuTextWithNoFileReachesLoopbackAtTheLandlinePortWithTheEnvironmentSecret(t *testing.T) {
+	t.Parallel()
+	w := start(t)
+	_, port := hostAndPort(t, w.addr)
+	rig := newMenubarRig(t, defaultFlags(t), "", landlineNextToBinary)
+	rig.env = withEnv(rig.env, "LANDLINE_PORT="+port, "LANDLINE_SECRET="+secret)
+	if got := rig.menu(t); !strings.HasPrefix(got, "icon: jack\n") || !strings.Contains(got, "Running at "+w.url) {
+		t.Errorf("the default address and LANDLINE_PORT were not used:\n%s", got)
+	}
+}
+
+func TestMenuTextTreatsAConfigFileWithABadLineAsUnreadableEvenWhenAnHTTPSwitchboardAnswersAtItsHostAndPort(t *testing.T) {
+	t.Parallel()
+	w := start(t)
+	host, port := hostAndPort(t, w.addr)
+	good := tomlFor(host, port, secret)
+	for name, content := range map[string]string{
+		"a string port":        tomlFor(host, "", secret) + `port = "` + port + `"` + "\n",
+		"a section header":     good + "[section]\n",
+		"a trailing comment":   good + "extra = 1 # note\n",
+		"a line that is no kv": good + "not toml at all\n",
+	} {
+		rig := newMenubarRig(t, defaultFlags(t), "", landlineNextToBinary)
+		writeConfigFile(t, rig.home, "config.toml", content)
+		if got := rig.menu(t); !strings.HasPrefix(got, "icon: jack dimmed\n") || strings.Contains(got, "Running at") {
+			t.Errorf("%s: the menu read a file with a bad line:\n%s", name, got)
+		}
+	}
+	rig := newMenubarRig(t, defaultFlags(t), "", landlineNextToBinary)
+	writeConfigFile(t, rig.home, "config.json", `{"url":"https://`+w.addr+`","secret":"`+secret+`"}`)
+	if got := rig.menu(t); !strings.HasPrefix(got, "icon: jack dimmed\n") || strings.Contains(got, "Running at") {
+		t.Errorf("an https url in config.json was used:\n%s", got)
 	}
 }

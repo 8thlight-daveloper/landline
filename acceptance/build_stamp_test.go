@@ -81,6 +81,7 @@ func absent(t *testing.T, entry map[string]any, keys ...string) {
 }
 
 func TestACleanStampedBuildRegistersItsExactCommitAndDateInTheWireListAndTheCliAndToolTextShowTheShortCommitAndTheDateInOrder(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	_, agentID := w.selfRegistered("demo-folder", "claude-code")
@@ -114,6 +115,7 @@ func TestACleanStampedBuildRegistersItsExactCommitAndDateInTheWireListAndTheCliA
 }
 
 func TestADirtyStampedBuildRegistersTheDirtyCommitAndNoDateAndShowsTheShortDirtyForm(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit+"-dirty", "")
 	w := startHub(t, bin, t.TempDir(), "")
 	_, agentID := w.selfRegistered("demo-folder", "claude-code")
@@ -134,6 +136,7 @@ func TestADirtyStampedBuildRegistersTheDirtyCommitAndNoDateAndShowsTheShortDirty
 }
 
 func TestAPlainBuildShowsDevAndNoCommitOrDateAnywhere(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "", "", "")
 	for _, name := range []string{landlineName, mcpName, switchboardName} {
 		if got := lastLine(versionOutput(t, filepath.Join(filepath.Dir(bin), name))); got != name+" dev" {
@@ -158,6 +161,7 @@ func TestAPlainBuildShowsDevAndNoCommitOrDateAnywhere(t *testing.T) {
 }
 
 func TestEachBinaryPrintsItsOwnVersionLineForTheMatchingLinkerValues(t *testing.T) {
+	t.Parallel()
 	for name, form := range map[string]struct{ version, commit, date, tail string }{
 		"clean":                      {"0.1.0", stampCommit, stampDate, "0.1.0 (commit " + stampCommit + ", built " + stampDate + ")"},
 		"dirty":                      {"0.1.0", stampCommit + "-dirty", "", "0.1.0 (commit " + stampCommit + "-dirty)"},
@@ -183,6 +187,7 @@ func TestEachBinaryPrintsItsOwnVersionLineForTheMatchingLinkerValues(t *testing.
 }
 
 func TestLandlineMCPAndTheSwitchboardPrintOneVersionLineOnStandardOutputAndNothingOnStandardError(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	for _, name := range []string{mcpName, switchboardName} {
 		result := runBin(t, filepath.Join(filepath.Dir(bin), name), isolatedEnv(t.TempDir()), "version")
@@ -194,6 +199,7 @@ func TestLandlineMCPAndTheSwitchboardPrintOneVersionLineOnStandardOutputAndNothi
 }
 
 func TestADirtyBuildPrintsNoDateEvenWhenALinkerValueGivesOne(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit+"-dirty", stampDate)
 	want := "0.1.0 (commit " + stampCommit + "-dirty)"
 	if got := lastLine(versionOutput(t, bin)); got != "landline "+want {
@@ -207,6 +213,7 @@ func TestADirtyBuildPrintsNoDateEvenWhenALinkerValueGivesOne(t *testing.T) {
 }
 
 func TestNoFlagEnvironmentVariableOrRegisterArgumentOverridesTheBuildCommitOrDate(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	forged := append([]string{}, w.env...)
@@ -273,6 +280,7 @@ func TestNoFlagEnvironmentVariableOrRegisterArgumentOverridesTheBuildCommitOrDat
 }
 
 func TestABadCommitOrDateOverRawHTTPAnswers400AndLeavesTheListUnchangedAndAGoodOneIsAccepted(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	good := map[string]string{"id": "alpha", "harness": "codex", "host": "mac", "landline_commit": stampCommit, "landline_date": stampDate}
 	if status, body := w.post("/v1/register", secret, good); status != http.StatusOK {
@@ -309,6 +317,7 @@ func TestABadCommitOrDateOverRawHTTPAnswers400AndLeavesTheListUnchangedAndAGoodO
 }
 
 func TestAnMCPProcessBuiltWithABadCommitOrDateNeverAppearsAndItsToolCallReturnsTheHubsError(t *testing.T) {
+	t.Parallel()
 	for name, values := range map[string][2]string{
 		"a control character in the commit": {"ab\x01cd", ""},
 		"a control character in the date":   {stampCommit, "2026\x01"},
@@ -335,6 +344,7 @@ func TestAnMCPProcessBuiltWithABadCommitOrDateNeverAppearsAndItsToolCallReturnsT
 }
 
 func TestAnMCPProcessBuiltWithABadCommitOrDateGetsTheHubsErrorFromTheLandlineRegisterCallItself(t *testing.T) {
+	t.Parallel()
 	for name, values := range map[string][2]string{
 		"a control character in the commit": {"ab\x01cd", ""},
 		"a control character in the date":   {stampCommit, "2026\x01"},
@@ -360,6 +370,7 @@ func TestAnMCPProcessBuiltWithABadCommitOrDateGetsTheHubsErrorFromTheLandlineReg
 }
 
 func TestARegistrationByNameReplacesTheCommitAndTheDateAndAnEmptyValueClearsThemWhileASeedReplacesNothing(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	observer := w.registerObserver("tui")
 	register := func(fields map[string]string) {
@@ -412,6 +423,7 @@ func TestARegistrationByNameReplacesTheCommitAndTheDateAndAnEmptyValueClearsThem
 }
 
 func TestAHandRegisteredNameShowsNeitherACommitNorADateEvenOnAStampedBuild(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	w.register("alpha")
@@ -422,6 +434,7 @@ func TestAHandRegisteredNameShowsNeitherACommitNorADateEvenOnAStampedBuild(t *te
 }
 
 func TestLandlineAgentsJSONCarriesTheExactCommitAndDateAndOmitsThemForAnAgentWithNone(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	_, stamped := w.selfRegistered("stamped-folder", "claude-code")
@@ -453,6 +466,7 @@ func TestLandlineAgentsJSONCarriesTheExactCommitAndDateAndOmitsThemForAnAgentWit
 }
 
 func TestLandlineAgentsJSONCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit+"-dirty", "")
 	w := startHub(t, bin, t.TempDir(), "")
 	_, agentID := w.selfRegistered("stamped-folder", "claude-code")
@@ -474,6 +488,7 @@ func TestLandlineAgentsJSONCarriesTheFullDirtyCommitAndNoDate(t *testing.T) {
 }
 
 func TestLandlineAgentsTextShowsTheShortCommitAndTheDateInTheAttributeFieldOfTheRow(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	_, agentID := w.selfRegistered("stamped-folder", "claude-code")
@@ -500,6 +515,7 @@ func TestLandlineAgentsTextShowsTheShortCommitAndTheDateInTheAttributeFieldOfThe
 }
 
 func TestTheRegisteredBuildIsTheOneOfLandlineMCPAndNotTheOneOfTheSwitchboard(t *testing.T) {
+	t.Parallel()
 	switchboardBuild := buildStamped(t, "0.1.0", stampCommit, stampDate)
 	otherCommit := strings.Repeat("9", 40)
 	mcpBuild := buildStamped(t, "0.1.0", otherCommit, "2001-02-02T19:05:06Z")

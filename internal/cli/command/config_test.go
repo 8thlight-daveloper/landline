@@ -7,45 +7,142 @@ import (
 	"testing"
 )
 
+const longSecret = "0123456789abcdef"
+
+func envFor(dir string, values map[string]string) Env {
+	return Env{ConfigDir: dir, Getenv: func(key string) string { return values[key] }}
+}
+
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTheSavedConfigIsPrivateAndReadBack(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "a", "b")
 	env := Env{ConfigDir: dir}
-	if err := SaveConfig(env, Config{URL: "http://127.0.0.1:9", Secret: "0123456789abcdef"}); err != nil {
+	if err := SaveConfig(env, Config{Host: "tailnet-mac", Port: 9, Secret: longSecret}); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(filepath.Join(dir, "config.json"))
+	info, err := os.Stat(filepath.Join(dir, "config.toml"))
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("%v %v", info, err)
 	}
 	if dirInfo, _ := os.Stat(dir); dirInfo.Mode().Perm() != 0o700 {
 		t.Fatalf("folder %v", dirInfo.Mode().Perm())
 	}
-	if got := LoadConfig(env); got.URL != "http://127.0.0.1:9" || got.Secret != "0123456789abcdef" {
+	raw, _ := os.ReadFile(filepath.Join(dir, "config.toml"))
+	if string(raw) != "secret = \""+longSecret+"\"\nhost = \"tailnet-mac\"\nport = 9\n" {
+		t.Fatalf("%q", raw)
+	}
+	if got, err := ReadConfig(env); err != nil || got != (Config{Host: "tailnet-mac", Port: 9, Secret: longSecret}) {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestSavingOverALooseConfigMakesItPrivateAndKeepsTheOtherLines(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, dir, "config.toml", "# mine\nsecret = \"old\"\nextra = 5\n")
+	writeFile(t, dir, "config.toml.tmp", "x")
+	os.Chmod(filepath.Join(dir, "config.toml.tmp"), 0o666)
+	if err := SaveConfig(Env{ConfigDir: dir}, Config{Secret: longSecret, Host: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(filepath.Join(dir, "config.toml"))
+	raw, _ := os.ReadFile(filepath.Join(dir, "config.toml"))
+	if info.Mode().Perm() != 0o600 || string(raw) != "# mine\nsecret = \""+longSecret+"\"\nextra = 5\nhost = \"h\"\n" {
+		t.Fatalf("%v %q", info.Mode().Perm(), raw)
+	}
+}
+
+func TestSavingOnlyOneKeyLeavesTheOthersAlone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	env := Env{ConfigDir: dir}
+	SaveConfig(env, Config{Host: "tailnet-mac", Port: 9, Secret: longSecret})
+	SaveConfig(env, Config{Port: 10})
+	if got, _ := ReadConfig(env); got != (Config{Host: "tailnet-mac", Port: 10, Secret: longSecret}) {
 		t.Fatalf("%+v", got)
 	}
 }
 
-func TestSavingOverALooseConfigMakesItPrivate(t *testing.T) {
+func TestAnOldConfigJSONIsReadWhenThereIsNoTomlAndTheFirstSaveReplacesIt(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644)
-	os.WriteFile(filepath.Join(dir, "config.json.tmp"), []byte("{}"), 0o666)
-	if err := SaveConfig(Env{ConfigDir: dir}, Config{URL: "http://x:1", Secret: "0123456789abcdef"}); err != nil {
+	writeFile(t, dir, "config.json", `{"url":"http://tailnet-mac:8787/","secret":"`+longSecret+`"}`)
+	env := Env{ConfigDir: dir}
+	if got, err := ReadConfig(env); err != nil || got != (Config{Host: "tailnet-mac", Port: 8787, Secret: longSecret}) {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if err := SaveConfig(env, Config{Port: 9}); err != nil {
 		t.Fatal(err)
 	}
-	if info, _ := os.Stat(filepath.Join(dir, "config.json")); info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode %v", info.Mode().Perm())
+	if _, err := os.Stat(filepath.Join(dir, "config.json")); err == nil {
+		t.Fatal("config.json stayed")
+	}
+	if got, _ := ReadConfig(env); got != (Config{Host: "tailnet-mac", Port: 9, Secret: longSecret}) {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestConfigTomlWinsOverConfigJSONAndAnHTTPSURLIsAnError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, dir, "config.json", `{"url":"http://old:1","secret":"`+longSecret+`"}`)
+	writeFile(t, dir, "config.toml", "host = \"new\"\n")
+	if got, _ := ReadConfig(Env{ConfigDir: dir}); got != (Config{Host: "new"}) {
+		t.Fatalf("%+v", got)
+	}
+	other := t.TempDir()
+	writeFile(t, other, "config.json", `{"url":"https://old:1","secret":"`+longSecret+`"}`)
+	if _, err := ReadConfig(Env{ConfigDir: other}); err == nil || !strings.Contains(err.Error(), "http only") || !strings.Contains(err.Error(), "config.json") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestTheReaderAcceptsBlankLinesCommentsAndUnknownKeysAndRefusesEverythingElseAtItsLine(t *testing.T) {
+	t.Parallel()
+	good := "# note\n\nextra = \"x\"\nother = 5\nsecret = \"" + longSecret + "\"\n  host = \"h\"  \nport = 8787\n"
+	if got, err := parseConfig("f", good); err != nil || got != (Config{Host: "h", Port: 8787, Secret: longSecret}) {
+		t.Fatalf("%+v %v", got, err)
+	}
+	for text, line := range map[string]string{
+		"host = h":                "line 1",
+		"host = 5":                "line 1",
+		"secret = 5":              "line 1",
+		"port = \"8787\"":         "line 1",
+		"port = 0":                "line 1",
+		"port = 65536":            "line 1",
+		"port = 87.87":            "line 1",
+		"port = 8787 # note":      "line 1",
+		"host = 'h'":              "line 1",
+		"[section]":               "line 1",
+		"list = [1, 2]":           "line 1",
+		"just words":              "line 1",
+		"# ok\n\nhost = \"h\"\n!": "line 4",
+	} {
+		_, err := parseConfig("/x/config.toml", text)
+		if err == nil || !strings.Contains(err.Error(), "/x/config.toml line "+line[len("line "):]) {
+			t.Errorf("%q: %v", text, err)
+			continue
+		}
+		for _, echoed := range strings.Fields(strings.ReplaceAll(text, "\n", " ")) {
+			if len(echoed) > 3 && echoed != "port" && echoed != "host" && echoed != "secret" && strings.Contains(err.Error(), echoed) {
+				t.Errorf("%q: the error repeats %q: %v", text, echoed, err)
+			}
+		}
 	}
 }
 
 func TestTheEnvironmentWinsOverTheSavedConfigAndTheConfigFillsTheGaps(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	SaveConfig(Env{ConfigDir: dir}, Config{URL: "http://saved:1", Secret: "saved-secret-0123456789"})
-	get := func(values map[string]string) Env {
-		return withConfig(Env{ConfigDir: dir, Getenv: func(k string) string { return values[k] }})
-	}
+	SaveConfig(Env{ConfigDir: dir}, Config{Host: "saved", Port: 1, Secret: "saved-secret-0123456789"})
+	get := func(values map[string]string) Env { return withConfig(envFor(dir, values)) }
 	if e := get(nil); e.Getenv("LANDLINE_URL") != "http://saved:1" || e.Getenv("LANDLINE_SECRET") != "saved-secret-0123456789" {
 		t.Fatalf("fill: %q %q", e.Getenv("LANDLINE_URL"), e.Getenv("LANDLINE_SECRET"))
 	}
@@ -57,76 +154,80 @@ func TestTheEnvironmentWinsOverTheSavedConfigAndTheConfigFillsTheGaps(t *testing
 	}
 }
 
-func TestTheHubURLDefaultsToLocalhost(t *testing.T) {
+func TestAMalformedConfigIsKeptAsAProblemOfTheEnvironment(t *testing.T) {
 	t.Parallel()
-	if got := HubURL(Env{ConfigDir: t.TempDir()}); got != DefaultURL {
-		t.Fatalf("%q", got)
-	}
 	dir := t.TempDir()
-	SaveConfig(Env{ConfigDir: dir}, Config{URL: "http://tailnet-mac:8787", Secret: "0123456789abcdef"})
-	if got := HubURL(Env{ConfigDir: dir}); got != "http://tailnet-mac:8787" {
-		t.Fatalf("%q", got)
+	writeFile(t, dir, "config.toml", "secret = \"x\"\nbad line\n")
+	if e := withConfig(envFor(dir, nil)); e.configProblem == nil || !strings.Contains(e.configProblem.Error(), "line 2") {
+		t.Fatalf("%v", e.configProblem)
 	}
 }
 
-func TestJoinSavesTheAddressAndSecretAndRefusesBadOnes(t *testing.T) {
+func TestTheHubURLDefaultsToLoopbackAtTheLandlinePortAndTheSavedPortWinsOverIt(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	var out, errOut strings.Builder
-	env := Env{ConfigDir: dir, Stdout: &out, Stderr: &errOut, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
-	if code := Run([]string{"join", "http://tailnet-mac:8787/"}, env); code != 0 {
-		t.Fatalf("%d %s", code, errOut.String())
+	withPort := func(dir, port string) Env { return envFor(dir, map[string]string{"LANDLINE_PORT": port}) }
+	empty := t.TempDir()
+	for port, want := range map[string]string{"9191": "http://127.0.0.1:9191", "": DefaultURL, "nope": DefaultURL} {
+		if got := HubURL(withPort(empty, port)); got != want {
+			t.Errorf("%q: %q", port, got)
+		}
 	}
-	if got := LoadConfig(env); got.URL != "http://tailnet-mac:8787" || got.Secret != "a-long-enough-secret-1" {
-		t.Fatalf("%+v", got)
+	hostOnly := t.TempDir()
+	SaveConfig(Env{ConfigDir: hostOnly}, Config{Host: "tailnet-mac", Secret: longSecret})
+	if got := HubURL(withPort(hostOnly, "9191")); got != "http://tailnet-mac:9191" {
+		t.Fatalf("a saved host with no port uses LANDLINE_PORT: %q", got)
 	}
-	for _, bad := range [][]string{{"join", "ftp://x"}, {"join", "http://u:p@x:1"}, {"join", "http://x:1/path"}, {"join", "not a url"}} {
+	both := t.TempDir()
+	SaveConfig(Env{ConfigDir: both}, Config{Host: "tailnet-mac", Port: 8787, Secret: longSecret})
+	if got := HubURL(withPort(both, "9191")); got != "http://tailnet-mac:8787" {
+		t.Fatalf("a saved port must win over LANDLINE_PORT: %q", got)
+	}
+	v6 := t.TempDir()
+	SaveConfig(Env{ConfigDir: v6}, Config{Host: "::1", Port: 8787, Secret: longSecret})
+	if got := HubURL(withPort(v6, "")); got != "http://[::1]:8787" {
+		t.Fatalf("an IPv6 host takes brackets: %q", got)
+	}
+}
+
+func TestJoinSavesHostPortAndSecretFromEitherFormAndRefusesBadOnes(t *testing.T) {
+	t.Parallel()
+	for _, form := range []string{"tailnet-mac:8787", "http://tailnet-mac:8787/"} {
+		dir := t.TempDir()
+		var out, errOut strings.Builder
+		env := Env{ConfigDir: dir, Stdout: &out, Stderr: &errOut, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
+		if code := Run([]string{"join", form}, env); code != 0 {
+			t.Fatalf("%s: %d %s", form, code, errOut.String())
+		}
+		if got, _ := ReadConfig(env); got != (Config{Host: "tailnet-mac", Port: 8787, Secret: "a-long-enough-secret-1"}) {
+			t.Fatalf("%s: %+v", form, got)
+		}
+	}
+	for _, bad := range []string{"https://x:1", "ftp://x:1", "http://u:p@x:1", "http://x:1/path", "not an address", "x", "x:0", "x:99999"} {
 		var e strings.Builder
-		env := Env{ConfigDir: t.TempDir(), Stdout: &out, Stderr: &e, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
-		if code := Run(bad, env); code == 0 || !strings.Contains(e.String(), "the switchboard address must look like") {
-			t.Errorf("%v: %d %q", bad, code, e.String())
+		env := Env{ConfigDir: t.TempDir(), Stdout: &e, Stderr: &e, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
+		code := Run([]string{"join", bad}, env)
+		wanted := "the switchboard address must look like host:port"
+		if strings.HasPrefix(bad, "https://") {
+			wanted = "http only"
+		}
+		if code == 0 || !strings.Contains(e.String(), wanted) {
+			t.Errorf("%s: %d %q", bad, code, e.String())
+		}
+		if _, err := os.Stat(filepath.Join(env.ConfigDir, "config.toml")); err == nil {
+			t.Errorf("%s: a file was written", bad)
 		}
 	}
 	var usage strings.Builder
-	bare := Env{ConfigDir: t.TempDir(), Stdout: &out, Stderr: &usage, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
-	if code := Run([]string{"join"}, bare); code == 0 || !strings.Contains(usage.String(), "usage: landline server join <switchboard address>. The switchboard secret comes from") {
+	bare := Env{ConfigDir: t.TempDir(), Stdout: &usage, Stderr: &usage, Stdin: strings.NewReader("a-long-enough-secret-1\n"), Getenv: func(string) string { return "" }}
+	if code := Run([]string{"join"}, bare); code == 0 || !strings.Contains(usage.String(), "usage: landline server join <host:port>. The switchboard secret comes from") {
 		t.Errorf("bare join: %d %q", code, usage.String())
 	}
-	short := Env{ConfigDir: t.TempDir(), Stdout: &out, Stderr: &errOut, Stdin: strings.NewReader("short\n"), Getenv: func(string) string { return "" }}
-	if Run([]string{"join", "http://x:1"}, short) == 0 || !strings.Contains(errOut.String(), "Switchboard secret: ") || !strings.Contains(errOut.String(), "the switchboard secret is at least 16 characters") {
-		t.Fatalf("a short secret: %q", errOut.String())
-	}
-}
-
-func TestLandlinePortSetsTheDefaultHubURL(t *testing.T) {
-	t.Parallel()
-	withPort := func(port string) Env {
-		return Env{ConfigDir: t.TempDir(), Getenv: func(key string) string {
-			if key == "LANDLINE_PORT" {
-				return port
-			}
-			return ""
-		}}
-	}
-	if got := HubURL(withPort("9191")); got != "http://127.0.0.1:9191" {
-		t.Fatalf("%q", got)
-	}
-	if got := HubURL(withPort("")); got != DefaultURL {
-		t.Fatalf("%q", got)
-	}
-	if got := HubURL(withPort("nope")); got != DefaultURL {
-		t.Fatalf("%q", got)
-	}
-	dir := t.TempDir()
-	SaveConfig(Env{ConfigDir: dir}, Config{URL: "http://tailnet-mac:8787", Secret: "0123456789abcdef"})
-	saved := Env{ConfigDir: dir, Getenv: func(key string) string {
-		if key == "LANDLINE_PORT" {
-			return "9191"
+	for secret, wanted := range map[string]string{"short": "at least 16 characters", "a-secret-with-a-\"-in-it": "cannot hold a quote"} {
+		var e strings.Builder
+		env := Env{ConfigDir: t.TempDir(), Stdout: &e, Stderr: &e, Stdin: strings.NewReader(secret + "\n"), Getenv: func(string) string { return "" }}
+		if Run([]string{"join", "x:1"}, env) == 0 || !strings.Contains(e.String(), wanted) {
+			t.Errorf("%q: %q", secret, e.String())
 		}
-		return ""
-	}}
-	if got := HubURL(saved); got != "http://tailnet-mac:8787" {
-		t.Fatalf("a saved address must win over the port: %q", got)
 	}
 }
 

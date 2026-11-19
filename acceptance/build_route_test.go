@@ -72,6 +72,7 @@ func buildFields(t *testing.T, body string) map[string]string {
 }
 
 func TestGetBuildAnswersTheSecretAndAnObserverTokenWithExactlyTheStampedVersionCommitAndDate(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, routeVersion, stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	observer := w.registerObserver("tui")
@@ -91,6 +92,7 @@ func TestGetBuildAnswersTheSecretAndAnObserverTokenWithExactlyTheStampedVersionC
 }
 
 func TestGetBuildAnswersTheDirtyCommitAsStampedAndAnEmptyDate(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, routeVersion, stampCommit+routeDirtyTag, "")
 	w := startHub(t, bin, t.TempDir(), "")
 	status, body := getBuild(t, w, bearer(secret))
@@ -101,6 +103,7 @@ func TestGetBuildAnswersTheDirtyCommitAsStampedAndAnEmptyDate(t *testing.T) {
 }
 
 func TestGetBuildAnswersEmptyStringsForAVersionOnlyBuildAndDevForAPlainGoBuild(t *testing.T) {
+	t.Parallel()
 	versionOnly := startHub(t, buildStamped(t, routeVersion, "", ""), t.TempDir(), "")
 	status, body := getBuild(t, versionOnly, bearer(secret))
 	fields := buildFields(t, body)
@@ -116,6 +119,7 @@ func TestGetBuildAnswersEmptyStringsForAVersionOnlyBuildAndDevForAPlainGoBuild(t
 }
 
 func TestGetBuildRefusesAnAgentTokenWith403AndNamesNoBuild(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, routeVersion, stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	w.register("alpha")
@@ -129,6 +133,7 @@ func TestGetBuildRefusesAnAgentTokenWith403AndNamesNoBuild(t *testing.T) {
 }
 
 func TestGetBuildRefusesAMissingOrWrongOrMalformedCredentialWith401(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, routeVersion, stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	w.register("alpha")
@@ -156,6 +161,7 @@ func TestGetBuildRefusesAMissingOrWrongOrMalformedCredentialWith401(t *testing.T
 }
 
 func TestGetBuildNeverEchoesTheSecretOrAnyTokenAndOnlyReadsWithGet(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, routeVersion, stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	w.register("alpha")
@@ -181,6 +187,7 @@ func TestGetBuildNeverEchoesTheSecretOrAnyTokenAndOnlyReadsWithGet(t *testing.T)
 }
 
 func TestGetBuildDoesNotRegisterOrListAnythingAndTheObserverKeepsItsReadOnlyRights(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, routeVersion, stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	observer := w.registerObserver("tui")
@@ -199,6 +206,7 @@ func TestGetBuildDoesNotRegisterOrListAnythingAndTheObserverKeepsItsReadOnlyRigh
 }
 
 func TestAnObserverTokenGets403OnEveryRouteExceptTheAgentListAndTheBuildWhichStayAt200(t *testing.T) {
+	t.Parallel()
 	bin := buildStamped(t, routeVersion, stampCommit, stampDate)
 	w := startHub(t, bin, t.TempDir(), "")
 	w.register("alpha")
@@ -223,6 +231,7 @@ func TestAnObserverTokenGets403OnEveryRouteExceptTheAgentListAndTheBuildWhichSta
 }
 
 func TestAnObserverOfKindMenubarGetsAToken200AndTheTokenReadsTheAgentList(t *testing.T) {
+	t.Parallel()
 	w := start(t)
 	w.register("alpha")
 	status, body := w.post("/v1/observers", secret, map[string]string{"kind": "menubar"})

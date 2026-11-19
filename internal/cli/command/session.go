@@ -113,6 +113,7 @@ func HarnessFromClient(name, aiAgent string) string {
 
 type Session struct {
 	env                       Env
+	base                      Env
 	mu                        sync.Mutex
 	identity                  Identity
 	overrides                 Identity
@@ -123,7 +124,7 @@ type Session struct {
 }
 
 func NewSession(env Env, detect func() Identity, overrides Identity) *Session {
-	return &Session{env: withConfig(env), detect: detect, overrides: overrides.With(EnvironmentIdentity(withConfig(env)))}
+	return &Session{env: withConfig(env), base: env, detect: detect, overrides: overrides.With(EnvironmentIdentity(withConfig(env)))}
 }
 
 func (s *Session) SetClient(name, version string) {
@@ -146,13 +147,17 @@ func (s *Session) hubDown(err error) error {
 }
 
 func (s *Session) register() error {
-	secret := s.env.Getenv("LANDLINE_SECRET")
+	saved := withConfig(s.base)
+	if saved.configProblem != nil {
+		return saved.configProblem
+	}
+	secret := saved.Getenv("LANDLINE_SECRET")
 	if secret == "" {
-		return errors.New("there is no switchboard secret. Run: landline server up, or landline join <switchboard address>")
+		return errors.New("there is no switchboard secret. Run: landline server up, or landline server join <host:port>")
 	}
 	host := s.env.Host
 	identity := s.detect().With(Identity{Harness: HarnessFromClient(s.clientName, s.env.Getenv("AI_AGENT")), HarnessVersion: s.clientVersion}).With(s.overrides)
-	url := HubURL(s.env)
+	url := saved.Getenv("LANDLINE_URL")
 	out, err := client.New(url, secret).Register(model.RegisterRequest{
 		Seed: identity.Seed, Harness: identity.Harness, Host: host, Session: s.env.Getenv("CLAUDE_CODE_SESSION_ID"),
 		Folder: identity.Folder, Branch: identity.Branch, Worktree: identity.Worktree, HarnessVersion: identity.HarnessVersion, LandlineVersion: identity.LandlineVersion,

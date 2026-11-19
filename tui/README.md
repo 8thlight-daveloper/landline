@@ -83,13 +83,15 @@ commit and the date. The snapshot holds no secret and no token.
 
 ## How it finds the switchboard
 
-The same way the other commands do. `LANDLINE_URL` and `LANDLINE_SECRET` win. Otherwise it reads `url` and `secret` from
-`$HOME/.config/landline/config.json`. With no address it uses `http://127.0.0.1:<port>`, where the port is
-`LANDLINE_PORT` or 8787.
+The same way the other commands do. `LANDLINE_URL` and `LANDLINE_SECRET` win. Otherwise it reads `secret`, `host`, and
+`port` from `$HOME/.config/landline/config.toml`, or `url` and `secret` from an old `config.json` when there is no
+`config.toml`. A missing host is `127.0.0.1`, and a missing port is `LANDLINE_PORT` or 8787. A line of `config.toml`
+that is not a blank line, a comment, or a key set to text in quotes or a whole number is an error that names the file
+and the line ([0190](../docs/decisions/0190-one-toml-config-names-the-switchboard-by-host-and-port.md)).
 
-The address is checked as `landline server join` checks it: `http` or `https`, a host, no user information, no query,
-and no path beyond `/`. It also refuses a fragment and any control or format rune, which the main module does not check.
-A bad address exits `1` with
+The address in `LANDLINE_URL` is checked as `landline server join` checked it before 0190: `http` or `https`, a host, no
+user information, no query, and no path beyond `/`. It also refuses a fragment and any control or format rune, which the
+main module does not check. A bad address exits `1` with
 `the switchboard address must look like http://host:port, with no credentials, query, or fragment`. The message never
 repeats the address, so a password in it is never printed. The JSON `hub` field and the status line never hold user
 information.

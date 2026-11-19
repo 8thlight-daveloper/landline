@@ -10,6 +10,7 @@ import (
 	"github.com/8thlight-daveloper/landline/menubar/internal/about"
 	"github.com/8thlight-daveloper/landline/menubar/internal/buildinfo"
 	"github.com/8thlight-daveloper/landline/menubar/internal/clipboard/pasteboard"
+	"github.com/8thlight-daveloper/landline/menubar/internal/confirm"
 	"github.com/8thlight-daveloper/landline/menubar/internal/icon"
 	"github.com/8thlight-daveloper/landline/menubar/internal/landline/runner"
 	"github.com/8thlight-daveloper/landline/menubar/internal/menu/model"
@@ -144,7 +145,7 @@ func (s *Screen) perform(action model.Action) {
 	case model.Copy:
 		pasteboard.Copy(pasteboard.Binary, action.Text)
 	case model.Run:
-		go s.run(action)
+		go s.confirmAndRun(action)
 	case model.About:
 		about.Show(about.ContentFor(s.config.App))
 	case model.Refresh:
@@ -152,6 +153,13 @@ func (s *Screen) perform(action model.Action) {
 	case model.Quit:
 		systray.Quit()
 	}
+}
+
+func (s *Screen) confirmAndRun(action model.Action) {
+	if action.Confirm != "" && !confirm.Ask(action.Confirm, action.ConfirmAccept) {
+		return
+	}
+	s.run(action)
 }
 
 func (s *Screen) run(action model.Action) {

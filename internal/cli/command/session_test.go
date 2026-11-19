@@ -227,7 +227,7 @@ func TestNoSecretGivesAnErrorThatSaysHowToGetOne(t *testing.T) {
 	t.Parallel()
 	env := Env{ConfigDir: t.TempDir(), Host: "mac", Getenv: func(string) string { return "" }}
 	s := NewSession(env, func() Identity { return Identity{Seed: "x"} }, Identity{})
-	if _, err := s.Agents(); err == nil || !strings.Contains(err.Error(), "landline join") {
+	if _, err := s.Agents(); err == nil || !strings.Contains(err.Error(), "landline server join") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -408,7 +408,7 @@ func TestTheSessionSaysThereIsNoSwitchboardSecret(t *testing.T) {
 	defer srv.Close()
 	s, _ := newSession(t, srv, "")
 	_, err := s.Send(model.SendBody{To: "x", Body: "b"})
-	if err == nil || !strings.Contains(err.Error(), "there is no switchboard secret. Run: landline server up, or landline join <switchboard address>") {
+	if err == nil || !strings.Contains(err.Error(), "there is no switchboard secret. Run: landline server up, or landline server join <host:port>") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -462,5 +462,46 @@ func TestTheSessionRemembersWhetherTheProjectWasGivenOrDerived(t *testing.T) {
 	}
 	if project, given := s.Project(); project != "chosen" || !given {
 		t.Fatalf("%q %v", project, given)
+	}
+}
+
+func TestARenewalReadsTheSavedSecretAgainAfterItWasRotated(t *testing.T) {
+	t.Parallel()
+	hub := &recordingHub{}
+	var mu sync.Mutex
+	var bearers []string
+	inner := hub.handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/register" {
+			mu.Lock()
+			bearers = append(bearers, r.Header.Get("Authorization"))
+			mu.Unlock()
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	host, port, _ := splitSwitchboardAddress(srv.URL)
+	env := Env{ConfigDir: dir, Host: "mac", Getenv: func(string) string { return "" }}
+	if err := SaveConfig(env, Config{Host: host, Port: port, Secret: "old-secret-0123456789"}); err != nil {
+		t.Fatal(err)
+	}
+	s := NewSession(env, func() Identity { return Identity{Seed: "x", Folder: "x"} }, Identity{})
+	if _, err := s.Send(model.SendBody{To: "y", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveConfig(env, Config{Secret: "new-secret-0123456789"}); err != nil {
+		t.Fatal(err)
+	}
+	hub.mu.Lock()
+	hub.rejected = 1
+	hub.mu.Unlock()
+	if _, err := s.Send(model.SendBody{To: "y", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bearers) != 2 || bearers[0] != "Bearer old-secret-0123456789" || bearers[1] != "Bearer new-secret-0123456789" {
+		t.Fatalf("register secrets: %q", bearers)
 	}
 }
