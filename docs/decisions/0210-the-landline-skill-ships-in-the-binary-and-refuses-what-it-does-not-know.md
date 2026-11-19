@@ -97,18 +97,26 @@ none beyond the typed command. The level lasts for the session and ends when the
 
 ### Installing and removing
 
+- **`landline setup claude|codex` replaces the harness's registration.** It runs the harness's remove command first and
+  ignores its status and its output, because nothing may be registered yet. It then runs the add command, then installs
+  the folder. A failing add exits `1` and installs no skill, as today. A machine therefore refreshes its MCP entry and
+  its skill with one `setup`, and an entry that points at an older `landline-mcp` points at the current one afterward.
+  `--print` shows the add command only and runs nothing.
 - `landline setup claude` installs the folder at `~/.claude/skills/landline/`. `landline setup codex` installs it at
   `$CODEX_HOME/skills/landline/`, or `~/.codex/skills/landline/` when `CODEX_HOME` is not set.
-- Each installed file carries a line that says it is managed by `landline setup` and names the build that wrote it. An
-  HTML comment holds it, after the front matter in `SKILL.md` and on the first line of the others.
-- `setup` replaces a file that carries that line, whatever build wrote it, so that a machine is never stuck on an older
-  skill. It keeps a file that does not carry the line, and says `kept <path>, which is not managed by landline setup`.
+- Each installed file carries one line, `<!-- managed by landline setup, build <version> -->`, where `<version>` is the
+  version that `landline version` prints. In `SKILL.md` it is the first line after the front matter, and in the other
+  files it is the first line. Every build writes this exact form and recognizes it in a file from any build.
+- A `SKILL.md` written by a build before this record carries no such line. One that is byte for byte a copy that an
+  earlier release shipped counts as managed, so `setup` replaces it and `--remove` deletes it. The build carries the
+  SHA-256 of each earlier copy. Any other file without the line is not managed.
+- `setup` replaces a managed file, whatever build wrote it, so that a machine is never stuck on an older skill. It keeps
+  a file that is not managed, and says `kept <path>, which is not managed by landline setup`.
 - **`setup` never writes through a symlink.** When the skill folder, or a file in it, is a symbolic link, `setup` skips
   it and says `kept <path>, a link to <target>, which is yours`. It still exits `0`.
-- `landline setup claude|codex --remove` deletes each file that carries the line, then each of the two folders that this
-  leaves empty, and says `kept <path>` for any other file. This replaces the rule of 0140 that removed the skill only
-  when it matched the embedded copy byte for byte. The skill removal still runs whatever the harness command's status
-  is.
+- `landline setup claude|codex --remove` deletes each managed file, then each of the two folders that this leaves empty,
+  and says `kept <path>` for any other file. This replaces the rule of 0140 that removed the skill only when it matched
+  the embedded copy byte for byte. The skill removal still runs whatever the harness command's status is.
 
 ## Consequences
 

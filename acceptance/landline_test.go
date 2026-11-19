@@ -2179,7 +2179,7 @@ func TestServerInstallWritesTheLoginServiceFileWithoutTheSecretAndWithoutLoading
 	}
 }
 
-func TestSetupClaudeInstallsTheLandlineSkillThatTheUserRunsAsSlashLandlineRegister(t *testing.T) {
+func TestSetupClaudeInstallsTheLandlineSkillFolderThatTheUserRunsAsSlashLandlineRegister(t *testing.T) {
 	t.Parallel()
 	w := start(t)
 	fake := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/claude-args\"\n"
@@ -2187,22 +2187,26 @@ func TestSetupClaudeInstallsTheLandlineSkillThatTheUserRunsAsSlashLandlineRegist
 		t.Fatal(err)
 	}
 	out := w.must("", "setup", "claude")
-	path := filepath.Join(w.config, ".claude", "skills", "landline", "SKILL.md")
-	if !strings.Contains(out, path) {
+	dir := filepath.Join(w.config, ".claude", "skills", "landline")
+	if !strings.Contains(out, dir) {
 		t.Fatalf("setup did not say where the skill went: %q", out)
 	}
-	skill, err := os.ReadFile(path)
+	skill, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"name: landline", "$ARGUMENTS", "landline_register", "landline_status", "CODEX_THREAD_ID", "argument-hint: register [project]"} {
+	register, err := os.ReadFile(filepath.Join(dir, "references", "register.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"name: landline", "argument-hint:"} {
 		if !strings.Contains(string(skill), want) {
 			t.Errorf("the skill lacks %q", want)
 		}
 	}
-	for _, old := range []string{"label", "handle"} {
-		if strings.Contains(strings.ToLower(string(skill)), old) {
-			t.Errorf("the skill keeps the old word %q", old)
+	for _, want := range []string{"landline_register", "landline_status", "CODEX_THREAD_ID"} {
+		if !strings.Contains(string(register), want) {
+			t.Errorf("the register reference lacks %q", want)
 		}
 	}
 	args, _ := os.ReadFile(filepath.Join(w.config, "claude-args"))
@@ -2217,8 +2221,11 @@ func TestSetupClaudeInstallsTheLandlineSkillThatTheUserRunsAsSlashLandlineRegist
 		t.Fatalf("claude mcp add was not run with landline-mcp --channel: %q", args)
 	}
 	w.must("", "setup", "claude")
-	if again, _ := os.ReadFile(path); string(again) != string(skill) {
+	if again, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(again) != string(skill) {
 		t.Fatal("running setup again changed the skill")
+	}
+	if again, _ := os.ReadFile(filepath.Join(dir, "references", "register.md")); string(again) != string(register) {
+		t.Fatal("running setup again changed the register reference")
 	}
 }
 
