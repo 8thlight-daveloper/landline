@@ -26,6 +26,7 @@ type Env struct {
 	Home      string
 	Host      string
 	Banner    func() string
+	Version   string
 
 	processGetenv func(string) string
 	configProblem error

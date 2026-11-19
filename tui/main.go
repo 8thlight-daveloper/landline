@@ -80,7 +80,7 @@ func environment(stdout, stderr io.Writer) command.Env {
 	return command.Env{
 		Stdin: os.Stdin, Stdout: stdout, Stderr: stderr, Getenv: os.Getenv,
 		ConfigDir: filepath.Join(home, ".config", "landline"), Home: home, Host: host,
-		Banner: func() string { return command.BannerFor(os.Stderr) },
+		Banner: func() string { return command.BannerFor(os.Stderr) }, Version: version,
 	}
 }
 
