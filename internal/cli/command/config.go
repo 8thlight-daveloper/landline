@@ -300,7 +300,7 @@ func join(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	secret := env.Getenv("LANDLINE_SECRET")
+	secret := env.processEnvironment("LANDLINE_SECRET")
 	if secret == "" {
 		fmt.Fprint(env.Stderr, "Switchboard secret: ")
 		raw := make([]byte, 256)

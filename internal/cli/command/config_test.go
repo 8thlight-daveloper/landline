@@ -245,3 +245,35 @@ func TestDefaultAddrReadsLandlinePortAndRefusesBadValues(t *testing.T) {
 		}
 	}
 }
+
+func TestJoinReplacesTheSecretAlreadySavedInTheFileWithTheOneOnStandardInput(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := SaveConfig(Env{ConfigDir: dir}, Config{Host: "old.example", Port: 9, Secret: "old-secret-0123456789"}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut strings.Builder
+	env := Env{ConfigDir: dir, Stdout: &out, Stderr: &errOut, Stdin: strings.NewReader("new-secret-0123456789\n"), Getenv: func(string) string { return "" }}
+	if code := Run([]string{"join", "tailnet-mac:8787"}, env); code != 0 {
+		t.Fatalf("%d %s", code, errOut.String())
+	}
+	if got, _ := ReadConfig(env); got != (Config{Host: "tailnet-mac", Port: 8787, Secret: "new-secret-0123456789"}) {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestJoinPrefersTheSecretInTheProcessEnvironmentOverStandardInput(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	var out, errOut strings.Builder
+	env := Env{ConfigDir: dir, Stdout: &out, Stderr: &errOut, Stdin: strings.NewReader("stdin-secret-0123456789\n"),
+		Getenv: func(key string) string {
+			return map[string]string{"LANDLINE_SECRET": "environment-secret-0123456789"}[key]
+		}}
+	if code := Run([]string{"join", "tailnet-mac:8787"}, env); code != 0 {
+		t.Fatalf("%d %s", code, errOut.String())
+	}
+	if got, _ := ReadConfig(env); got.Secret != "environment-secret-0123456789" {
+		t.Fatalf("%+v", got)
+	}
+}
