@@ -1,6 +1,7 @@
 package command
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -374,6 +375,16 @@ func forgetSecretLine(env Env) error {
 	return os.Rename(temporary, configPath(env))
 }
 
+func saveJoin(env Env, private ed25519.PrivateKey, host string, port int, name string) error {
+	if err := writeMachineKey(env, private); err != nil {
+		return err
+	}
+	if err := SaveConfig(env, Config{Host: host, Port: port, Machine: name}); err != nil {
+		return err
+	}
+	return forgetSecretLine(env)
+}
+
 func joinWithCode(env Env, host string, port int, code string) error {
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	public, private, err := newMachineKey()
@@ -388,14 +399,13 @@ func joinWithCode(env Env, host string, port int, code string) error {
 		}
 		return err
 	}
-	if err := writeMachineKey(env, private); err != nil {
-		return err
+	if !machineNamePattern.MatchString(name) {
+		return fmt.Errorf("the switchboard answered with a machine name %q that is not allowed. Nothing was saved", name)
 	}
-	if err := SaveConfig(env, Config{Host: host, Port: port, Machine: name}); err != nil {
-		return err
-	}
-	if err := forgetSecretLine(env); err != nil {
-		return err
+	restore := snapshotJoinFiles(env)
+	if err := saveJoin(env, private, host, port, name); err != nil {
+		restore()
+		return fmt.Errorf("%w. The earlier key and config.toml were restored, and the new machine %s stays on the switchboard until you run landline server revoke %s", err, name, name)
 	}
 	fmt.Fprintf(env.Stdout, "joined the switchboard at %s as %s. The key is saved in %s, readable only by you\n", address, name, machineKeyPath(env))
 	return nil

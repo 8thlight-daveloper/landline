@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	client "github.com/8thlight-daveloper/landline/internal/client/http"
@@ -48,6 +49,27 @@ func writeMachineKey(env Env, key ed25519.PrivateKey) error {
 		return err
 	}
 	return os.Rename(temporary, path)
+}
+
+var machineNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+func snapshotJoinFiles(env Env) func() {
+	paths := []string{machineKeyPath(env), configPath(env)}
+	contents := make([][]byte, len(paths))
+	for i, path := range paths {
+		contents[i], _ = os.ReadFile(path)
+	}
+	return func() {
+		for i, path := range paths {
+			os.Remove(path + ".tmp")
+			if contents[i] == nil {
+				os.Remove(path)
+				continue
+			}
+			os.WriteFile(path, contents[i], 0o600)
+			os.Chmod(path, 0o600)
+		}
+	}
 }
 
 func newMachineKey() (ed25519.PublicKey, ed25519.PrivateKey, error) {

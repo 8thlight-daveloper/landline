@@ -115,7 +115,8 @@ func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header st
 	unix, timeErr := strconv.ParseInt(fields["time"], 10, 64)
 	signature, signatureErr := base64.StdEncoding.DecodeString(fields["signature"])
 	body, bodyErr := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
-	if bodyErr != nil || timeErr != nil || signatureErr != nil || fields["name"] == "" {
+	nonce, nonceErr := base64.StdEncoding.DecodeString(fields["nonce"])
+	if bodyErr != nil || timeErr != nil || signatureErr != nil || nonceErr != nil || len(nonce) != 16 || fields["name"] == "" {
 		fail(w, http.StatusUnauthorized, machineRefusal)
 		return "", false
 	}

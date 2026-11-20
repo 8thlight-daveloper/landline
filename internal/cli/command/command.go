@@ -55,15 +55,15 @@ const Usage = `usage: landline <command> [flags]
   agents    [--json] [--interval D]   list agents and whether each is connected. --json prints the screen's view
   setup     claude|codex [--remove]   add the Landline MCP server, landline-mcp, to a harness, once. --remove takes it out
   claude    [--project P] [-- args]   start Claude Code with the channel loaded
-  server    up|down|restart|rotate-secret|status|install|join|log   run and find the switchboard
+  server    up|down|restart|rotate-secret|status|install|join|log|invite|machines|revoke   run and find the switchboard
 
-  register  --id N --harness H [--host H] [--session S] [--project P]   needs LANDLINE_URL and LANDLINE_SECRET.
+  register  --id N --harness H [--host H] [--session S] [--project P]   needs LANDLINE_URL and LANDLINE_SECRET, or a machine key.
             A hand-registered id holds no delivery stream, so it can send but cannot receive
             unless "landline-mcp --as N --channel" runs for it
   send      --as N --to X [--thread T] [--kind K] [--reply-to ID] <body, or - for stdin>
             --to takes the id of one agent, as "landline agents" lists it. The agent must be connected, or the send fails
   log       [--after SEQ]
-  join      <host:port>   save a switchboard address and its secret, for a switchboard on another machine
+  join      <host:port> [--code C]   save a switchboard address for a switchboard on another machine, with its secret or with a machine key redeemed by an invite code
   version   print the version and the build
 
 --as defaults to LANDLINE_AS. The switchboard address and secret come from LANDLINE_URL and LANDLINE_SECRET, or from the file

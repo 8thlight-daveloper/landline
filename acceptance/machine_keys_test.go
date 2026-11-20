@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -2136,5 +2137,88 @@ func TestTheFailureCountStartsAgainAfterACancel(t *testing.T) {
 	failRedeems(t, h, 4)
 	if out, err := h.newMachineHome().joinWith(next); err != nil {
 		t.Errorf("four failures after a cancel cancelled the next invite: %v %s", err, h.clean(out))
+	}
+}
+
+func TestASignedRequestWhoseNonceIsNotSixteenBytesOfStandardBase64Gets401AndAValidOneGets200(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	m := h.machine("linux-box")
+	send := func(nonce string) int {
+		status, _ := h.rawRequest("GET", "/v1/build", nil, map[string]string{"Authorization": machineAuthWith(m.key(), m.name, time.Now().Unix(), nonce, "GET", "/v1/build", nil)})
+		return status
+	}
+	if status := send(freshNonce()); status != 200 {
+		t.Fatalf("control with a 16 byte nonce: %d", status)
+	}
+	short, long := base64.StdEncoding.EncodeToString(make([]byte, 15)), base64.StdEncoding.EncodeToString(make([]byte, 17))
+	for name, nonce := range map[string]string{"one character": "-", "one byte": "AA==", "not base64": "!!!not-base64!!!", "15 bytes": short, "17 bytes": long, "4000 characters": strings.Repeat("A", 4000)} {
+		if status := send(nonce); status != 401 {
+			t.Errorf("%s: status %d, want 401", name, status)
+		}
+	}
+}
+
+func TestAJoinThatCannotSaveAfterTheCodeWasRedeemedKeepsTheEarlierKeyAndConfigAndSaysHowToRevokeTheNewMachine(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	m := h.machine("alpha")
+	keyBefore, configBefore := readFileOrFail(t, m.keyPath()), readFileOrFail(t, configTomlOf(m.home))
+	if err := os.MkdirAll(filepath.Join(configDirOf(m.home), "config.toml.tmp", "blocker"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := m.joinWith(h.invite("beta"))
+	if exitCodeOf(err) != 1 {
+		t.Fatalf("exit %d, want 1: %s", exitCodeOf(err), safe(out))
+	}
+	if readFileOrFail(t, m.keyPath()) != keyBefore || readFileOrFail(t, configTomlOf(m.home)) != configBefore {
+		t.Error("the earlier key or config.toml changed")
+	}
+	if !strings.Contains(out, "landline server revoke beta") {
+		t.Errorf("the failure does not say how to revoke the stranded machine: %s", safe(out))
+	}
+	os.RemoveAll(filepath.Join(configDirOf(m.home), "config.toml.tmp"))
+	if out, err := m.run("agents", "--json"); err != nil {
+		t.Errorf("the earlier key stopped working: %v %s", err, safe(out))
+	}
+}
+
+func TestAJoinAgainstASwitchboardThatAnswersWithAMachineNameBreakingTheNameRuleSavesNothing(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	hostile := "a\"\nhost = \"evil.example\"\nsecret = \"x"
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		raw, _ := json.Marshal(map[string]string{"name": hostile})
+		w.Write(raw)
+	}))
+	t.Cleanup(fake.Close)
+	m := h.newMachineHome()
+	out, err := m.run("server", "join", strings.TrimPrefix(fake.URL, "http://"), "--code", "ABCD-EFGH")
+	if exitCodeOf(err) != 1 {
+		t.Fatalf("exit %d, want 1: %s", exitCodeOf(err), safe(out))
+	}
+	for _, path := range []string{m.keyPath(), configTomlOf(m.home)} {
+		if _, statErr := os.Stat(path); statErr == nil {
+			t.Errorf("%s was written", path)
+		}
+	}
+}
+
+func TestAdministrationCommandsRefuseWhenLandlineURLNamesAnotherMachineAndLeaveTheSwitchboardAlone(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	h.machine("linux-box")
+	env := append(append([]string{}, h.env...), "LANDLINE_URL=http://203.0.113.9:8787", "LANDLINE_SECRET="+h.secret)
+	for _, args := range [][]string{{"server", "invite", "--name", "other-box"}, {"server", "machines"}, {"server", "revoke", "linux-box"}, {"server", "revoke", "--all"}} {
+		out, err := runIn(t, h.bin, env, h.home, args...)
+		lower := strings.ToLower(out)
+		if exitCodeOf(err) != 1 || !strings.Contains(out, "203.0.113.9") || joinCommandLine.MatchString(strings.TrimSpace(out)) ||
+			strings.Contains(lower, "dial") || strings.Contains(lower, "timeout") || strings.Contains(lower, "refused by the switchboard") {
+			t.Errorf("%v: exit %d, want 1 with a refusal that names the address: %q", args, exitCodeOf(err), safe(out))
+		}
+	}
+	if !strings.Contains(listedMachines(t, h), "linux-box") {
+		t.Error("the machine was revoked")
 	}
 }
