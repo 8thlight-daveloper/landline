@@ -1,6 +1,8 @@
 package hubclient
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -117,6 +119,19 @@ func TestAgentsReportsARefusedSecretWithoutPrintingIt(t *testing.T) {
 	defer server.Close()
 	_, err := New(server.URL, "wrong-wrong-wrong-wrong").Agents()
 	if err == nil || !strings.Contains(err.Error(), "refused the switchboard secret") || strings.Contains(err.Error(), "wrong-wrong") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAgentsReportsARefusedMachineKeyAndSaysToJoinAgain(t *testing.T) {
+	server := httptest.NewServer(newStubHub("right-right-right-right"))
+	defer server.Close()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewWith(server.URL, Credential{Machine: "linux-box", Key: key}).Agents()
+	if err == nil || !strings.Contains(err.Error(), "refused this machine's key") || !strings.Contains(err.Error(), "--code") || strings.Contains(err.Error(), "switchboard secret") {
 		t.Fatalf("got %v", err)
 	}
 }

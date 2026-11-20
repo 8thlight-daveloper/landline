@@ -770,12 +770,80 @@ func TestTheInvalidCodeErrorSaysInvalidOrExpiredInviteCode(t *testing.T) {
 	}
 }
 
-func TestVerifyReportsAnUnknownMachineBeforeAClockError(t *testing.T) {
+func notActiveStates(t *testing.T) map[string]model.Machines {
+	t.Helper()
+	known := machineState(t)
+	pending, _ := invited(t, known, "pending-box", 16, t0)
+	revoked, err := newImpl().Revoke(known, "linux-box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]model.Machines{"a known machine": known, "a pending name": pending, "a revoked name": revoked}
+}
+
+func notActiveNames() map[string]string {
+	return map[string]string{"a known machine": "linux-box", "a pending name": "pending-box", "a revoked name": "linux-box"}
+}
+
+func TestVerifyReportsAClockErrorForAnyNameWhenTheTimeIsOutsideTheWindow(t *testing.T) {
 	t.Parallel()
-	_, _, err := verify(machineState(t), signedBy("other-box", keyOf(1), t0.Unix()+999), t0)
-	var skew *model.ClockSkewError
-	if !errors.Is(err, model.ErrUnknownMachine) || errors.As(err, &skew) {
-		t.Errorf("an unknown name with a time far away: %v", err)
+	held := notActiveNames()
+	for label, state := range notActiveStates(t) {
+		for _, name := range []string{held[label], "ghost-box"} {
+			for _, offset := range []int64{61, -61, 999, -999, 3600} {
+				got, who, err := verify(state, signedBy(name, keyOf(1), t0.Unix()+offset), t0)
+				var skew *model.ClockSkewError
+				if !errors.As(err, &skew) || errors.Is(err, model.ErrUnknownMachine) || skew.Seconds != offset || who != "" {
+					t.Errorf("%s, name %s, %d seconds: %q %v", label, name, offset, who, err)
+				}
+				if !reflect.DeepEqual(snapshot(got), snapshot(state)) {
+					t.Errorf("%s, name %s, %d seconds: the state changed", label, name, offset)
+				}
+			}
+		}
+	}
+}
+
+func TestVerifyGivesTheSameClockErrorWhetherOrNotTheNameBelongsToAMachine(t *testing.T) {
+	t.Parallel()
+	state := machineState(t)
+	for _, offset := range []int64{61, -61, 5000} {
+		_, _, known := verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+offset), t0)
+		_, _, unknown := verify(state, signedBy("ghost-box", keyOf(9), t0.Unix()+offset), t0)
+		if known == nil || unknown == nil || known.Error() != unknown.Error() {
+			t.Errorf("%d seconds: a known name gets %v and an unknown name gets %v", offset, known, unknown)
+		}
+	}
+}
+
+func TestVerifyReportsAnUnknownMachineForAnyNameThatIsNotActiveWhenTheTimeIsInsideTheWindow(t *testing.T) {
+	t.Parallel()
+	for label, state := range notActiveStates(t) {
+		if label == "a known machine" {
+			continue
+		}
+		name := notActiveNames()[label]
+		for _, offset := range []int64{0, 60, -60} {
+			_, who, err := verify(state, signedBy(name, keyOf(1), t0.Unix()+offset), t0)
+			var skew *model.ClockSkewError
+			if !errors.Is(err, model.ErrUnknownMachine) || errors.As(err, &skew) || who != "" {
+				t.Errorf("%s, %d seconds: %q %v", label, offset, who, err)
+			}
+		}
+	}
+	for _, offset := range []int64{0, 60, -60} {
+		if _, _, err := verify(machineState(t), signedBy("ghost-box", keyOf(1), t0.Unix()+offset), t0); !errors.Is(err, model.ErrUnknownMachine) {
+			t.Errorf("a name that never existed, %d seconds: %v", offset, err)
+		}
+	}
+}
+
+func TestVerifyReportsAnUnknownMachineBeforeATimeBeforeTheStart(t *testing.T) {
+	t.Parallel()
+	started := t0.Add(-5 * time.Second)
+	request := signedBy("ghost-box", keyOf(1), t0.Unix()-10).request()
+	if _, _, err := newImpl().Verify(machineState(t), request, t0, started, window); !errors.Is(err, model.ErrUnknownMachine) {
+		t.Errorf("an unknown name with a time inside the window and before the start: %v", err)
 	}
 }
 
@@ -1027,6 +1095,168 @@ func TestVerifyRefusesATimeAtTheLimitsOfTheIntegerRangeAsOutOfTheWindowWithoutOv
 		var skew *model.ClockSkewError
 		if _, _, err := verify(machineState(t), signedBy("linux-box", keyOf(1), unix), t0); !errors.As(err, &skew) {
 			t.Errorf("time %d: %v", unix, err)
+		}
+	}
+}
+
+func TestInviteWithExactlyEightRandomBytesIsAcceptedAndMakesTheCodeFromThem(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{8, 9} {
+		got, code, err := newImpl().Invite(model.Machines{}, "box", random(0)[:n], t0, lifetime)
+		if err != nil || code != "2345-6789" {
+			t.Errorf("%d bytes: %q %v", n, code, err)
+			continue
+		}
+		want := []model.Invite{{Name: "box", Code: "23456789", Expires: t0.Add(lifetime)}}
+		if !reflect.DeepEqual(got.Invites, want) {
+			t.Errorf("%d bytes: invites %+v, want %+v", n, got.Invites, want)
+		}
+	}
+}
+
+func TestRedeemRefusesACodeTypedWithAnySeparatorOtherThanAHyphenSuchAsAnUnderscoreOrATab(t *testing.T) {
+	t.Parallel()
+	var typed []string
+	for c := 0; c < 128; c++ {
+		switch {
+		case c == '-', '0' <= c && c <= '9', 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z':
+			continue
+		}
+		separator := string(rune(c))
+		typed = append(typed, "2345"+separator+"6789", separator+"23456789", "23456789"+separator)
+	}
+	for _, separator := range []string{"\u00a0", "\u0085", "\u2003", "\u2028", "\u200b", "\ufeff"} {
+		typed = append(typed, "2345"+separator+"6789", separator+"23456789", "23456789"+separator)
+	}
+	typed = append(typed, "2345_6789", "2345\t6789", "2345 6789", " 2345-6789", "2345-6789 ", "2345-6789\t", "2345-6789\r\n", "2345\n6789")
+	for _, each := range typed {
+		state, _ := invited(t, model.Machines{}, "box", 0, t0)
+		got, name, err := newImpl().Redeem(state, each, publicOf(1), t0)
+		if !errors.Is(err, model.ErrInvalidCode) || name != "" || got.Failures != 1 || len(got.Active) != 0 || len(got.Invites) != 1 {
+			t.Errorf("%q: %q %v %+v", each, name, err, got)
+		}
+	}
+	state, _ := invited(t, model.Machines{}, "box", 0, t0)
+	for _, each := range []string{"2345-6789", "23456789", "2345--6789", "-2345-6789-"} {
+		if _, name, err := newImpl().Redeem(state, each, publicOf(1), t0); err != nil || name != "box" {
+			t.Errorf("control %q: %q %v", each, name, err)
+		}
+	}
+}
+
+func TestVerifyDoesNotTreatASignatureRememberedUntilExactlyNowAsAReplay(t *testing.T) {
+	t.Parallel()
+	now := t0.Add(500 * time.Millisecond)
+	request := signedBy("linux-box", keyOf(1), now.Unix()).request()
+	for _, c := range []struct {
+		until  time.Duration
+		replay bool
+	}{
+		{-time.Second, false},
+		{-time.Nanosecond, false},
+		{0, false},
+		{time.Nanosecond, true},
+		{time.Second, true},
+	} {
+		state := machineState(t)
+		state.Seen = []model.SeenSignature{{Signature: request.Signature, Until: now.Add(c.until)}}
+		_, name, err := newImpl().Verify(state, request, now, t0.Add(-time.Hour), window)
+		if c.replay && (!errors.Is(err, model.ErrReplayed) || name != "") || !c.replay && (err != nil || name != "linux-box") {
+			t.Errorf("remembered until now%+v: %q %v", c.until, name, err)
+		}
+	}
+}
+
+func TestVerifyDropsARememberedSignatureWhoseMemoryEndsExactlyNowAndKeepsOneThatEndsANanosecondLater(t *testing.T) {
+	t.Parallel()
+	now := t0.Add(500 * time.Millisecond)
+	state := machineState(t)
+	state.Seen = []model.SeenSignature{
+		{Signature: []byte{1, 1}, Until: now.Add(-time.Nanosecond)},
+		{Signature: []byte{2, 2}, Until: now},
+		{Signature: []byte{3, 3}, Until: now.Add(time.Nanosecond)},
+	}
+	request := signedBy("linux-box", keyOf(1), now.Unix()).request()
+	got, name, err := newImpl().Verify(state, request, now, t0.Add(-time.Hour), window)
+	if err != nil || name != "linux-box" {
+		t.Fatalf("%q %v", name, err)
+	}
+	kept := map[string]time.Time{}
+	for _, seen := range got.Seen {
+		kept[string(seen.Signature)] = seen.Until
+	}
+	if len(got.Seen) != 2 || len(kept) != 2 {
+		t.Fatalf("seen %+v, want the entry that ends a nanosecond after now and the new signature", got.Seen)
+	}
+	if until, ok := kept[string([]byte{3, 3})]; !ok || !until.Equal(now.Add(time.Nanosecond)) {
+		t.Errorf("the entry that ends a nanosecond after now: %v %v", until, ok)
+	}
+	if until, ok := kept[string(request.Signature)]; !ok || !until.Equal(time.Unix(now.Unix()+61, 0)) {
+		t.Errorf("the new signature: %v %v", until, ok)
+	}
+}
+
+func TestVerifyCountsOnlyTheWholeSecondsOfAWindowThatHasAFraction(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		window time.Duration
+		whole  int64
+	}{
+		{90*time.Second + 500*time.Millisecond, 90},
+		{5*time.Second + 900*time.Millisecond, 5},
+		{60*time.Second + 999*time.Millisecond, 60},
+		{2*time.Second + time.Nanosecond, 2},
+	} {
+		state := machineState(t)
+		for _, offset := range []int64{c.whole, -c.whole} {
+			request := signedBy("linux-box", keyOf(1), t0.Unix()+offset).request()
+			if _, _, err := newImpl().Verify(state, request, t0, t0.Add(-time.Hour), c.window); err != nil {
+				t.Errorf("window %v, %d seconds: %v", c.window, offset, err)
+			}
+		}
+		for _, offset := range []int64{c.whole + 1, -c.whole - 1} {
+			request := signedBy("linux-box", keyOf(1), t0.Unix()+offset).request()
+			var skew *model.ClockSkewError
+			if _, _, err := newImpl().Verify(state, request, t0, t0.Add(-time.Hour), c.window); !errors.As(err, &skew) || skew.Seconds != offset {
+				t.Errorf("window %v, %d seconds: %v", c.window, offset, err)
+			}
+		}
+		got, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()).request(), t0, t0.Add(-time.Hour), c.window)
+		if err != nil || len(got.Seen) != 1 || !got.Seen[0].Until.Equal(time.Unix(t0.Unix()+c.whole+1, 0)) {
+			t.Errorf("window %v: %v seen %+v, want one entry that lasts until %d seconds after t0", c.window, err, got.Seen, c.whole+1)
+		}
+	}
+}
+
+func TestVerifyRefusesATimeWhoseDistanceFromNowDoesNotFitAnInt64WithoutPanickingOrWrapping(t *testing.T) {
+	t.Parallel()
+	unbounded := time.Unix(math.MinInt64, 0)
+	for _, c := range []struct{ now, request int64 }{
+		{math.MaxInt64, math.MinInt64},
+		{math.MaxInt64, math.MinInt64 + 1},
+		{math.MaxInt64, math.MinInt64 + 59},
+		{math.MaxInt64, math.MinInt64 + 60},
+		{math.MinInt64, math.MaxInt64},
+		{math.MinInt64, math.MaxInt64 - 1},
+		{math.MinInt64, math.MaxInt64 - 58},
+		{math.MinInt64, math.MaxInt64 - 59},
+		{math.MaxInt64 / 2, math.MinInt64},
+		{math.MinInt64 / 2, math.MaxInt64},
+		{1, math.MinInt64},
+		{-1, math.MaxInt64},
+	} {
+		state := machineState(t)
+		now := time.Unix(c.now, 0)
+		if now.Unix() != c.now {
+			t.Fatalf("fixture error: a time with %d seconds reads back as %d", c.now, now.Unix())
+		}
+		got, name, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), c.request).request(), now, unbounded, window)
+		var skew *model.ClockSkewError
+		if !errors.As(err, &skew) || name != "" || !strings.Contains(strings.ToLower(err.Error()), "clock") {
+			t.Errorf("now %d, time %d: %q %v", c.now, c.request, name, err)
+		}
+		if !reflect.DeepEqual(snapshot(got), snapshot(state)) {
+			t.Errorf("now %d, time %d: the state changed", c.now, c.request)
 		}
 	}
 }

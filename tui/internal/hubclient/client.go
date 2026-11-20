@@ -158,6 +158,8 @@ func (c *Client) register() (string, error) {
 		return "", err
 	}
 	switch {
+	case status == http.StatusUnauthorized && credential.Key != nil:
+		return "", errors.New("the switchboard refused this machine's key. Run landline server join <host:port> --code <code> to join again")
 	case status == http.StatusUnauthorized:
 		return "", errors.New("the switchboard refused the switchboard secret")
 	case status != http.StatusOK:

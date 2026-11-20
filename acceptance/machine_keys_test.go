@@ -2222,3 +2222,59 @@ func TestAdministrationCommandsRefuseWhenLandlineURLNamesAnotherMachineAndLeaveT
 		t.Error("the machine was revoked")
 	}
 }
+
+func signedRegisterHeaders(t *testing.T, name string, priv ed25519.PrivateKey, unix int64) map[string]string {
+	t.Helper()
+	return map[string]string{"Authorization": machineAuth(priv, name, unix, "POST", "/v1/register", registerBody("alpha"))}
+}
+
+func TestAnUnknownNameSignedWithATimeFarOutsideTheWindowGetsTheSameStatusAndBodyAsAKnownMachine(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	m := h.machine("linux-box")
+	_, ghost, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, offset := range []int64{5000, -5000} {
+		var knownStatus, ghostStatus int
+		var knownBody, ghostBody string
+		for attempt := 0; attempt < 5; attempt++ {
+			unix := time.Now().Unix() + offset
+			knownStatus, knownBody = h.rawRequest("POST", "/v1/register", registerBody("alpha"), signedRegisterHeaders(t, m.name, m.key(), unix))
+			ghostStatus, ghostBody = h.rawRequest("POST", "/v1/register", registerBody("alpha"), signedRegisterHeaders(t, "ghost-box", ghost, unix))
+			if knownBody == ghostBody {
+				break
+			}
+		}
+		if knownStatus != http.StatusUnauthorized || !strings.Contains(strings.ToLower(knownBody), "clock") {
+			t.Fatalf("a known machine with a time %+d seconds off: %d %q, want 401 with the clock message", offset, knownStatus, knownBody)
+		}
+		if ghostStatus != knownStatus || ghostBody != knownBody {
+			t.Errorf("a name that never joined with a time %+d seconds off: %d %q, want the status and body a known machine gets: %d %q", offset, ghostStatus, ghostBody, knownStatus, knownBody)
+		}
+	}
+}
+
+func TestAnUnknownNameSignedWithAGoodTimeGets401AndTheSameGenericRefusalAsAKnownNameWithAWrongKey(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	m := h.machine("linux-box")
+	_, ghost, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, other, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unix := time.Now().Unix()
+	ghostStatus, ghostBody := h.rawRequest("POST", "/v1/register", registerBody("alpha"), signedRegisterHeaders(t, "ghost-box", ghost, unix))
+	wrongStatus, wrongBody := h.rawRequest("POST", "/v1/register", registerBody("alpha"), signedRegisterHeaders(t, m.name, other, unix))
+	if ghostStatus != http.StatusUnauthorized || strings.Contains(strings.ToLower(ghostBody), "clock") || strings.Contains(ghostBody, "ghost-box") {
+		t.Errorf("a name that never joined with a good time: %d %q, want 401 with the generic machine refusal and no clock message or name", ghostStatus, ghostBody)
+	}
+	if wrongStatus != ghostStatus || wrongBody != ghostBody {
+		t.Errorf("a known name with a wrong key: %d %q, want the same status and body as the unknown name: %d %q", wrongStatus, wrongBody, ghostStatus, ghostBody)
+	}
+}

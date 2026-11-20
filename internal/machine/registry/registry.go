@@ -151,14 +151,14 @@ func signedText(request model.SignedRequest) []byte {
 
 func (Registry) Verify(state model.Machines, request model.SignedRequest, now, started time.Time, window time.Duration) (model.Machines, string, error) {
 	state = cloneState(state)
-	i := activeIndex(state, request.Name)
-	if i < 0 {
-		return state, "", model.ErrUnknownMachine
-	}
 	seconds := int64(window / time.Second)
 	difference := clockDifference(request.Time, now.Unix())
 	if difference < -seconds || difference > seconds {
 		return state, "", &model.ClockSkewError{Seconds: difference}
+	}
+	i := activeIndex(state, request.Name)
+	if i < 0 {
+		return state, "", model.ErrUnknownMachine
 	}
 	if request.Time < started.Unix() {
 		return state, "", model.ErrBeforeStart

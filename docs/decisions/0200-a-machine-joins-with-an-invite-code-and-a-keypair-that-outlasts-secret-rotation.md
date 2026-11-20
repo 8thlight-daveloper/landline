@@ -101,9 +101,11 @@ The nonce is 16 random bytes in standard base64, new for each request. The signa
 feeds: `landline-machine-v1`, the name, the time, the nonce, the HTTP method, the path with its query, and the lower
 case hex SHA-256 of the body.
 
-The switchboard accepts a request when the machine is active, the time is within the signature window of its own clock,
+The switchboard accepts a request when the time is within the signature window of its own clock, the machine is active,
 the time is not earlier than the second in which the switchboard started, the signature verifies, and it has not seen
-that signature while it could still pass the window check. The window is 60 seconds. A time in the second of the start
+that signature while it could still pass the window check. The window check comes first and does not look at the name,
+so a time outside the window gets the same clock message whether or not the name belongs to a machine, and a caller who
+holds no credential learns nothing about which names exist. The window is 60 seconds. A time in the second of the start
 passes, because a time has whole seconds and a legitimate request in the first second after a restart must work. The
 switchboard remembers a signature until one second after the time in it plus the window, which is the last moment it
 could pass the window check, because a time has whole seconds. A signature is therefore never forgotten while a copy of
