@@ -44,6 +44,10 @@ the cases below.
 1. Record the approval as the shared rules say. A decision record gets `approval: agent`, with `approver` and `author`
    naming their harness and session. A protected unit goes through `nix run .#approve`. The approver's session differs
    from the author's, and nobody approves their own work.
+1. When a review finds that a contract or acceptance test misses a case, a separate test author session writes the added
+   tests from the accepted record and the findings. The builder never writes them, and a fresh reviewer approves them as
+   above. A person authorizes the change once, when the task is assigned. A change to a contract's rules, or to what an
+   accepted record says, still goes to a person, because `.agents/rules/regenerative.md` says to stop and ask.
 1. Settle an open product behavior choice with the behavior judge, or with the recommendation that a conventional
    default gives, and let the reviewer check it. Do not stop to ask a person for it.
 
