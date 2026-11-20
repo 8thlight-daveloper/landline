@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -83,6 +84,23 @@ func names(state model.Machines) []string {
 		out = append(out, m.Name)
 	}
 	return out
+}
+
+func sortedSignatures(signatures ...[]byte) []string {
+	out := []string{}
+	for _, signature := range signatures {
+		out = append(out, string(signature))
+	}
+	slices.Sort(out)
+	return out
+}
+
+func seenSignatures(state model.Machines) []string {
+	signatures := [][]byte{}
+	for _, seen := range state.Seen {
+		signatures = append(signatures, seen.Signature)
+	}
+	return sortedSignatures(signatures...)
 }
 
 func inviteNames(state model.Machines) []string {
@@ -1005,8 +1023,13 @@ func TestTwoResultsBuiltFromOneStateWithSpareCapacityDoNotShareStorage(t *testin
 	second := signedBy("alpha-box", keyOf(1), t0.Unix())
 	second.nonce = "AgICAgICAgICAgICAgICAg=="
 	y, _, _ := r.Verify(state, second.request(), t0, t0.Add(-time.Hour), window)
-	if len(x.Seen) != 3 || len(y.Seen) != 3 || bytes.Equal(x.Seen[2].Signature, y.Seen[2].Signature) {
-		t.Errorf("verifies from one state: %d and %d entries", len(x.Seen), len(y.Seen))
+	xSignature := signedBy("alpha-box", keyOf(1), t0.Unix()).request().Signature
+	ySignature := second.request().Signature
+	if got, want := seenSignatures(x), sortedSignatures([]byte{1, 1}, []byte{2, 2}, xSignature); !reflect.DeepEqual(got, want) {
+		t.Errorf("the first verify remembers %x, want %x", got, want)
+	}
+	if got, want := seenSignatures(y), sortedSignatures([]byte{1, 1}, []byte{2, 2}, ySignature); !reflect.DeepEqual(got, want) {
+		t.Errorf("the second verify remembers %x, want %x", got, want)
 	}
 }
 
@@ -1257,6 +1280,137 @@ func TestVerifyRefusesATimeWhoseDistanceFromNowDoesNotFitAnInt64WithoutPanicking
 		}
 		if !reflect.DeepEqual(snapshot(got), snapshot(state)) {
 			t.Errorf("now %d, time %d: the state changed", c.now, c.request)
+		}
+	}
+}
+
+func TestInviteRefusesAMachineNameWithAnUpperCaseLetterAfterItsFirstCharacter(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"linux-Box", "boX", "aB", "a-B-c", "boxZ", "boxA", "a1B", "a" + strings.Repeat("b", 30) + "C"} {
+		got, code, err := newImpl().Invite(model.Machines{}, name, random(0), t0, lifetime)
+		if !errors.Is(err, model.ErrBadMachineName) || code != "" || len(got.Invites) != 0 {
+			t.Errorf("%q: %q %v %+v", name, code, err, got)
+		}
+	}
+}
+
+func TestRedeemReadsALowerCaseZAsTheLetterZ(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		random []byte
+		typed  []string
+	}{
+		{[]byte{8, 9, 10, 11, 27, 28, 29, 30}, []string{"abcd-wxyz", "abcdwxyz", "AbCd-wXyZ"}},
+		{[]byte{30, 29, 28, 27, 26, 25, 24, 23}, []string{"zyxw-vuts", "zyxwvuts", "ZyXw-vUtS"}},
+		{bytes.Repeat([]byte{30}, 8), []string{"zzzz-zzzz", "zzzzzzzz", "ZZZZ-ZZZZ"}},
+	} {
+		state, display, err := newImpl().Invite(model.Machines{}, "box", c.random, t0, lifetime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, typed := range append(c.typed, strings.ToLower(display)) {
+			if _, name, err := newImpl().Redeem(state, typed, publicOf(1), t0); err != nil || name != "box" {
+				t.Errorf("code %s typed as %q: %q %v", display, typed, name, err)
+			}
+		}
+	}
+}
+
+func TestInviteIsRefusedForANameOfAPendingInviteThatIsNotTheFirstInTheList(t *testing.T) {
+	t.Parallel()
+	state := model.Machines{}
+	for i, name := range []string{"alpha", "bravo", "charlie"} {
+		state, _ = invited(t, state, name, byte(i*8), t0)
+	}
+	before := snapshot(state)
+	for _, name := range []string{"alpha", "bravo", "charlie"} {
+		got, code, err := newImpl().Invite(state, name, random(100), t0, lifetime)
+		if !errors.Is(err, model.ErrMachineHeld) || code != "" || !reflect.DeepEqual(snapshot(got), before) {
+			t.Errorf("%s: %q %v %+v", name, code, err, got)
+		}
+	}
+	later := t0.Add(lifetime)
+	if _, _, err := newImpl().Invite(state, "charlie", random(100), later.Add(-time.Nanosecond), lifetime); !errors.Is(err, model.ErrMachineHeld) {
+		t.Errorf("the last invite a nanosecond before it expires: %v", err)
+	}
+	if _, _, err := newImpl().Invite(state, "charlie", random(100), later, lifetime); err != nil {
+		t.Errorf("the last invite at its expiry: %v", err)
+	}
+}
+
+func TestInviteAndRedeemKeepTheNanosecondsOfTheTimeTheyAreGiven(t *testing.T) {
+	t.Parallel()
+	now := t0.Add(123456789 * time.Nanosecond)
+	state, code := invited(t, model.Machines{}, "box", 8, now)
+	if len(state.Invites) != 1 || !state.Invites[0].Expires.Equal(now.Add(lifetime)) {
+		t.Fatalf("invites %+v, want one that expires at %v", state.Invites, now.Add(lifetime))
+	}
+	later := now.Add(987654321 * time.Nanosecond)
+	got, _, err := newImpl().Redeem(state, code, publicOf(1), later)
+	if err != nil || len(got.Active) != 1 || !got.Active[0].Created.Equal(later) {
+		t.Fatalf("%v machines %+v, want one created at %v", err, got.Active, later)
+	}
+	if _, _, err := newImpl().Redeem(state, code, publicOf(1), now.Add(lifetime-time.Nanosecond)); err != nil {
+		t.Errorf("one nanosecond before the expiry: %v", err)
+	}
+	if _, _, err := newImpl().Redeem(state, code, publicOf(1), now.Add(lifetime)); !errors.Is(err, model.ErrInvalidCode) {
+		t.Errorf("at the expiry: %v", err)
+	}
+}
+
+func TestVerifyNeverVerifiesAndNeverPanicsAgainstAStoredKeyOfThirtyOneOrThirtyThreeBytes(t *testing.T) {
+	t.Parallel()
+	good := publicOf(1)
+	for label, key := range map[string][]byte{
+		"thirty-one bytes":   good[:31],
+		"thirty-three bytes": append(append([]byte(nil), good...), 0),
+		"sixty-four bytes":   append(append([]byte(nil), good...), good...),
+	} {
+		state := machineState(t)
+		state.Active[0].PublicKey = key
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Errorf("%s: the call panicked: %v", label, recovered)
+				}
+			}()
+			got, name, err := verify(state, signedBy("linux-box", keyOf(1), t0.Unix()), t0)
+			if !errors.Is(err, model.ErrBadSignature) || name != "" || len(got.Seen) != 0 {
+				t.Errorf("%s: %q %v %+v", label, name, err, got.Seen)
+			}
+		}()
+	}
+}
+
+func TestFingerprintDoesNotChangeTheKeyItIsGiven(t *testing.T) {
+	t.Parallel()
+	for _, key := range [][]byte{publicOf(7), make([]byte, 32), {1, 2, 3}} {
+		before := append([]byte(nil), key...)
+		first := newImpl().Fingerprint(key)
+		if !bytes.Equal(key, before) {
+			t.Errorf("%d bytes: the key changed from %x to %x", len(key), before, key)
+		}
+		if second := newImpl().Fingerprint(key); second != first {
+			t.Errorf("%d bytes: %q and then %q", len(key), first, second)
+		}
+	}
+}
+
+func TestVerifyReportsTheExactSignedClockDifferenceEvenWhenItIsTooLargeForATimeDuration(t *testing.T) {
+	t.Parallel()
+	state := machineState(t)
+	for _, offset := range []int64{10_000_000_000, -10_000_000_000, 9_223_372_037, -9_223_372_037, 4_000_000_000_000} {
+		got, name, err := verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+offset), t0)
+		var skew *model.ClockSkewError
+		if !errors.As(err, &skew) || skew.Seconds != offset || name != "" {
+			t.Errorf("%d seconds: %q %v", offset, name, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), strconv.FormatInt(offset, 10)+" seconds") || !strings.Contains(strings.ToLower(err.Error()), "clock") {
+			t.Errorf("%d seconds: the text is %q", offset, err.Error())
+		}
+		if !reflect.DeepEqual(snapshot(got), snapshot(state)) {
+			t.Errorf("%d seconds: the state changed", offset)
 		}
 	}
 }

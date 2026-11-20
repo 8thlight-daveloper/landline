@@ -53,7 +53,13 @@ type hostRig struct {
 
 func startHostWith(t *testing.T, flags ...string) *hostRig {
 	t.Helper()
+	return startHostWithEnv(t, nil, flags...)
+}
+
+func startHostWithEnv(t *testing.T, extra []string, flags ...string) *hostRig {
+	t.Helper()
 	bin, home, env := serverEnv(t)
+	env = append(env, extra...)
 	addr := freeAddr(t)
 	began := time.Now()
 	args := append([]string{"server", "up", "--addr", addr}, flags...)
@@ -1104,7 +1110,12 @@ func TestAKeyFileWithAnExtraLineAfterTheKeyStillWorksBecauseTheReaderTakesTheFir
 	}
 }
 
-func TestMachinesListsEachMachineOnOneLineWithTheNameAFingerprintOfTheRawKeyAndTheCreatedDateAndNoKey(t *testing.T) {
+var (
+	lowerHexTwelve = regexp.MustCompile(`^[0-9a-f]{12}$`)
+	isoDate        = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+)
+
+func TestMachinesListsEachMachineOnOneLineWithTheNameAFingerprintOfTheRawKeyAndTheCreatedDateAsThreeTabSeparatedFieldsAndNoKey(t *testing.T) {
 	t.Parallel()
 	h := startHost(t)
 	first, second := h.machine("linux-box"), h.machine("mac-mini")
@@ -1119,19 +1130,29 @@ func TestMachinesListsEachMachineOnOneLineWithTheNameAFingerprintOfTheRawKeyAndT
 		}
 		created[name] = when.UTC().Format("2006-01-02")
 	}
-	for _, m := range []*machineRig{first, second} {
-		var matching []string
-		for _, each := range strings.Split(out, "\n") {
-			if strings.Contains(each, m.name) {
-				matching = append(matching, each)
-			}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("machines printed %d lines, want 2:\n%s", len(lines), safe(out))
+	}
+	fields := map[string][]string{}
+	for _, line := range lines {
+		parts := strings.Split(line, "\t")
+		if len(parts) != 3 {
+			t.Fatalf("the line %q has %d tab separated fields, want 3", line, len(parts))
 		}
-		if len(matching) != 1 {
-			t.Fatalf("%s appears on %d lines of:\n%s", m.name, len(matching), safe(string(out)))
+		fields[parts[0]] = parts
+	}
+	for _, m := range []*machineRig{first, second} {
+		parts, listed := fields[m.name]
+		if !listed {
+			t.Fatalf("%s is not the first field of any line of:\n%s", m.name, safe(out))
 		}
 		raw := sha256.Sum256(m.publicKey())
-		if !strings.Contains(matching[0], hex.EncodeToString(raw[:])[:12]) || !strings.Contains(matching[0], created[m.name]) {
-			t.Errorf("the line for %s is %q, want the name, the first 12 hex characters of the SHA-256 of its 32 key bytes, and its created date", m.name, matching[0])
+		if want := hex.EncodeToString(raw[:])[:12]; parts[1] != want || !lowerHexTwelve.MatchString(parts[1]) {
+			t.Errorf("the fingerprint field for %s is %q, want %q, the first 12 lower case hex characters of the SHA-256 of its 32 key bytes", m.name, parts[1], want)
+		}
+		if !isoDate.MatchString(parts[2]) || parts[2] != created[m.name] {
+			t.Errorf("the date field for %s is %q, want exactly %q shaped YYYY-MM-DD", m.name, parts[2], created[m.name])
 		}
 		for _, key := range []string{base64.StdEncoding.EncodeToString(m.publicKey()), hex.EncodeToString(m.publicKey()), strings.TrimSpace(readFileOrFail(t, m.keyPath()))} {
 			if strings.Contains(out, key) {
@@ -2276,5 +2297,275 @@ func TestAnUnknownNameSignedWithAGoodTimeGets401AndTheSameGenericRefusalAsAKnown
 	}
 	if wrongStatus != ghostStatus || wrongBody != ghostBody {
 		t.Errorf("a known name with a wrong key: %d %q, want the same status and body as the unknown name: %d %q", wrongStatus, wrongBody, ghostStatus, ghostBody)
+	}
+}
+
+func changedFiles(before, after map[string]string) []string {
+	var changed []string
+	for path, content := range before {
+		if now, kept := after[path]; !kept || now != content {
+			changed = append(changed, path)
+		}
+	}
+	for path := range after {
+		if _, had := before[path]; !had {
+			changed = append(changed, path)
+		}
+	}
+	return changed
+}
+
+var refusalOnly = regexp.MustCompile(`^([a-z ]+: )?` + regexp.QuoteMeta(invalidCode) + `$`)
+
+func TestRevokeAllIsSavedSoNoMachineIsListedOrCanSignAfterARestartOfTheSwitchboard(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	machines := []*machineRig{h.machine("one-box"), h.machine("two-box")}
+	for _, m := range machines {
+		m.registerAgent("alpha")
+	}
+	if out, err := h.run("server", "revoke", "--all"); err != nil {
+		t.Fatalf("revoke --all: %v %s", err, safe(string(out)))
+	}
+	if entries := storedEntries(t, readFileOrFail(t, h.dataFile("machines.json"))); len(entries) != 0 {
+		t.Errorf("machines.json holds %d machines right after revoke --all", len(entries))
+	}
+	h.restartAndSettle()
+	if twelveHex.MatchString(listedMachines(t, h)) {
+		t.Error("a machine came back after a restart that followed revoke --all")
+	}
+	if entries := storedEntries(t, readFileOrFail(t, h.dataFile("machines.json"))); len(entries) != 0 {
+		t.Errorf("machines.json holds %d machines after a restart", len(entries))
+	}
+	for _, m := range machines {
+		if status := h.signedStatus(m, time.Now().Unix(), "POST", "/v1/register", registerBody("bravo")); !refused(status) {
+			t.Errorf("%s signed a registration after revoke --all and a restart: %d", m.name, status)
+		}
+		if out, err := m.run("agents", "--json"); err == nil {
+			t.Errorf("%s still works after revoke --all and a restart: %s", m.name, safe(string(out)))
+		}
+	}
+}
+
+func TestAFailedJoinWithACodePrintsTheSwitchboardsRefusalAndNothingMoreAboutWhyAndNeverEchoesTheCode(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	h.invite("linux-box")
+	wrong := randomCode(t)
+	for _, typed := range []string{wrong, strings.ToLower(wrong), strings.ReplaceAll(wrong, "-", "")} {
+		out, err := h.newMachineHome().joinWith(typed)
+		if err == nil {
+			t.Fatalf("a join with the wrong code %q succeeded", typed)
+		}
+		line := strings.TrimSuffix(out, "\n")
+		if !refusalOnly.MatchString(line) {
+			t.Errorf("a failed join with %q printed %q, want only the switchboard's message %q", typed, line, invalidCode)
+		}
+		for _, echoed := range []string{wrong, strings.ToLower(wrong), strings.ReplaceAll(wrong, "-", ""), strings.ToLower(strings.ReplaceAll(wrong, "-", ""))} {
+			if strings.Contains(out, echoed) {
+				t.Errorf("a failed join echoed the code %q", echoed)
+			}
+		}
+		for _, status := range []string{"401", "unauthorized", "status"} {
+			if strings.Contains(strings.ToLower(out), status) {
+				t.Errorf("a failed join printed %q: %q", status, line)
+			}
+		}
+	}
+}
+
+func TestAKeyFileWithExtraLinesStillWorksForLogAndRegisterAndAMalformedFirstLineIsAnErrorThatNamesTheFileForEveryCommand(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	m := h.machine("linux-box")
+	seed := strings.TrimSpace(readFileOrFail(t, m.keyPath()))
+	commands := map[string][]string{
+		"log":      {"log"},
+		"register": {"register", "--id", "alpha", "--harness", "claude-code", "--host", "mac"},
+	}
+	for label, content := range map[string]string{
+		"two extra lines":          seed + "\nan extra line\nanother-extra-hunter2\n",
+		"a blank line then a line": seed + "\n\nafter the blank\n",
+		"no final line feed":       seed + "\nan extra line",
+	} {
+		if err := os.WriteFile(m.keyPath(), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for command, args := range commands {
+			if out, err := m.run(args...); err != nil {
+				t.Errorf("%s with a key file that has %s: %v %s", command, label, err, safe(string(out)))
+			}
+		}
+	}
+	for label, content := range map[string]string{
+		"garbage first line":      "garbage-first-line-hunter2!!\n" + seed + "\n",
+		"blank first line":        "\n" + seed + "\n",
+		"short seed first line":   base64.StdEncoding.EncodeToString([]byte("too short hunter2")) + "\n" + seed + "\n",
+		"a seed that is too long": base64.StdEncoding.EncodeToString(make([]byte, 33)) + "\n",
+	} {
+		if err := os.WriteFile(m.keyPath(), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		first, _, _ := strings.Cut(content, "\n")
+		for command, args := range commands {
+			out, err := m.run(args...)
+			if err == nil || !strings.Contains(out, "machine.key") || strings.Contains(out, "hunter2") || first != "" && strings.Contains(out, first) || strings.Contains(out, seed) {
+				t.Errorf("%s with %s: %v %q", command, label, err, safe(string(out)))
+			}
+		}
+	}
+}
+
+func TestTheCreatedDateOfAMachineIsTheUTCDateWhateverTheLocalTimeZoneOfTheSwitchboardAndTheCommand(t *testing.T) {
+	t.Parallel()
+	for _, zone := range []string{"Pacific/Kiritimati", "Etc/GMT+12"} {
+		zone := zone
+		t.Run(zone, func(t *testing.T) {
+			t.Parallel()
+			h := startHostWithEnv(t, []string{"TZ=" + zone})
+			before := time.Now().UTC().Format("2006-01-02")
+			h.machine("linux-box")
+			after := time.Now().UTC().Format("2006-01-02")
+			listed := strings.Split(strings.TrimSuffix(listedMachines(t, h), "\n"), "\t")
+			if len(listed) != 3 || listed[0] != "linux-box" || listed[2] != before && listed[2] != after {
+				t.Errorf("under TZ=%s machines printed %q, want the UTC date %s or %s in the third field", zone, listed, before, after)
+			}
+			entries := storedEntries(t, readFileOrFail(t, h.dataFile("machines.json")))
+			if len(entries) != 1 {
+				t.Fatalf("machines.json holds %d machines", len(entries))
+			}
+			stamp, _ := entries[0]["created"].(string)
+			if !strings.HasSuffix(stamp, "Z") || len(stamp) < 10 || stamp[:10] != before && stamp[:10] != after {
+				t.Errorf("under TZ=%s the created field is %q, want an RFC 3339 UTC time on %s or %s", zone, stamp, before, after)
+			}
+		})
+	}
+}
+
+func TestAValidCodeWithAValid32ByteKeyFollowedByExtraCharactersAnswers400AndIsNotUsedUp(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	code := h.invite("linux-box")
+	failRedeems(t, h, 4)
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	clean := base64.StdEncoding.EncodeToString(priv.Public().(ed25519.PublicKey))
+	for _, trailing := range []string{"!!", "!", "!!!!"} {
+		body, _ := json.Marshal(map[string]string{"code": code, "public_key": clean + trailing})
+		if status, _ := h.rawRequest("PATCH", "/v1/machines", body, nil); status != http.StatusBadRequest {
+			t.Errorf("a valid key followed by %q answered %d, want 400", trailing, status)
+		}
+	}
+	body, _ := json.Marshal(map[string]string{"code": code, "public_key": clean})
+	if status, answer := h.rawRequest("PATCH", "/v1/machines", body, nil); status < 200 || status > 299 || !strings.Contains(answer, "linux-box") {
+		t.Errorf("the redeem with a clean key after the refused ones answered %d %s", status, h.clean(answer))
+	}
+	if !strings.Contains(listedMachines(t, h), "linux-box") {
+		t.Error("the machine was not made")
+	}
+}
+
+func TestJoinWithASecretIsRefusedAndChangesNoFileWhileAMachineKeyIsSaved(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	m := h.machine("linux-box")
+	m.registerAgent("alpha")
+	before := filesUnder(t, m.home)
+	withSecret := append(append([]string{}, m.env...), "LANDLINE_SECRET="+h.secret)
+	for label, env := range map[string][]string{"with the secret in the environment": withSecret, "with no secret": m.env} {
+		out, err := runIn(t, h.bin, env, m.home, "server", "join", h.addr)
+		if err == nil {
+			t.Errorf("a join with a secret %s succeeded: %s", label, h.clean(out))
+		}
+		if strings.Contains(out, h.secret) {
+			t.Errorf("a refused join %s printed the secret", label)
+		}
+		if changed := changedFiles(before, filesUnder(t, m.home)); len(changed) != 0 {
+			t.Errorf("a refused join %s changed %v", label, changed)
+		}
+	}
+	if out, err := m.run("agents", "--json"); err != nil {
+		t.Errorf("the machine stopped working after a refused join: %v %s", err, safe(string(out)))
+	}
+}
+
+func TestJoinWithAnEmptyCodeIsAnErrorThatNeverAsksForASecretAndChangesNoFile(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	m := h.newMachineHome()
+	writeConfigFile(t, m.home, "config.toml", "secret = \""+joinedSecret+joinedSecret+"\"\nhost = \"old.invalid\"\nport = 1\n")
+	before := filesUnder(t, m.home)
+	withSecret := append(append([]string{}, m.env...), "LANDLINE_SECRET="+h.secret)
+	for label, env := range map[string][]string{"with the secret in the environment": withSecret, "with no secret": m.env} {
+		for _, args := range [][]string{{"server", "join", h.addr, "--code="}, {"server", "join", h.addr, "--code", ""}} {
+			out, err := runIn(t, h.bin, env, m.home, args...)
+			if err == nil {
+				t.Errorf("%q %s succeeded: %s", args[3:], label, h.clean(out))
+			}
+			if strings.Contains(strings.ToLower(out), "secret:") || strings.Contains(out, h.secret) {
+				t.Errorf("%q %s asked for or printed a secret: %q", args[3:], label, h.clean(out))
+			}
+			if changed := changedFiles(before, filesUnder(t, m.home)); len(changed) != 0 {
+				t.Errorf("%q %s changed %v", args[3:], label, changed)
+			}
+		}
+	}
+}
+
+func TestInviteRunWithALandlineURLThatNamesAnotherLocalPortOfTheSwitchboardPrintsAJoinLineWithThatPort(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	proxy := startProxy(t, h.addr)
+	if proxy.port == h.port {
+		t.Fatal("the proxy listens on the switchboard's own port")
+	}
+	env := append(append([]string{}, h.env...), "LANDLINE_URL=http://"+net.JoinHostPort(proxy.host, proxy.port))
+	out, err := runIn(t, h.bin, env, h.home, "server", "invite", "--name", "linux-box")
+	if err != nil {
+		t.Fatalf("invite through the other port: %v %s", err, h.clean(out))
+	}
+	found := joinCommandLine.FindStringSubmatch(strings.TrimSpace(out))
+	if found == nil {
+		t.Fatalf("invite printed %q", h.clean(out))
+	}
+	h.issued = append(h.issued, found[2])
+	if _, port, splitErr := net.SplitHostPort(found[1]); splitErr != nil || port != proxy.port {
+		t.Errorf("the join line names %q, want port %s, the port LANDLINE_URL named and not the saved port %s", found[1], proxy.port, h.port)
+	}
+	if len(proxy.requests()) == 0 {
+		t.Error("the invite did not go through the port that LANDLINE_URL named")
+	}
+	if joinOut, joinErr := h.newMachineHome().run("server", "join", found[1], "--code", found[2]); joinErr != nil {
+		t.Errorf("the printed join command did not work: %v %s", joinErr, h.clean(joinOut))
+	}
+}
+
+func TestAMalformedMachineKeyDoesNotStopMachinesInviteOrRevokeOnTheSwitchboardMachineThatHoldsTheSharedSecret(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	h.machine("linux-box")
+	for label, content := range map[string]string{
+		"not base64":   "this-is-not-base64-content-hunter2!!\n",
+		"wrong length": base64.StdEncoding.EncodeToString([]byte("too short hunter2")) + "\n",
+		"empty":        "\n",
+	} {
+		writeConfigFile(t, h.home, "machine.key", content)
+		if out, err := h.run("server", "machines"); err != nil || !strings.Contains(out, "linux-box") {
+			t.Errorf("machines with a key file that is %s: %v %q", label, err, safe(out))
+		}
+		if out, err := h.run("server", "invite", "--name", "probe-box"); err != nil || !joinCommandLine.MatchString(strings.TrimSpace(out)) {
+			t.Errorf("invite with a key file that is %s: %v %q", label, err, safe(out))
+		}
+		if out, err := h.run("server", "revoke", "probe-box"); err != nil {
+			t.Errorf("revoke of a pending invite with a key file that is %s: %v %q", label, err, safe(out))
+		}
+	}
+	if out, err := h.run("server", "revoke", "linux-box"); err != nil {
+		t.Errorf("revoke of a machine with a malformed key file: %v %q", err, safe(out))
+	}
+	if out, err := h.run("server", "revoke", "--all"); err != nil {
+		t.Errorf("revoke --all with a malformed key file: %v %q", err, safe(out))
+	}
+	if twelveHex.MatchString(listedMachines(t, h)) {
+		t.Error("a machine remains after revoke")
 	}
 }
