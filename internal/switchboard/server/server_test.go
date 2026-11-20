@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -2038,5 +2039,22 @@ func TestAHubRestartForgetsObservers(t *testing.T) {
 	restarted := start(t)
 	if status, _ := restarted.call("GET", "/v1/agents", observer, nil); status != 401 {
 		t.Fatalf("status %d", status)
+	}
+}
+
+func TestARedeemWhoseKeyIsNotCleanBase64Gets400AndKeepsTheInvite(t *testing.T) {
+	h := start(t)
+	status, raw := h.call("POST", "/v1/machines", secret, map[string]string{"name": "alpha"})
+	if status != 200 {
+		t.Fatalf("invite: %d %s", status, raw)
+	}
+	var made struct{ Code string }
+	json.Unmarshal(raw, &made)
+	good := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	if status, _ := h.call("PATCH", "/v1/machines", "", map[string]string{"code": made.Code, "public_key": good + "!!!"}); status != 400 {
+		t.Fatalf("garbage after a full key: %d", status)
+	}
+	if status, raw := h.call("PATCH", "/v1/machines", "", map[string]string{"code": made.Code, "public_key": good}); status != 200 {
+		t.Fatalf("the invite was used up: %d %s", status, raw)
 	}
 }

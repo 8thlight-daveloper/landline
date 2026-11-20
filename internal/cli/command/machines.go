@@ -66,7 +66,11 @@ func serverInvite(args []string, env Env) int {
 		return 1
 	}
 	host, port, _ := config.Listen(env.processEnvironment)
-	fmt.Fprintf(env.Stdout, "landline server join %s --code %s\n", net.JoinHostPort(host, strconv.Itoa(port)), made.Code)
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+	if contacted, parseErr := url.Parse(HubURL(env)); parseErr == nil && contacted.Host != "" {
+		address = contacted.Host
+	}
+	fmt.Fprintf(env.Stdout, "landline server join %s --code %s\n", address, made.Code)
 	return 0
 }
 

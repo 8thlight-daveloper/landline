@@ -30,6 +30,7 @@ type Env struct {
 
 	processGetenv func(string) string
 	configProblem error
+	keyProblem    error
 	signer        *client.Signer
 }
 

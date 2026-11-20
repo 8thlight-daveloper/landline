@@ -171,8 +171,9 @@ every agent registers again, as after a restart. It refuses, and changes nothing
 machine's (`localhost`, a loopback IP, or a name or IP that resolves to an address of one of its interfaces), when
 `LANDLINE_SECRET` is set in the environment, when `landline-switchboard` cannot be found, or when something that
 `landline server up` did not start answers at the saved address, such as a switchboard that launchd runs, because the
-command cannot stop it. Without `--addr` the new switchboard keeps the saved address. A session whose own environment
-sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
+command cannot stop it. Without `--addr` the new switchboard keeps the saved address. It does not remember `--log`, so
+pass the same `--log` again, or the new switchboard reads the `machines.json` of another folder and lists no machines. A
+session whose own environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
 ([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md)).
 
 #### Channel delivery in Claude Code

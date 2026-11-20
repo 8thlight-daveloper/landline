@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -191,7 +192,9 @@ func readRedeem(w http.ResponseWriter, r *http.Request) (string, []byte) {
 	var encoded string
 	var key []byte
 	if json.Unmarshal(fields["public_key"], &encoded) == nil {
-		key, _ = base64.StdEncoding.DecodeString(encoded)
+		if decoded, decodeErr := base64.StdEncoding.DecodeString(encoded); decodeErr == nil {
+			key = decoded
+		}
 	}
 	return code, key
 }
@@ -321,3 +324,7 @@ func newMachineSettings(cfg *Config) {
 }
 
 func newMachineRegistry() machineregistry.Registry { return machineregistry.New() }
+
+func (s *Server) machineActiveLocked(name string) bool {
+	return slices.ContainsFunc(s.state.Active, func(machine model.Machine) bool { return machine.Name == name })
+}

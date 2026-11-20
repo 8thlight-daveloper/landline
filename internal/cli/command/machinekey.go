@@ -91,6 +91,9 @@ func credentialClient(env Env, url string) (*client.Client, error) {
 	if env.signer != nil {
 		return client.NewSigned(url, *env.signer), nil
 	}
+	if env.keyProblem != nil {
+		return nil, env.keyProblem
+	}
 	secret := env.Getenv("LANDLINE_SECRET")
 	if secret == "" {
 		return nil, errors.New(NoCredentialMessage)

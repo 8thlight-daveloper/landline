@@ -269,8 +269,9 @@ func withConfig(env Env) Env {
 	if env.processGetenv == nil {
 		env.processGetenv = original
 	}
+	env.keyProblem = nil
 	if problem == nil && env.processGetenv("LANDLINE_SECRET") == "" {
-		env.signer, problem = savedSigner(env, saved)
+		env.signer, env.keyProblem = savedSigner(env, saved)
 	}
 	env.configProblem = problem
 	env.Getenv = func(key string) string {
@@ -302,15 +303,17 @@ func HubURL(env Env) string {
 
 func join(args []string, env Env) error {
 	set := flags("join", env)
-	code := new(string)
+	code, given := new(string), new(bool)
 	rest := []string{}
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--code" && i+1 < len(args):
 			*code = args[i+1]
+			*given = true
 			i++
 		case strings.HasPrefix(args[i], "--code="):
 			*code = strings.TrimPrefix(args[i], "--code=")
+			*given = true
 		default:
 			rest = append(rest, args[i])
 		}
@@ -325,8 +328,14 @@ func join(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	if *given && strings.TrimSpace(*code) == "" {
+		return errors.New("the invite code is empty. Run landline server join <host:port> --code <code>")
+	}
 	if *code != "" {
 		return joinWithCode(env, host, port, *code)
+	}
+	if _, statErr := os.Stat(machineKeyPath(env)); statErr == nil {
+		return fmt.Errorf("this machine holds a machine key at %s. Joining with a secret would leave that key in use. Remove the key file and the machine line in %s first, or run landline server join <host:port> --code <code>", machineKeyPath(env), configPath(env))
 	}
 	secret := env.processEnvironment("LANDLINE_SECRET")
 	if secret == "" {

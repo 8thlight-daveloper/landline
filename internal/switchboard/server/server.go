@@ -311,6 +311,10 @@ func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if machine != "" && !s.machineActiveLocked(machine) {
+		fail(w, http.StatusUnauthorized, machineRefusal)
+		return
+	}
 	s.expireLocked()
 	token := s.cfg.NewToken()
 	s.observers[token] = s.cfg.Now()
@@ -371,6 +375,10 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if machine != "" && !s.machineActiveLocked(machine) {
+		fail(w, http.StatusUnauthorized, machineRefusal)
+		return
+	}
 	s.expireLocked()
 	id := body.ID
 	if body.Seed != "" {

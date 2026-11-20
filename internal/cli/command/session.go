@@ -151,6 +151,9 @@ func (s *Session) register() error {
 	if saved.configProblem != nil {
 		return saved.configProblem
 	}
+	if saved.keyProblem != nil && saved.signer == nil && saved.processEnvironment("LANDLINE_SECRET") == "" {
+		return saved.keyProblem
+	}
 	url := saved.Getenv("LANDLINE_URL")
 	hub, err := credentialClient(saved, url)
 	if err != nil {

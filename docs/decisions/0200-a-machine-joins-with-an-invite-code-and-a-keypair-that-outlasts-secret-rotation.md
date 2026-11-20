@@ -60,6 +60,9 @@ them gets `401` or `403`. `GET /v1/machines` lists active machines only.
    public key, and saves the key, the address, and `machine = "<name>"` from the reply when the switchboard accepts. It
    removes the `secret` line from `config.toml`, so that the machine holds one credential. A join that fails changes no
    file, and a working key and `config.toml` stay as they were.
+1. `landline server join <host:port>` without a code refuses while a `machine.key` is saved, and changes nothing,
+   because the key would stay first in the credential order. The person removes the key file and the `machine` line, or
+   joins with a code. An empty `--code` is an error and never falls back to the secret.
 1. The switchboard keeps the invites in memory. A restart cancels every invite that is waiting.
 
 `PATCH /v1/machines` takes no `Authorization` header. The public key is the standard base64 of the 32 key bytes.
