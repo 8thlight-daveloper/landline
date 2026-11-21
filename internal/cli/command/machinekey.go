@@ -53,11 +53,15 @@ func writeMachineKey(env Env, key ed25519.PrivateKey) error {
 
 var machineNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
-func snapshotJoinFiles(env Env) func() {
+func snapshotJoinFiles(env Env) (func(), error) {
 	paths := []string{machineKeyPath(env), configPath(env)}
 	contents := make([][]byte, len(paths))
 	for i, path := range paths {
-		contents[i], _ = os.ReadFile(path)
+		raw, err := os.ReadFile(path)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("%s cannot be read, so a failed join could not put it back: %v. Nothing was saved and the code was not used", path, err)
+		}
+		contents[i] = raw
 	}
 	return func() {
 		for i, path := range paths {
@@ -69,7 +73,7 @@ func snapshotJoinFiles(env Env) func() {
 			os.WriteFile(path, contents[i], 0o600)
 			os.Chmod(path, 0o600)
 		}
-	}
+	}, nil
 }
 
 func newMachineKey() (ed25519.PublicKey, ed25519.PrivateKey, error) {

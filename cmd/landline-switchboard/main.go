@@ -116,14 +116,7 @@ func listenOn(addr string) (net.Listener, []net.IP, error) {
 	if len(resolved) == 0 {
 		return nil, nil, fmt.Errorf("lookup %s: no addresses", host)
 	}
-	chosen := resolved[0]
-	for _, ip := range resolved {
-		if ip.To4() != nil {
-			chosen = ip
-			break
-		}
-	}
-	listener, err := net.Listen("tcp", net.JoinHostPort(chosen.String(), port))
+	listener, err := net.Listen("tcp", net.JoinHostPort(resolved[0].String(), port))
 	return listener, resolved, err
 }
 

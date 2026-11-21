@@ -171,9 +171,9 @@ every agent registers again, as after a restart. It refuses, and changes nothing
 machine's (`localhost`, a loopback IP, or a name or IP that resolves to an address of one of its interfaces), when
 `LANDLINE_SECRET` is set in the environment, when `landline-switchboard` cannot be found, or when something that
 `landline server up` did not start answers at the saved address, such as a switchboard that launchd runs, because the
-command cannot stop it. Without `--addr` the new switchboard keeps the saved address. It does not remember `--log`, so
-pass the same `--log` again, or the new switchboard reads the `machines.json` of another folder and lists no machines. A
-session whose own environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
+command cannot stop it. Without `--addr` the new switchboard keeps the saved address. Without `--log` it keeps the log
+file of the switchboard it stops, so it reads the same `machines.json` and keeps the machines. A session whose own
+environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
 ([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md)).
 
 #### Channel delivery in Claude Code
@@ -300,14 +300,14 @@ listen on a private network address such as a Tailscale one. Traffic on a tailne
 switchboard prints a warning that it speaks plain HTTP. On the first machine, name the address once:
 
 ```sh
-landline server up --addr davelight-mbp:8787         # saves host and port in config.toml after it listens
+landline server up --addr alpha-host:8787            # saves host and port in config.toml after it listens
 ```
 
 On the second machine, join with an invite. The first machine makes a code, and the second redeems it:
 
 ```sh
 landline server invite --name linux-box              # first machine. Prints the join line below, with a code
-landline server join davelight-mbp:8787 --code K7M2-9QXA   # second machine
+landline server join alpha-host:8787 --code K7M2-9QXA   # second machine
 landline setup claude
 ```
 
@@ -329,7 +329,7 @@ To join with the secret instead, set it and run `join` without a code:
 
 ```sh
 export LANDLINE_SECRET=...                            # the switchboard's secret, from the first machine's config.toml
-landline server join davelight-mbp:8787               # or an IP address, or 127.0.0.1:8787 through an SSH tunnel
+landline server join alpha-host:8787                 # or an IP address, or 127.0.0.1:8787 through an SSH tunnel
 ```
 
 Without `--code`, `join` saves `host`, `port`, and the secret, and refuses an `https://` address because Landline speaks

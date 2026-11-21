@@ -80,15 +80,21 @@ func writeMachines(path string, machines []model.Machine) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	temporary := path + ".tmp"
-	os.Remove(temporary)
-	if err := os.WriteFile(temporary, append(raw, '\n'), 0o600); err != nil {
+	temporary, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.saving")
+	if err != nil {
 		return err
 	}
-	if err := os.Chmod(temporary, 0o600); err != nil {
+	_, writeErr := temporary.Write(append(raw, '\n'))
+	closeErr := temporary.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		os.Remove(temporary.Name())
 		return err
 	}
-	return os.Rename(temporary, path)
+	if err := os.Rename(temporary.Name(), path); err != nil {
+		os.Remove(temporary.Name())
+		return err
+	}
+	return nil
 }
 
 func (s *Server) saveMachinesLocked(state model.Machines) error {
@@ -124,7 +130,7 @@ func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header st
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	request := model.SignedRequest{Name: fields["name"], Time: unix, Nonce: fields["nonce"], Signature: signature, Method: r.Method, Path: r.URL.RequestURI(), Body: body}
 	s.mu.Lock()
-	next, name, err := s.machines.Verify(s.state, request, s.cfg.Now(), s.started, s.cfg.SignatureWindow)
+	next, name, err := s.machines.Verify(s.state, request, requestTime(r), s.started, s.cfg.SignatureWindow)
 	if err == nil {
 		s.state = next
 	}
@@ -149,12 +155,13 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	now := requestTime(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for attempt := 0; attempt < inviteRetries; attempt++ {
 		random := make([]byte, 16)
 		s.cfg.NewRandom(random)
-		next, code, err := s.machines.Invite(s.state, body.Name, random, s.cfg.Now(), s.cfg.InviteLifetime)
+		next, code, err := s.machines.Invite(s.state, body.Name, random, now, s.cfg.InviteLifetime)
 		switch {
 		case err == nil:
 			s.state = next
@@ -203,7 +210,7 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 	code, key := readRedeem(w, r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	next, name, err := s.machines.Redeem(s.state, code, key, s.cfg.Now())
+	next, name, err := s.machines.Redeem(s.state, code, key, requestTime(r))
 	switch {
 	case errors.Is(err, model.ErrInvalidCode):
 		s.state = next
@@ -288,6 +295,11 @@ func (s *Server) endMachineLocked(matches func(string) bool) {
 		}
 		delete(s.machineTokens, token)
 	}
+	for id, open := range s.streams {
+		if open.machine != "" && matches(open.machine) {
+			s.endStreamLocked(id, open)
+		}
+	}
 }
 
 func (s *Server) removeAgentLocked(id string) {
@@ -299,14 +311,7 @@ func (s *Server) removeAgentLocked(id string) {
 	}
 	s.agents = kept
 	if open := s.streams[id]; open != nil {
-		delete(s.streams, id)
-		close(open.done)
-		for pendingID, waiting := range s.pending {
-			if waiting.stream == open {
-				delete(s.pending, pendingID)
-				close(waiting.lost)
-			}
-		}
+		s.endStreamLocked(id, open)
 	}
 	s.forgetLocked(id)
 }

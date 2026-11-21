@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	nethttp "net/http"
@@ -46,8 +47,9 @@ func (c *Client) do(method, path string, in, out any) error {
 	return c.doWith(true, method, path, in, out)
 }
 
+const machineRefusal = "missing or wrong switchboard secret or machine signature"
+
 func (c *Client) doWith(authorized bool, method, path string, in, out any) error {
-	var body io.Reader
 	var raw []byte
 	if in != nil {
 		var err error
@@ -55,6 +57,20 @@ func (c *Client) doWith(authorized bool, method, path string, in, out any) error
 		if err != nil {
 			return err
 		}
+	}
+	err := c.send(authorized, method, path, raw, out)
+	var refused *StatusError
+	signed := authorized && c.Signer != nil && signedRoute(method, path)
+	if signed && errors.As(err, &refused) && refused.Status == nethttp.StatusUnauthorized && refused.Message == machineRefusal {
+		time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+		err = c.send(authorized, method, path, raw, out)
+	}
+	return err
+}
+
+func (c *Client) send(authorized bool, method, path string, raw []byte, out any) error {
+	var body io.Reader
+	if raw != nil {
 		body = bytes.NewReader(raw)
 	}
 	req, err := nethttp.NewRequest(method, c.URL+path, body)
@@ -68,7 +84,7 @@ func (c *Client) doWith(authorized bool, method, path string, in, out any) error
 	default:
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-	if in != nil {
+	if raw != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.http.Do(req)

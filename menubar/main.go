@@ -71,12 +71,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		address = strings.TrimRight(os.Getenv("LANDLINE_URL"), "/")
 	}
 	client := hubclient.NewWith(address, credential)
-	client.RereadCredentialWith(func() hubclient.Credential {
-		_, fresh, err := hubclient.DiscoverCredential(os.Getenv, home)
+	client.RereadCredentialWith(func() (string, hubclient.Credential) {
+		address, fresh, err := hubclient.DiscoverCredential(os.Getenv, home)
 		if err != nil {
-			return hubclient.Credential{}
+			return "", hubclient.Credential{}
 		}
-		return fresh
+		return address, fresh
 	})
 	app := buildinfo.Stamped(version, commit)
 	self, _ := os.Executable()

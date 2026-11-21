@@ -42,6 +42,7 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "codex_thread must be a lowercase UUID")
 		return
 	}
+	now := requestTime(r)
 	s.mu.Lock()
 	agent, found := s.reg.Find(s.agents, name)
 	if !found {
@@ -64,13 +65,13 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 	var challengeText, challengeThread string
 	switch {
 	case body.CodexThread != "" && body.Code == "":
-		if !s.takeChallengeSlot(name) {
+		if !s.takeChallengeSlot(name, now) {
 			s.mu.Unlock()
 			fail(w, http.StatusTooManyRequests, "too many proof challenges, try again later")
 			return
 		}
 		code := s.cfg.NewCode()
-		s.attach[name] = &attachChallenge{thread: body.CodexThread, code: code, expires: s.cfg.Now().Add(attachLifetime)}
+		s.attach[name] = &attachChallenge{thread: body.CodexThread, code: code, expires: now.Add(attachLifetime)}
 		challengeThread = body.CodexThread
 		challengeText = model.Render(model.Envelope{
 			ID: "attach", Thread: model.DefaultThread, From: "landline", Kind: model.KindChat,
@@ -79,7 +80,7 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 		response.Challenge = true
 	case body.CodexThread != "":
 		pending := s.attach[name]
-		if pending == nil || s.cfg.Now().After(pending.expires) {
+		if pending == nil || now.After(pending.expires) {
 			delete(s.attach, name)
 			s.mu.Unlock()
 			fail(w, http.StatusUnprocessableEntity, "there is no pending code for this agent, or it expired. Ask for a new one")
@@ -98,7 +99,7 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 		response.Attached = true
 	}
 	if len(updated) > 0 {
-		revised, err := s.reg.Register(s.agents, agent, s.cfg.Now())
+		revised, err := s.reg.Register(s.agents, agent, now)
 		if err != nil {
 			s.mu.Unlock()
 			fail(w, http.StatusBadRequest, err.Error())
@@ -126,8 +127,7 @@ func (s *Server) attachClaims(w http.ResponseWriter, r *http.Request) {
 	write(w, http.StatusOK, response)
 }
 
-func (s *Server) takeChallengeSlot(name string) bool {
-	now := s.cfg.Now()
+func (s *Server) takeChallengeSlot(name string, now time.Time) bool {
 	recent := []time.Time{}
 	for _, at := range s.sent[name] {
 		if now.Sub(at) < s.cfg.ChallengeWindow {
@@ -170,6 +170,7 @@ func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "task must be present and a string")
 		return
 	}
+	now := requestTime(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	agent, found := s.reg.Find(s.agents, id)
@@ -181,10 +182,10 @@ func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
 		agent.Task = *body.Task
 		agent.TaskAt = time.Time{}
 		if agent.Task != "" {
-			agent.TaskAt = s.cfg.Now()
+			agent.TaskAt = now
 		}
 	}
-	updated, err := s.reg.Register(s.agents, agent, s.cfg.Now())
+	updated, err := s.reg.Register(s.agents, agent, now)
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return

@@ -103,12 +103,12 @@ func connect(stderr io.Writer) (*hubclient.Client, int) {
 		return nil, fail(stderr, err.Error(), 1)
 	}
 	client := hubclient.NewWith(address, credential)
-	client.RereadCredentialWith(func() hubclient.Credential {
-		_, fresh, err := hubclient.DiscoverCredential(os.Getenv, home)
+	client.RereadCredentialWith(func() (string, hubclient.Credential) {
+		address, fresh, err := hubclient.DiscoverCredential(os.Getenv, home)
 		if err != nil {
-			return hubclient.Credential{}
+			return "", hubclient.Credential{}
 		}
-		return fresh
+		return address, fresh
 	})
 	return client, 0
 }

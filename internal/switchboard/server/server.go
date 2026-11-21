@@ -73,8 +73,9 @@ type Server struct {
 }
 
 type stream struct {
-	out  chan model.Delivery
-	done chan struct{}
+	out     chan model.Delivery
+	done    chan struct{}
+	machine string
 }
 
 type pendingDelivery struct {
@@ -171,15 +172,21 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) expiring(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		now := s.cfg.Now()
 		s.mu.Lock()
-		s.expireLocked()
+		s.expireLocked(now)
 		s.mu.Unlock()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestTimeKey{}, now)))
 	})
 }
 
-func (s *Server) expireLocked() {
-	now := s.cfg.Now()
+type requestTimeKey struct{}
+
+func requestTime(r *http.Request) time.Time {
+	return r.Context().Value(requestTimeKey{}).(time.Time)
+}
+
+func (s *Server) expireLocked(now time.Time) {
 	kept := make([]model.Agent, 0, len(s.agents))
 	for _, agent := range s.agents {
 		if s.streams[agent.ID] != nil || now.Sub(agent.LastSeen) <= s.cfg.Grace {
@@ -237,11 +244,12 @@ func (s *Server) callerFor(r *http.Request) (string, caller) {
 	if token == "" {
 		return "", unknownCaller
 	}
+	now := requestTime(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.expireLocked()
+	s.expireLocked(now)
 	if _, ok := s.observers[token]; ok {
-		s.observers[token] = s.cfg.Now()
+		s.observers[token] = now
 		return "", observerCaller
 	}
 	name, ok := s.tokens[token]
@@ -249,7 +257,7 @@ func (s *Server) callerFor(r *http.Request) (string, caller) {
 		return "", unknownCaller
 	}
 	if agent, found := s.reg.Find(s.agents, name); found {
-		if updated, err := s.reg.Register(s.agents, agent, s.cfg.Now()); err == nil {
+		if updated, err := s.reg.Register(s.agents, agent, now); err == nil {
 			s.agents = updated
 		}
 	}
@@ -273,13 +281,14 @@ func (s *Server) observerRefreshed(r *http.Request) bool {
 	if token == "" {
 		return false
 	}
+	now := requestTime(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.expireLocked()
+	s.expireLocked(now)
 	if _, ok := s.observers[token]; !ok {
 		return false
 	}
-	s.observers[token] = s.cfg.Now()
+	s.observers[token] = now
 	return true
 }
 
@@ -315,9 +324,10 @@ func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnauthorized, machineRefusal)
 		return
 	}
-	s.expireLocked()
+	now := requestTime(r)
+	s.expireLocked(now)
 	token := s.cfg.NewToken()
-	s.observers[token] = s.cfg.Now()
+	s.observers[token] = now
 	if machine != "" {
 		s.machineTokens[token] = machine
 	}
@@ -379,7 +389,8 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnauthorized, machineRefusal)
 		return
 	}
-	s.expireLocked()
+	now := requestTime(r)
+	s.expireLocked(now)
 	id := body.ID
 	if body.Seed != "" {
 		id = s.newID()
@@ -390,7 +401,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		LandlineCommit: body.LandlineCommit, LandlineDate: body.LandlineDate,
 		Model: body.Model, Effort: body.Effort, Project: body.Project,
 	}
-	updated, err := s.reg.Register(s.agents, entry, s.cfg.Now())
+	updated, err := s.reg.Register(s.agents, entry, now)
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
@@ -458,9 +469,10 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	now := requestTime(r)
 	s.mu.Lock()
-	s.expireLocked()
-	decision, err := s.rt.Route(s.agents, from, model.SendRequest(body), s.cfg.NewID(), s.seq+1, s.cfg.Now())
+	s.expireLocked(now)
+	decision, err := s.rt.Route(s.agents, from, model.SendRequest(body), s.cfg.NewID(), s.seq+1, now)
 	if err != nil {
 		problem := err.Error()
 		if errors.Is(err, model.ErrUnknownRecipient) && body.To != model.Broadcast {
@@ -637,8 +649,14 @@ func (s *Server) openStream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	mine := &stream{out: make(chan model.Delivery), done: make(chan struct{})}
+	token := bearer(r)
 	s.mu.Lock()
+	if s.tokens[token] != name {
+		s.mu.Unlock()
+		fail(w, http.StatusUnauthorized, "missing or unknown agent token")
+		return
+	}
+	mine := &stream{out: make(chan model.Delivery), done: make(chan struct{}), machine: s.machineTokens[token]}
 	if previous := s.streams[name]; previous != nil {
 		close(previous.done)
 	}
@@ -690,17 +708,21 @@ func (s *Server) closeStream(name string, closing *stream) {
 	if s.streams[name] != closing {
 		return
 	}
+	s.endStreamLocked(name, closing)
+	if agent, found := s.reg.Find(s.agents, name); found {
+		if updated, err := s.reg.Register(s.agents, agent, s.cfg.Now()); err == nil {
+			s.agents = updated
+		}
+	}
+}
+
+func (s *Server) endStreamLocked(name string, closing *stream) {
 	delete(s.streams, name)
 	close(closing.done)
 	for id, waiting := range s.pending {
 		if waiting.stream == closing {
 			delete(s.pending, id)
 			close(waiting.lost)
-		}
-	}
-	if agent, found := s.reg.Find(s.agents, name); found {
-		if updated, err := s.reg.Register(s.agents, agent, s.cfg.Now()); err == nil {
-			s.agents = updated
 		}
 	}
 }
@@ -711,7 +733,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.expireLocked()
+	s.expireLocked(requestTime(r))
 	listed := append([]model.Agent{}, s.agents...)
 	connected := map[string]bool{}
 	for name := range s.streams {

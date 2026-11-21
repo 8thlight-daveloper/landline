@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/8thlight-daveloper/landline/menubar/internal/agentsview"
@@ -16,6 +17,7 @@ type Source interface {
 
 type Observed struct {
 	Reachable     bool
+	KeyRefusal    string
 	Agents        []agentsview.Row
 	Switchboard   model.Switchboard
 	LandlineFound bool
@@ -24,6 +26,10 @@ type Observed struct {
 func Observe(source Source, landlineFound bool) Observed {
 	observed := Observed{LandlineFound: landlineFound}
 	agents, err := source.Agents()
+	var refusal hubclient.KeyRefusal
+	if errors.As(err, &refusal) {
+		observed.KeyRefusal = refusal.Text
+	}
 	if err != nil {
 		return observed
 	}
@@ -60,9 +66,10 @@ func (s *Session) Apply(observed Observed) {
 	defer s.mu.Unlock()
 	s.observed, s.local = observed, local
 	switch {
-	case s.notice == "":
 	case s.skip:
 		s.skip = false
+	case observed.KeyRefusal != "":
+		s.notice = observed.KeyRefusal
 	case observed.Reachable:
 		s.notice = ""
 	}

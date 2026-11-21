@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -46,8 +49,12 @@ func serverRotateSecret(args []string, env Env, dataDir string) int {
 			}
 		}
 	}
-	if values, _ := FlagValues(args, SwitchboardFlags...); values["--addr"] == "" {
+	values, _ := FlagValues(args, SwitchboardFlags...)
+	if values["--addr"] == "" {
 		args = append([]string{"--addr", address}, args...)
+	}
+	if logPath := runningLogPath(dataDir); values["--log"] == "" && logPath != "" {
+		args = append([]string{"--log", logPath}, args...)
 	}
 	quiet := env
 	quiet.Stdout = io.Discard
@@ -101,4 +108,32 @@ func addressAnswers(address string) bool {
 	}
 	connection.Close()
 	return true
+}
+
+const (
+	listeningMarker = " listening on "
+	logMarker       = "\", log "
+	asGivenMarker   = ", address as given "
+)
+
+func runningLogPath(dataDir string) string {
+	if _, owned := switchboardPID(dataDir); !owned {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(dataDir, "switchboard.out"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(line, SwitchboardBinaryName+listeningMarker) {
+			continue
+		}
+		_, rest, found := strings.Cut(line, logMarker)
+		if !found {
+			return ""
+		}
+		logPath, _, _ := strings.Cut(rest, asGivenMarker)
+		return logPath
+	}
+	return ""
 }

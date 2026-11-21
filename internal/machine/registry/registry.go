@@ -16,6 +16,8 @@ import (
 
 const alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
+var dummyKey = ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)).Public().(ed25519.PublicKey)
+
 var machineName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
 type Registry struct{}
@@ -157,14 +159,17 @@ func (Registry) Verify(state model.Machines, request model.SignedRequest, now, s
 		return state, "", &model.ClockSkewError{Seconds: difference}
 	}
 	i := activeIndex(state, request.Name)
-	if i < 0 {
+	key, trusted := dummyKey, false
+	if i >= 0 && len(state.Active[i].PublicKey) == ed25519.PublicKeySize {
+		key, trusted = state.Active[i].PublicKey, true
+	}
+	verified := ed25519.Verify(key, signedText(request), request.Signature) && trusted
+	switch {
+	case i < 0:
 		return state, "", model.ErrUnknownMachine
-	}
-	if request.Time < started.Unix() {
+	case request.Time <= started.Unix():
 		return state, "", model.ErrBeforeStart
-	}
-	key := state.Active[i].PublicKey
-	if len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, signedText(request), request.Signature) {
+	case !verified:
 		return state, "", model.ErrBadSignature
 	}
 	for _, seen := range state.Seen {

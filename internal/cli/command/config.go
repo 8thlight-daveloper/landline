@@ -149,7 +149,7 @@ func readLegacyConfig(env Env) (Config, error) {
 
 const httpOnly = "Landline speaks http only, so the address cannot start with https://"
 
-var errAddressShape = errors.New("the switchboard address must look like host:port, as in davelight-mbp:8787")
+var errAddressShape = errors.New("the switchboard address must look like host:port, as in alpha-host:8787")
 
 func splitSwitchboardAddress(text string) (string, int, error) {
 	text = strings.TrimRight(strings.TrimSpace(text), "/")
@@ -396,6 +396,10 @@ func saveJoin(env Env, private ed25519.PrivateKey, host string, port int, name s
 
 func joinWithCode(env Env, host string, port int, code string) error {
 	address := net.JoinHostPort(host, strconv.Itoa(port))
+	restore, err := snapshotJoinFiles(env)
+	if err != nil {
+		return err
+	}
 	public, private, err := newMachineKey()
 	if err != nil {
 		return err
@@ -411,7 +415,6 @@ func joinWithCode(env Env, host string, port int, code string) error {
 	if !machineNamePattern.MatchString(name) {
 		return fmt.Errorf("the switchboard answered with a machine name %q that is not allowed. Nothing was saved", name)
 	}
-	restore := snapshotJoinFiles(env)
 	if err := saveJoin(env, private, host, port, name); err != nil {
 		restore()
 		return fmt.Errorf("%w. The earlier key and config.toml were restored, and the new machine %s stays on the switchboard until you run landline server revoke %s", err, name, name)

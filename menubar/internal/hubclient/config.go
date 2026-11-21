@@ -95,11 +95,26 @@ func readLegacy(path string) (saved, error) {
 	if old.URL == "" {
 		return config, nil
 	}
-	parsed, err := url.Parse(strings.TrimRight(old.URL, "/"))
-	port, portErr := strconv.Atoi(parsed.Port())
-	if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") || portErr != nil || port < 1 || port > 65535 {
-		return saved{}, fmt.Errorf("%s holds a url that Landline cannot use. Landline speaks http only, and the url must look like http://host:port. Edit or remove the file", path)
+	host, port, ok := splitLegacyAddress(old.URL)
+	if !ok {
+		return saved{}, fmt.Errorf("%s holds a url that Landline cannot use. Landline speaks http only, and the url must look like host:port or http://host:port. Edit or remove the file", path)
 	}
-	config.Host, config.Port = parsed.Hostname(), port
+	config.Host, config.Port = host, port
 	return config, nil
+}
+
+func splitLegacyAddress(text string) (string, int, bool) {
+	text = strings.TrimPrefix(strings.TrimRight(strings.TrimSpace(text), "/"), "http://")
+	if text == "" || strings.Contains(text, "://") {
+		return "", 0, false
+	}
+	parsed, err := url.Parse("http://" + text)
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "" || parsed.Hostname() == "" {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, false
+	}
+	return parsed.Hostname(), port, true
 }

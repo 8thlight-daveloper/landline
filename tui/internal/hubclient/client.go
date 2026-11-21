@@ -24,6 +24,8 @@ const (
 
 var ErrControlSecret = errors.New("the switchboard secret contains a control character")
 
+const machineRefusal = "missing or wrong switchboard secret or machine signature"
+
 var ErrNoSecret = errors.New("there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET")
 
 type Client struct {
@@ -36,7 +38,7 @@ type Client struct {
 
 	machine          string
 	key              ed25519.PrivateKey
-	rereadCredential func() Credential
+	rereadCredential func() (string, Credential)
 }
 
 func New(address, secret string) *Client {
@@ -47,7 +49,11 @@ func newWithTimeout(address, secret string, timeout time.Duration) *Client {
 	return &Client{address: address, secret: secret, http: &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
-func (c *Client) Address() string { return c.address }
+func (c *Client) Address() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.address
+}
 
 func NewWith(address string, credential Credential) *Client {
 	client := New(address, credential.Secret)
@@ -55,7 +61,7 @@ func NewWith(address string, credential Credential) *Client {
 	return client
 }
 
-func (c *Client) RereadCredentialWith(reread func() Credential) {
+func (c *Client) RereadCredentialWith(reread func() (string, Credential)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.rereadCredential = reread
@@ -66,8 +72,11 @@ func (c *Client) currentCredential() Credential {
 	reread := c.rereadCredential
 	c.mu.Unlock()
 	if reread != nil {
-		if fresh := reread(); !fresh.empty() {
+		if address, fresh := reread(); address != "" && !fresh.empty() {
 			c.mu.Lock()
+			if address != c.address {
+				c.address, c.token = address, ""
+			}
 			c.secret, c.machine, c.key = fresh.Secret, fresh.Machine, fresh.Key
 			c.mu.Unlock()
 		}
@@ -135,17 +144,27 @@ func (c *Client) currentToken() (string, error) {
 }
 
 func (c *Client) register() (string, error) {
+	token, keyRefused, err := c.registerOnce()
+	if keyRefused {
+		time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+		token, _, err = c.registerOnce()
+	}
+	return token, err
+}
+
+func (c *Client) registerOnce() (string, bool, error) {
 	credential := c.currentCredential()
 	if credential.empty() {
-		return "", ErrNoSecret
+		return "", false, ErrNoSecret
 	}
 	if credential.Key == nil && strings.ContainsFunc(credential.Secret, unicode.IsControl) {
-		return "", ErrControlSecret
+		return "", false, ErrControlSecret
 	}
+	address := c.Address()
 	body, _ := json.Marshal(map[string]string{"kind": "tui"})
-	req, err := http.NewRequest(http.MethodPost, c.address+"/v1/observers", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, address+"/v1/observers", bytes.NewReader(body))
 	if err != nil {
-		return "", errors.New("the switchboard address is not valid")
+		return "", false, errors.New("the switchboard address is not valid")
 	}
 	if credential.Key != nil {
 		req.Header.Set("Authorization", signedHeader(credential.Machine, credential.Key, http.MethodPost, "/v1/observers", body, time.Now()))
@@ -155,30 +174,43 @@ func (c *Client) register() (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	raw, status, err := c.do(req)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	switch {
 	case status == http.StatusUnauthorized && credential.Key != nil:
-		return "", errors.New("the switchboard refused this machine's key. Run landline server join <host:port> --code <code> to join again")
+		if refusal := refusalIn(raw); refusal != "" && refusal != machineRefusal {
+			return "", false, errors.New(refusal)
+		}
+		return "", true, errors.New("the switchboard refused this machine's key. Run landline server join <host:port> --code <code> to join again")
 	case status == http.StatusUnauthorized:
-		return "", errors.New("the switchboard refused the switchboard secret")
+		return "", false, errors.New("the switchboard refused the switchboard secret")
 	case status != http.StatusOK:
-		return "", fmt.Errorf("the switchboard answered %d to observer registration", status)
+		return "", false, fmt.Errorf("the switchboard answered %d to observer registration", status)
 	}
 	var answer struct {
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(raw, &answer); err != nil || answer.Token == "" {
-		return "", errors.New("the switchboard answered observer registration without a token")
+		return "", false, errors.New("the switchboard answered observer registration without a token")
 	}
 	c.mu.Lock()
-	c.token = answer.Token
+	if c.address == address {
+		c.token = answer.Token
+	}
 	c.mu.Unlock()
-	return answer.Token, nil
+	return answer.Token, false, nil
+}
+
+func refusalIn(raw []byte) string {
+	var answer struct {
+		Error string `json:"error"`
+	}
+	json.Unmarshal(raw, &answer)
+	return clean.Text(answer.Error)
 }
 
 func (c *Client) list(token string) ([]Agent, int, error) {
-	req, err := http.NewRequest(http.MethodGet, c.address+"/v1/agents", nil)
+	req, err := http.NewRequest(http.MethodGet, c.Address()+"/v1/agents", nil)
 	if err != nil {
 		return nil, 0, errors.New("the switchboard address is not valid")
 	}
@@ -201,7 +233,7 @@ func (c *Client) do(req *http.Request) ([]byte, int, error) {
 		if errors.As(err, &urlErr) {
 			err = urlErr.Err
 		}
-		return nil, 0, errors.New(clean.Text(fmt.Sprintf("cannot reach the switchboard at %s: %v", c.address, err)))
+		return nil, 0, errors.New(clean.Text(fmt.Sprintf("cannot reach the switchboard at %s: %v", req.URL.Scheme+"://"+req.URL.Host, err)))
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 300 && res.StatusCode < 400 {
@@ -209,7 +241,7 @@ func (c *Client) do(req *http.Request) ([]byte, int, error) {
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {
-		return nil, 0, errors.New(clean.Text(fmt.Sprintf("cannot read the answer of the switchboard at %s: %v", c.address, err)))
+		return nil, 0, errors.New(clean.Text(fmt.Sprintf("cannot read the answer of the switchboard at %s: %v", req.URL.Scheme+"://"+req.URL.Host, err)))
 	}
 	if len(raw) > maxResponseBytes {
 		return nil, 0, errors.New("the switchboard answered with more than 8 MiB")
