@@ -328,10 +328,14 @@ func TestTheSwitchboardShowsTheHostAsGivenTheAddressItBoundAndEveryOtherAddressT
 	if !strings.Contains(line, "localhost:"+port) {
 		t.Fatalf("the listening line does not show the host as given:\n%s", hubOut)
 	}
-	if !regexp.MustCompile(`(127\.0\.0\.1|\[::1\]):` + port).MatchString(line) {
-		t.Errorf("the listening line does not show the address that was bound:\n%s", line)
-	}
 	ips, _ := net.LookupIP("localhost")
+	if len(ips) == 0 {
+		t.Fatal("localhost does not resolve on this machine")
+	}
+	first := net.JoinHostPort(ips[0].String(), port)
+	if !strings.Contains(line, first) {
+		t.Errorf("localhost resolves to %v in that order, and the listening line does not show %s, the first address, as the one bound:\n%s", ips, first, line)
+	}
 	for _, ip := range ips {
 		if !strings.Contains(line, ip.String()) {
 			t.Errorf("the listening line leaves out %s, which localhost resolves to:\n%s", ip, line)

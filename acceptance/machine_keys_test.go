@@ -66,6 +66,7 @@ func startHostWithEnv(t *testing.T, extra []string, flags ...string) *hostRig {
 	if out, err := runIn(t, bin, env, home, args...); err != nil {
 		t.Fatalf("up: %v %s", err, safe(string(out)))
 	}
+	waitPastTheStartSecond()
 	host, port := hostAndPort(t, addr)
 	values, _ := readTomlValues(t, configTomlOf(home))
 	return &hostRig{t: t, bin: bin, home: home, env: env, addr: addr, host: host, port: port, secret: values["secret"], url: "http://" + addr, began: began}
@@ -1570,6 +1571,7 @@ func TestRestartAndRotateSecretPassTheSignatureWindowOn(t *testing.T) {
 	if out, err := h2.run("server", "rotate-secret", "--signature-window", "3s"); err != nil {
 		t.Fatalf("rotate-secret: %v %s", err, safe(string(out)))
 	}
+	waitPastTheStartSecond()
 	if status := h2.signedStatus(m2, time.Now().Unix(), "GET", "/v1/build", nil); status != http.StatusOK {
 		t.Errorf("after rotate-secret --signature-window 3s, a request timed now answered %d", status)
 	}
@@ -1635,6 +1637,11 @@ func (h *hostRig) restartAndSettle(flags ...string) {
 	if out, err := h.run(append([]string{"server", "restart"}, flags...)...); err != nil {
 		h.t.Fatalf("restart: %v %s", err, h.clean(out))
 	}
+	waitPastTheStartSecond()
+}
+
+func waitPastTheStartSecond() {
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
 }
 
 var hyphenatedCode = regexp.MustCompile(`[2-9A-HJKMNP-Za-hjkmnp-z]{4}-[2-9A-HJKMNP-Za-hjkmnp-z]{4}`)

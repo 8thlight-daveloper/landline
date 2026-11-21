@@ -69,10 +69,16 @@ errors are in `internal/model/errors.go`.
   must be no more than `window` in whole seconds either way, or a `*model.ClockSkewError` whose `Seconds` is that signed
   difference and whose text names it and says `clock`. This check comes first and does not look at the name, so a time
   outside the window gets the same error for a known name, a pending name, a revoked name, and a name that never
-  existed. The machine must then be active, or `model.ErrUnknownMachine`. `request.Time` must not be less than
-  `started.Unix()`, or `model.ErrBeforeStart`. The signature must verify, and a missing or short one does not, or
-  `model.ErrBadSignature`. No remembered signature that equals it may have an `Until` after `now`, or
-  `model.ErrReplayed`.
+  existed. The machine must then be active, or `model.ErrUnknownMachine`. `request.Time` must be greater than
+  `started.Unix()`, or `model.ErrBeforeStart`, so a time equal to the second of the start is refused. The signature must
+  verify, and a missing or short one does not, or `model.ErrBadSignature`. No remembered signature that equals it may
+  have an `Until` after `now`, or `model.ErrReplayed`.
+- Inside the window, the call runs exactly one Ed25519 verify of the signed text before it returns, whatever it returns.
+  For an active machine whose stored key is 32 bytes, it verifies against that key. For a name that is not active, and
+  for a stored key that is not 32 bytes, it verifies against a fixed 32-byte dummy key and treats the result as a
+  failure. The verify runs before the error is chosen, so the work done inside the window is the same whether or not the
+  name is active and whether or not the time is after the start. The errors keep the order above: an unknown machine
+  comes before a time at or before the start, which comes before a bad signature.
 - A window counts only its whole seconds, so a window of 90.5 seconds is 90 seconds. It is that count that bounds the
   difference and sets `Until`.
 - On success the call returns the name and a copy of the value in which every `Seen` entry with an `Until` at or before
@@ -80,7 +86,9 @@ errors are in `internal/model/errors.go`.
   where `window` counts whole seconds. That is the first moment a copy can no longer pass the window check, so a copy is
   refused as long as it could be accepted and never after. On any error it returns the value it was given.
 - With a time inside the window, a pending machine, a revoked machine, and a name that never existed are all
-  `model.ErrUnknownMachine`, and that error comes before `model.ErrBeforeStart`.
+  `model.ErrUnknownMachine`, and that error comes before `model.ErrBeforeStart`. The switchboard answers every error
+  inside the window with the same `401` and message, so the order decides only which error the caller of the component
+  sees.
 - A stored key that is not 32 bytes never verifies, so the result is `model.ErrBadSignature`. A time so far from `now`
   that the difference would not fit in an `int64` is a `*model.ClockSkewError`, whatever the signs of the two, and
   `now.Unix()` may be any `int64`. Its `Seconds` is `math.MaxInt64` when `request.Time` is ahead of `now` and
@@ -94,15 +102,16 @@ None. It reads no clock, random source, file, or environment. It **returns a cha
 
 ## Decisions to know
 
-| Decision                                                                                                            | Reversal |
-| ------------------------------------------------------------------------------------------------------------------- | -------- |
-| The caller passes the time, the start time, the window, and the random bytes, so every rule can be tested           | cheap    |
-| The start rule compares whole seconds, so a request in the second of the start works                                | cheap    |
-| The window check comes first and ignores the name, so a caller with no credential cannot learn which names exist    | cheap    |
-| An invalid code and a bad key with a valid code are different errors, and only the second leaves the value          | cheap    |
-| A signature is remembered until one second after its time plus the window, so no copy gets in after the memory ends | cheap    |
-| `Revoke` and `RevokeAll` leave the failure count alone, because a revoke is not a redeem                            | cheap    |
-| The code takes each random byte modulo 31, which favors a few characters very slightly                              | cheap    |
+| Decision                                                                                                              | Reversal |
+| --------------------------------------------------------------------------------------------------------------------- | -------- |
+| The caller passes the time, the start time, the window, and the random bytes, so every rule can be tested             | cheap    |
+| The start rule refuses the second of the start, because the process before a restart could have accepted a copy in it | cheap    |
+| Inside the window one Ed25519 verify runs for every name, against a dummy key when the name is not active             | cheap    |
+| The window check comes first and ignores the name, so a caller with no credential cannot learn which names exist      | cheap    |
+| An invalid code and a bad key with a valid code are different errors, and only the second leaves the value            | cheap    |
+| A signature is remembered until one second after its time plus the window, so no copy gets in after the memory ends   | cheap    |
+| `Revoke` and `RevokeAll` leave the failure count alone, because a revoke is not a redeem                              | cheap    |
+| The code takes each random byte modulo 31, which favors a few characters very slightly                                | cheap    |
 
 ## Open questions
 
@@ -123,6 +132,8 @@ None.
 - A `random` slice, a key, or a signature that is nil and not empty, beyond the length rules above.
 - The order of `Seen`, which a caller does not read.
 - How the switchboard turns an error into a status code, which the acceptance tests cover.
+- That the dummy verify runs. The component returns the same value with or without it, and a test that compares timings
+  would be flaky, so no test checks it. A reviewer checks it in the code.
 
 ## Wrong implementations tried
 
@@ -137,6 +148,7 @@ and not at the end also passes, because the contract does not fix the order.
 | Need more than 8 random bytes                                                    | `TestInviteWithExactlyEightRandomBytesIsAcceptedAndMakesTheCodeFromThem`                                                                                                                                                                          |
 | Need 16 random bytes                                                             | `TestInviteMakesAnEightCharacterCodeFromTheFirstEightRandomBytesModuloThirtyOne`, `TestInviteWithExactlyEightRandomBytesIsAcceptedAndMakesTheCodeFromThem`                                                                                        |
 | Allow upper case letters in a name                                               | `TestInviteAcceptsAMachineNameOfOneToThirtyTwoLowercaseLettersDigitsAndHyphensStartingWithALetter`                                                                                                                                                |
+| Allow only the digits 1 to 9 in a name, and not 0                                | `TestInviteAcceptsAMachineNameWithTheDigitZeroAnywhereAfterItsFirstLetter`                                                                                                                                                                        |
 | Allow upper case letters in a name after its first character                     | `TestInviteRefusesAMachineNameWithAnUpperCaseLetterAfterItsFirstCharacter`                                                                                                                                                                        |
 | Let an invite take a name that an active machine holds                           | `TestInviteIsRefusedForANameAnActiveMachineHolds`                                                                                                                                                                                                 |
 | Let an invite take a name that a pending invite holds                            | `TestInviteIsRefusedForANameAPendingInviteHoldsUntilItExpires`                                                                                                                                                                                    |
@@ -167,9 +179,11 @@ and not at the end also passes, because the contract does not fix the order.
 | Strip every ASCII separator from a typed code                                    | `TestRedeemRefusesACodeTypedWithAnySeparatorOtherThanAHyphenSuchAsAnUnderscoreOrATab`, `TestRedeemWithAnyBadCodeIsInvalidCountsAsOneFailureAndChangesNothingElse`                                                                                 |
 | Trim white space around a typed code                                             | `TestRedeemRefusesACodeTypedWithAnySeparatorOtherThanAHyphenSuchAsAnUnderscoreOrATab`, `TestRedeemWithAnyBadCodeIsInvalidCountsAsOneFailureAndChangesNothingElse`                                                                                 |
 | Strip a non-breaking space or another Unicode space from a typed code            | `TestRedeemRefusesACodeTypedWithAnySeparatorOtherThanAHyphenSuchAsAnUnderscoreOrATab`                                                                                                                                                             |
+| Strip U+2010 or another Unicode hyphen or dash from a typed code                 | `TestRedeemRefusesACodeTypedWithAUnicodeHyphenOrDashInPlaceOfTheHyphen`                                                                                                                                                                           |
 | Require the hyphen in a typed code                                               | `TestRedeemReadsTheCodeInAnyCaseWithOrWithoutTheHyphen`                                                                                                                                                                                           |
 | Make Unicode letters upper case in a typed code                                  | `TestRedeemReadsEveryHyphenAndOnlyASCIILettersAsUpperCase`                                                                                                                                                                                        |
 | Revoke only an active machine and not a pending invite                           | `TestEachFunctionChangesOnlyWhatItsRulesNameAndLeavesTheRestOfTheValueAlone`, `TestRevokeRemovesAPendingInviteSoItsCodeStopsWorkingAndItsNameIsFree`                                                                                              |
+| Delete every expired invite when a new invite is made                            | `TestInviteReplacesOnlyTheExpiredInviteForItsOwnNameAndRevokeStillRemovesAnotherExpiredOne`                                                                                                                                                       |
 | Clear the remembered signatures on a revoke                                      | `TestEachFunctionChangesOnlyWhatItsRulesNameAndLeavesTheRestOfTheValueAlone`                                                                                                                                                                      |
 | Clear the failure count on a revoke                                              | `TestEachFunctionChangesOnlyWhatItsRulesNameAndLeavesTheRestOfTheValueAlone`                                                                                                                                                                      |
 | Revoke every machine and keep the pending invites                                | `TestRevokeAllRemovesEveryMachineAndEveryPendingInviteAndLeavesTheFailureCountAndTheSeenSignatures`                                                                                                                                               |
@@ -197,8 +211,9 @@ and not at the end also passes, because the contract does not fix the order.
 | Check the start rule before the clock window                                     | `TestVerifyChecksTheWindowBeforeTheStartRule`, `TestVerifyRefusesATimeAtTheLimitsOfTheIntegerRangeAsOutOfTheWindowWithoutOverflowing`, `TestVerifyReportsAnUnknownMachineBeforeATimeBeforeTheStart`                                               |
 | Check the machine after the start rule                                           | `TestVerifyReportsAnUnknownMachineBeforeATimeBeforeTheStart`                                                                                                                                                                                      |
 | Check the machine after the signature                                            | `TestVerifyRefusesAMachineThatIsNotActive`, `TestVerifyReportsAnUnknownMachineBeforeATimeBeforeTheStart`, `TestVerifyReportsAnUnknownMachineForAnyNameThatIsNotActiveWhenTheTimeIsInsideTheWindow`                                                |
-| Compare the start rule below one second                                          | `TestVerifyRefusesATimeBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeInThatSecond`                                                                                                                                                           |
-| Skip the start rule                                                              | `TestVerifyRefusesATimeBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeInThatSecond`, `TestVerifyReportsATimeBeforeTheStartBeforeABadSignature`                                                                                                |
+| Accept a time equal to the second of the start                                   | `TestVerifyRefusesATimeInOrBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeAfterIt`                                                                                                                                                            |
+| Compare the start rule as an instant and accept a time equal to it               | `TestVerifyRefusesATimeInOrBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeAfterIt`                                                                                                                                                            |
+| Skip the start rule                                                              | `TestVerifyRefusesATimeInOrBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeAfterIt`, `TestVerifyReportsATimeBeforeTheStartBeforeABadSignature`                                                                                                 |
 | Check the start rule after the signature                                         | `TestVerifyReportsATimeBeforeTheStartBeforeABadSignature`                                                                                                                                                                                         |
 | Skip the replay check                                                            | `TestAFailedVerifyReturnsTheStateItWasGivenUnchanged`, `TestARememberedSignatureIsACopyOfTheBytesTheCallerPassed`, `TestVerifyDoesNotTreatASignatureRememberedUntilExactlyNowAsAReplay` and 3 more                                                |
 | Forget a signature one second before its last moment                             | `TestVerifyCountsOnlyTheWholeSecondsOfAWindowThatHasAFraction`, `TestVerifyDropsARememberedSignatureWhoseMemoryEndsExactlyNowAndKeepsOneThatEndsANanosecondLater`, `TestVerifyRefusesACopyUntilItsMemoryRunsOutAndNeverAcceptsItAfter` and 1 more |

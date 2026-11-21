@@ -569,7 +569,7 @@ func TestVerifyChecksTheWindowBeforeTheStartRule(t *testing.T) {
 	}
 }
 
-func TestVerifyRefusesATimeBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeInThatSecond(t *testing.T) {
+func TestVerifyRefusesATimeInOrBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeAfterIt(t *testing.T) {
 	t.Parallel()
 	state := machineState(t)
 	started := t0.Add(700 * time.Millisecond)
@@ -577,8 +577,14 @@ func TestVerifyRefusesATimeBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeIn
 	if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()-1).request(), now, started, window); !errors.Is(err, model.ErrBeforeStart) {
 		t.Errorf("a time in the second before the start: %v", err)
 	}
-	if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()).request(), now, started, window); err != nil {
-		t.Errorf("a time in the second of the start: %v", err)
+	got, name, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()).request(), now, started, window)
+	if !errors.Is(err, model.ErrBeforeStart) || name != "" || !reflect.DeepEqual(snapshot(got), snapshot(state)) {
+		t.Errorf("a time in the second of the start: %q %v", name, err)
+	}
+	for _, exact := range []time.Time{t0, t0.Add(999 * time.Millisecond)} {
+		if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()).request(), now, exact, window); !errors.Is(err, model.ErrBeforeStart) {
+			t.Errorf("a time equal to the second of a start at %v: %v", exact.Format(time.RFC3339Nano), err)
+		}
 	}
 	if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+1).request(), now, started, window); err != nil {
 		t.Errorf("a time in the second after the start: %v", err)
@@ -1443,6 +1449,57 @@ func TestVerifyReportsTheExactSignedClockDifferenceEvenWhenItIsTooLargeForATimeD
 		}
 		if !reflect.DeepEqual(snapshot(got), snapshot(state)) {
 			t.Errorf("%d seconds: the state changed", offset)
+		}
+	}
+}
+
+func TestInviteAcceptsAMachineNameWithTheDigitZeroAnywhereAfterItsFirstLetter(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"a0", "box-0", "box-10", "r0b0t", "a" + strings.Repeat("0", 31)} {
+		if _, _, err := newImpl().Invite(model.Machines{}, name, random(0), t0, lifetime); err != nil {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+	if _, _, err := newImpl().Invite(model.Machines{}, "0box", random(0), t0, lifetime); !errors.Is(err, model.ErrBadMachineName) {
+		t.Errorf("a name that starts with 0: %v", err)
+	}
+}
+
+func TestRedeemRefusesACodeTypedWithAUnicodeHyphenOrDashInPlaceOfTheHyphen(t *testing.T) {
+	t.Parallel()
+	for _, dash := range []string{"\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015", "\u2212", "\ufe63", "\uff0d", "\u00ad"} {
+		for _, typed := range []string{"2345" + dash + "6789", dash + "23456789", "23456789" + dash} {
+			state, _ := invited(t, model.Machines{}, "box", 0, t0)
+			got, name, err := newImpl().Redeem(state, typed, publicOf(1), t0)
+			if !errors.Is(err, model.ErrInvalidCode) || name != "" || got.Failures != 1 || len(got.Active) != 0 || len(got.Invites) != 1 {
+				t.Errorf("%+q: %q %v %+v", typed, name, err, got)
+			}
+		}
+	}
+}
+
+func TestInviteReplacesOnlyTheExpiredInviteForItsOwnNameAndRevokeStillRemovesAnotherExpiredOne(t *testing.T) {
+	t.Parallel()
+	state, _ := invited(t, model.Machines{}, "alpha-box", 8, t0)
+	state, _ = invited(t, state, "bravo-box", 16, t0)
+	state, _ = invited(t, state, "charlie-box", 24, t0)
+	later := t0.Add(lifetime)
+	next, _, err := newImpl().Invite(state, "bravo-box", random(32), later, lifetime)
+	if err != nil {
+		t.Fatalf("invite over an expired invite: %v", err)
+	}
+	if want := []string{"alpha-box", "bravo-box", "charlie-box"}; !reflect.DeepEqual(inviteNames(next), want) {
+		t.Fatalf("invites %v, want %v", inviteNames(next), want)
+	}
+	for _, invite := range next.Invites {
+		if invite.Name != "bravo-box" && !invite.Expires.Equal(t0.Add(lifetime)) {
+			t.Errorf("the expired invite for %s changed: %+v", invite.Name, invite)
+		}
+	}
+	for _, name := range []string{"alpha-box", "charlie-box"} {
+		revoked, err := newImpl().Revoke(next, name)
+		if err != nil || slices.Contains(inviteNames(revoked), name) {
+			t.Errorf("revoke of the expired pending %s after another name was invited: %v %v", name, err, inviteNames(revoked))
 		}
 	}
 }
