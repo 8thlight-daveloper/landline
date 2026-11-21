@@ -5,7 +5,7 @@ approval: person
 approver: {kind: person, name: dnawara}
 affects: [machine/registry, cli/command, switchboard/server, client/http, mcp/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0090', '0170', '0190']
-note: Drafted on 2026-11-19 and amended the same day after the acceptance review. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. It has security consequences and needs a person's approval of the amendment.
+note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. It has security consequences and needs the person's approval of the amendment.
 ---
 
 # 0200. A machine joins with an invite code and a keypair that outlasts secret rotation
@@ -104,17 +104,33 @@ The nonce is 16 random bytes in standard base64, new for each request. The signa
 feeds: `landline-machine-v1`, the name, the time, the nonce, the HTTP method, the path with its query, and the lower
 case hex SHA-256 of the body.
 
-The switchboard accepts a request when the time is within the signature window of its own clock, the machine is active,
-the time is not earlier than the second in which the switchboard started, the signature verifies, and it has not seen
-that signature while it could still pass the window check. The window check comes first and does not look at the name,
-so a time outside the window gets the same clock message whether or not the name belongs to a machine, and a caller who
-holds no credential learns nothing about which names exist. The window is 60 seconds. A time in the second of the start
-passes, because a time has whole seconds and a legitimate request in the first second after a restart must work. The
-switchboard remembers a signature until one second after the time in it plus the window, which is the last moment it
+The switchboard accepts a request when the time is within the signature window of its own clock, the time is later than
+the second in which the switchboard started, the machine is active, the signature verifies, and it has not seen that
+signature while it could still pass the window check. The window is 60 seconds.
+
+The window check comes first and does not look at the name. A time outside the window gets `401` and a message that
+names the difference in seconds and tells the person to set the clock, whether or not the name belongs to a machine.
+
+Inside the window, the switchboard runs one Ed25519 verify before it answers, whatever the answer is. For an active
+machine it verifies against the machine's public key. For a name that is unknown, pending, or revoked, it verifies
+against a fixed dummy key and refuses the request whatever the result. Every refusal inside the window gets `401` and
+the message `missing or wrong switchboard secret or machine signature`, whichever check failed. Neither the answer nor
+the work done before it depends on whether the name exists, so a caller who holds no credential learns nothing about
+which names exist, from the text or from the time it takes.
+
+The switchboard remembers a signature until one second after the time in it plus the window, which is the last moment it
 could pass the window check, because a time has whole seconds. A signature is therefore never forgotten while a copy of
-it could still be accepted. The start rule stops a copy from being replayed after a restart empties the cache. A time
-outside the window gets `401` and a message that names the difference in seconds and tells the person to set the clock.
-Two requests that differ only in their nonce are both accepted, and an exact copy of one is refused.
+it could still be accepted. Two requests that differ only in their nonce are both accepted, and an exact copy of one is
+refused.
+
+The switchboard keeps the signatures it has seen in memory, and a restart empties them. A time equal to the second of
+the start is refused, because a request signed in that second could have been accepted by the old process just before it
+stopped, and the new process would not know it. The start rule therefore refuses every copy that the old process could
+have accepted. A legitimate request in the first second after a restart is refused once, and the client registers again
+on the `401` and retries, as `landline-mcp` and the screen do after a rotation. A machine whose clock runs `d` seconds
+behind the switchboard's, with `d` inside the window, is refused for about `d` seconds after every start, including the
+restart that `rotate-secret` makes. It gets the `401` and the message above, and its requests pass once the
+switchboard's clock is more than `d` seconds past the start. A clock that runs ahead is not refused by this rule.
 
 After a request registers, the agent or observer token works as it does today, and the switchboard records which machine
 it came from.
@@ -211,6 +227,12 @@ and Landline is not used off a tailnet before it.
   another machine's. The person picks the name at invite time.
 - **Put the name in the redeem route.** `PATCH /v1/machines/<name>` makes the person type or copy the name, and makes
   the route answer differently for a name with no pending machine. The code is the lookup key instead.
+- **Let a time in the start second pass.** A legitimate request in the first second after a restart would work at once.
+  A request that the old process accepted in that second could then be replayed against the new one, whose memory of
+  signatures is empty. A refused request costs one retry.
+- **Answer an unknown name before the signature check.** It is cheaper, and the text of the answer is the same. The
+  answer comes back in nanoseconds for an unknown name and in microseconds for a known one, so its time tells a caller
+  which names exist.
 - **A clock that an outside caller can move.** A route or variable that moves time would defeat the window and the start
   rule. The timing flags give a test short real times without it.
 - **`join --via ssh`, which fetches the shared secret over ssh.** It needs ssh from the new machine, and the machine
