@@ -1277,9 +1277,41 @@ func TestVerifyRefusesATimeWhoseDistanceFromNowDoesNotFitAnInt64WithoutPanicking
 		var skew *model.ClockSkewError
 		if !errors.As(err, &skew) || name != "" || !strings.Contains(strings.ToLower(err.Error()), "clock") {
 			t.Errorf("now %d, time %d: %q %v", c.now, c.request, name, err)
+			continue
+		}
+		saturated := int64(math.MinInt64)
+		if c.request > c.now {
+			saturated = math.MaxInt64
+		}
+		if skew.Seconds != saturated || !strings.Contains(err.Error(), strconv.FormatInt(saturated, 10)) {
+			t.Errorf("now %d, time %d: seconds %d, want %d: %v", c.now, c.request, skew.Seconds, saturated, err)
 		}
 		if !reflect.DeepEqual(snapshot(got), snapshot(state)) {
 			t.Errorf("now %d, time %d: the state changed", c.now, c.request)
+		}
+	}
+}
+
+func TestVerifyReportsTheExactDifferenceWhenItJustFitsAnInt64(t *testing.T) {
+	t.Parallel()
+	unbounded := time.Unix(math.MinInt64, 0)
+	for _, c := range []struct{ now, request, seconds int64 }{
+		{0, math.MaxInt64, math.MaxInt64},
+		{0, math.MinInt64, math.MinInt64},
+		{-1, math.MaxInt64 - 1, math.MaxInt64},
+		{1, math.MinInt64 + 1, math.MinInt64},
+		{math.MinInt64 / 2, math.MaxInt64 / 2, math.MaxInt64},
+		{math.MaxInt64 / 2, math.MinInt64 / 2, math.MinInt64 + 1},
+	} {
+		state := machineState(t)
+		now := time.Unix(c.now, 0)
+		if now.Unix() != c.now || c.request-c.now != c.seconds {
+			t.Fatalf("fixture error: now %d, time %d, seconds %d", c.now, c.request, c.seconds)
+		}
+		_, name, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), c.request).request(), now, unbounded, window)
+		var skew *model.ClockSkewError
+		if !errors.As(err, &skew) || skew.Seconds != c.seconds || name != "" {
+			t.Errorf("now %d, time %d: %q %v, want seconds %d", c.now, c.request, name, err, c.seconds)
 		}
 	}
 }
