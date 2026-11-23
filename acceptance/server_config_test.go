@@ -407,6 +407,10 @@ var badServerValues = map[string]struct{ line, echo string }{
 	"a key given twice in [server]": {"# chosen by hand\nkeepalive = \"15s\"", ""},
 }
 
+func (c *configuredHome) repeats(output, echo string) bool {
+	return echo != "" && strings.Contains(strings.ReplaceAll(output, c.home, "<home>"), echo)
+}
+
 func TestABadValueInTheServerTableStopsTheBinaryAndUpWithExitOneNamingTheFileAndLine(t *testing.T) {
 	t.Parallel()
 	for name, each := range badServerValues {
@@ -419,12 +423,12 @@ func TestABadValueInTheServerTableStopsTheBinaryAndUpWithExitOneNamingTheFileAnd
 		c.writeTable(table)
 		written := c.configText()
 		result := c.switchboardExit()
-		if result.code != 1 || !errorAtLine(result.stderr, wantLine) || (each.echo != "" && strings.Contains(result.stdout+result.stderr, each.echo)) {
+		if result.code != 1 || !errorAtLine(result.stderr, wantLine) || c.repeats(result.stdout+result.stderr, each.echo) {
 			t.Errorf("%s, the binary: %d %q, want 1 and an error at config.toml line %s that does not repeat the line", name, result.code, result.stderr, wantLine)
 		}
 		result = c.landline("server", "up")
 		combined := result.stdout + result.stderr
-		if result.code != 1 || !errorAtLine(combined, wantLine) || (each.echo != "" && strings.Contains(combined, each.echo)) {
+		if result.code != 1 || !errorAtLine(combined, wantLine) || c.repeats(combined, each.echo) {
 			t.Errorf("%s, server up: %d %q, want 1 and an error at config.toml line %s that does not repeat the line", name, result.code, combined, wantLine)
 		}
 		if answers(c.addr) || exists(c.dataFile("switchboard.pid")) || c.configText() != written {
