@@ -6,7 +6,7 @@ approver: {kind: person, name: dnawara}
 affects: [machine/registry, cli/command, switchboard/server, client/http, mcp/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0090', '0170', '0190']
 partly-superseded-by: ['0220']
-note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component.
+note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. Amended on 2026-11-23 again, so that a refusal carries a reason that clients read instead of its text. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. The second amendment of 2026-11-23 changes the wire format of four routes.
 ---
 
 # 0200. A machine joins with an invite code and a keypair that outlasts secret rotation
@@ -133,10 +133,38 @@ behind the switchboard's, with `d` inside the window, is refused for about `d` s
 restart that `rotate-secret` makes. It gets the `401` and the message above, and its requests pass once the
 switchboard's clock is more than `d` seconds past the start. A clock that runs ahead is not refused by this rule.
 
-On the refusal `missing or wrong switchboard secret or machine signature`, a client (the `landline` commands,
-`landline-mcp`, the screen, and the menu bar) names the possible causes, among them a rotated secret, a revoked machine,
-and a clock that runs behind the switchboard's, and tells the person to join again only if the refusal persists after
-its one retry.
+Every `401` that answers a request signed with a machine key carries a JSON body with the message in `error` and a field
+`reason`:
+
+- A time outside the window gets `"reason": "clock"` and `"clock_difference": N`, besides the message that names the
+  difference. `N` is the time in the request minus the switchboard's time, in signed whole seconds, so it is positive
+  when the machine's clock runs ahead.
+- Every refusal inside the window gets `"reason": "refused"` and the one message above. A `Landline-Machine` header that
+  cannot be read gets the same answer.
+
+```json
+{"error": "missing or wrong switchboard secret or machine signature", "reason": "refused"}
+```
+
+The two values reveal nothing the message does not already say. The clock message already names the difference, and
+`refused` is one value for every refusal inside the window, whichever check failed. The promise above holds: a caller
+who holds no credential learns nothing about which names exist.
+
+A client (the `landline` commands through `client/http`, `landline-mcp`, the screen, and the menu bar) decides from
+`reason` and `clock_difference` whether to make its one retry and whether to give the clock advice or the generic
+advice. It never compares the message text, by C1 in [coding-principles.md](../reference/coding-principles.md). A client
+that gets a `reason` it does not know, or no `reason`, as from a switchboard built before this amendment, treats the
+answer as `refused` and shows the message as given. So does a client that gets `clock` without an integer
+`clock_difference`.
+
+This changes the wire format of `POST /v1/register`, `POST /v1/observers`, `GET /v1/log`, and `GET /v1/build`: the `401`
+body for a signed request gains `reason`, and `clock_difference` for a time outside the window. A change to either field
+needs a new record. [0230](0230-the-person-learns-why-a-signed-request-was-refused.md) proposed the same field, and this
+record now defines it.
+
+On an answer whose `reason` is `refused`, a client names the possible causes, among them a rotated secret, a revoked
+machine, and a clock that runs behind the switchboard's, and tells the person to join again only if the refusal persists
+after its one retry.
 
 After a request registers, the agent or observer token works as it does today, and the switchboard records which machine
 it came from.
@@ -206,6 +234,7 @@ and Landline is not used off a tailnet before it.
 - The domain model gains the types of the component, and `docs/architecture/components.md` names the component. The
   contracts and acceptance scenarios of these components change. A person authorizes those edits, and an agent does not
   make them. The README and the command table name the key file and the new commands.
+- `docs/reference/delivery-protocol.md` gains the `reason` and `clock_difference` fields.
 - `machine.key`, `machines.json`, and the `machine` key of `config.toml` are stored formats. A change to any of them
   needs a new record.
 - A machine that loses its key file or its config directory joins again with a new invite. Its old name needs a revoke

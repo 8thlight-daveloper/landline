@@ -76,7 +76,7 @@ go install github.com/8thlight-daveloper/landline/cmd/landline-mcp@latest
 ## Quick start on one machine
 
 Start the switchboard once. It runs in the background, saves its address and a generated secret in
-`~/.config/landline/config.toml` (readable only by you), and listens on localhost only:
+[`~/.config/landline/config.toml`](#files-and-settings) (readable only by you), and listens on localhost only:
 
 ```sh
 landline server up
@@ -143,13 +143,16 @@ sessions still run an old binary after an upgrade. `just build` and `just instal
 the nix package reads them from the flake source, and a plain `go build` leaves them empty. `landline version` prints
 them for the installed binary.
 
-The file holds up to four keys, and you can edit it by hand. Comments and other keys are kept when Landline saves it:
+The file holds up to four top-level keys and the switchboard's settings in `[server]`, as
+[Files and settings](#files-and-settings) shows, and you can edit it by hand. Comments and other keys are kept when
+Landline saves it:
 
 ```toml
 secret = "..."
 host = "127.0.0.1"
 port = 8787
-machine = "linux-box"                  # only on a machine that joined with an invite, which has no secret line
+# machine replaces secret on a machine that joined with an invite
+machine = "linux-box"
 ```
 
 `host` is a name or an IP address, with no scheme, and `port` is a number. One address says where the switchboard
@@ -160,10 +163,10 @@ is no `config.toml`, and the first save replaces it
 ([0190](docs/decisions/0190-one-toml-config-names-the-switchboard-by-host-and-port.md)).
 
 `landline server status`, `landline server log`, and `landline server down` look in on the switchboard and stop it.
-`landline server restart` stops it and starts it again, for example after `just install` replaces the binary. It does
-not remember the flags of the earlier start, so pass them again. The switchboard keeps no agents on disk, so after a
-restart each agent registers again on its next call and gets a new id. A session started before the upgrade keeps its
-old process and needs its own restart.
+`landline server restart` stops it and starts it again, for example after `just install` replaces the binary. The
+switchboard takes its settings from `[server]` in `config.toml`, and a flag lasts one run. The switchboard keeps no
+agents on disk, so after a restart each agent registers again on its next call and gets a new id. A session started
+before the upgrade keeps its old process and needs its own restart.
 
 `landline server rotate-secret` replaces the switchboard secret and restarts the switchboard, for a secret that was
 exposed. It takes the flags of `restart` and prints one line, never a secret. The old secret stops working at once and
@@ -171,9 +174,11 @@ every agent registers again, as after a restart. It refuses, and changes nothing
 machine's (`localhost`, a loopback IP, or a name or IP that resolves to an address of one of its interfaces), when
 `LANDLINE_SECRET` is set in the environment, when `landline-switchboard` cannot be found, or when something that
 `landline server up` did not start answers at the saved address, such as a switchboard that launchd runs, because the
-command cannot stop it. Without `--addr` the new switchboard keeps the saved address. Without `--log` it keeps the log
-file of the switchboard it stops, so it reads the same `machines.json` and keeps the machines. A session whose own
-environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
+command cannot stop it. Without `--addr` the new switchboard keeps the saved address. It reads its settings from
+`[server]` and its machines from `~/.local/share/landline/machines.json`, so it keeps every joined machine whatever log
+it uses
+([0220](docs/decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)).
+A session whose own environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
 ([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md)).
 
 #### Channel delivery in Claude Code
@@ -286,9 +291,9 @@ Launchpad. `just install-app /Applications` installs the bundle into another fol
 rebuilds and replaces it. The bundle is signed ad hoc and has no Dock icon. An app started from Spotlight has no shell
 environment, so `landline` must be on your login shell's `PATH`. `~/.local/bin` is there only when your shell profile
 adds it. Add the app as a login item by hand, or start the binary from a terminal. It finds the switchboard the way
-`landline` does, from `LANDLINE_URL` and `LANDLINE_SECRET`, then `~/.config/landline/config.toml`.
-`landline-menubar menu --text` prints the menu as text and exits, as
-[the menu text](docs/reference/menubar-menu-text.md) defines. See
+`landline` does, from `LANDLINE_URL` and `LANDLINE_SECRET`, then
+[`~/.config/landline/config.toml`](#files-and-settings). `landline-menubar menu --text` prints the menu as text and
+exits, as [the menu text](docs/reference/menubar-menu-text.md) defines. See
 [0140](docs/decisions/0140-a-macos-menu-bar-item-shows-agents-runs-the-switchboard-and-sets-up-harnesses.md). The
 project's GitHub address is in the About panel, so a move of the repository changes it
 ([stack notes](docs/stack/README.md#moving-the-repository)).
@@ -343,6 +348,49 @@ switchboard pushes a message:
 landline setup codex
 ```
 
+## Files and settings
+
+Landline keeps these files. The two folders are made with mode `0700`.
+
+| File                             | Folder                                                       | Holds                                                                                        | Written by                                                                     | Mode   |
+| -------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------ |
+| `config.toml`                    | `~/.config/landline/`                                        | The switchboard's address, the secret or this machine's name, and the switchboard's settings | `server up`, `restart`, `rotate-secret`, and `join`. A person edits `[server]` | `0600` |
+| `machine.key`                    | `~/.config/landline/`                                        | This machine's Ed25519 key, on a machine that joined with an invite                          | `server join --code`                                                           | `0600` |
+| `session-<id>.json`              | `~/.config/landline/`                                        | The address and agent token of one registered id, which `send --as <id>` reads               | `landline register`, and `landline-mcp` while its session runs                 | `0600` |
+| `config.json`                    | `~/.config/landline/`                                        | The old format, read only when there is no `config.toml`                                     | Nothing. The first save of `config.toml` removes it                            |        |
+| `log.jsonl`                      | `~/.local/share/landline/`, or `log` in `[server]`           | The append-only message log                                                                  | `landline-switchboard`                                                         | `0600` |
+| `machines.json`                  | `~/.local/share/landline/`, whatever the log path            | The joined machines: name, public key, and date                                              | `landline-switchboard`, on a join and a revoke                                 | `0600` |
+| `switchboard.out`                | `~/.local/share/landline/`                                   | The switchboard's output                                                                     | `server up`, and the launchd agent                                             | `0600` |
+| `switchboard.pid`                | `~/.local/share/landline/`                                   | The process id of the switchboard that `server up` started                                   | `server up`. `server down` removes it                                          | `0600` |
+| `dev.landline.switchboard.plist` | `~/Library/LaunchAgents/`                                    | The launchd agent that starts the switchboard at login, on macOS                             | `server install`                                                               | `0644` |
+| `landline-switchboard.service`   | `~/.config/systemd/user/`                                    | The systemd user unit that starts the switchboard at login, on Linux                         | `server install`                                                               | `0644` |
+| `SKILL.md` and `references/`     | `~/.claude/skills/landline/`, `$CODEX_HOME/skills/landline/` | The `/landline` skill                                                                        | `landline setup`. `setup --remove` deletes an unchanged copy                   | `0644` |
+
+`$CODEX_HOME` is `~/.codex` when it is not set. `landline-mcp` removes its session file when its session ends.
+`machines.json` stays in the data folder when the log moves
+([0220](docs/decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)).
+
+`config.toml` on the switchboard's machine, with every `[server]` key. The switchboard reads `[server]`, nothing writes
+it, and a missing key means the default shown here:
+
+```toml
+secret = "..."
+host = "alpha-host"
+port = 8787
+
+[server]
+log = "~/.local/share/landline/log.jsonl"
+keepalive = "15s"
+delivery-timeout = "20s"
+grace = "2m"
+invite-lifetime = "5m"
+signature-window = "60s"
+```
+
+A comment takes a whole line, and Landline keeps it when it saves the file. A flag overrides `[server]` for one run, and
+`LANDLINE_URL` and `LANDLINE_SECRET` override the file for every client. The exact format, the errors, and which program
+reads and writes each key are in [docs/reference/config-toml.md](docs/reference/config-toml.md).
+
 ## Commands
 
 | Command                                           | Does                                                                                                                                                |
@@ -369,8 +417,9 @@ landline setup codex
 
 `landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, `--grace`,
 `--invite-lifetime`, and `--signature-window`, Go durations for the 15 second keepalive, the 20 second wait for a
-delivery report, the 2 minute grace, the 5 minute invite lifetime, and the 60 second signature window. `LANDLINE_PORT`
-changes the default port, 8787, for the switchboard and its clients.
+delivery report, the 2 minute grace, the 5 minute invite lifetime, and the 60 second signature window. A flag lasts one
+run. To keep a value, set it in the [`[server]` table](#files-and-settings) of `config.toml`. `LANDLINE_PORT` changes
+the default port, 8787, for the switchboard and its clients.
 
 ## Not built yet
 

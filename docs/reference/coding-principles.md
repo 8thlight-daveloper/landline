@@ -22,6 +22,7 @@ A program never depends on text written for people, such as log lines, banners, 
 reword that text at any time, and nothing warns that code depended on it. When one program needs a fact another program
 knows, they share it through a channel built for programs, with a stated format: an API response, a structured file, an
 argument, or an environment variable. Pick the channel that fits who needs the fact and when they need it. Every such
-format is a contract, and a change to it needs a record.
+format is a contract, and a change to it needs a record. New or changed code follows the principle, and code written
+before it is tracked and fixed in its own change, which does not block unrelated work.
 
 Records: 0220
