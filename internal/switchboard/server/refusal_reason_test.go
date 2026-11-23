@@ -50,19 +50,19 @@ func fieldNames(fields map[string]json.RawMessage) []string {
 	return names
 }
 
-func startedPastTheStartSecond(t *testing.T) *harness {
+func startedPastTheStartPeriod(t *testing.T) *harness {
 	t.Helper()
 	h := start(t)
-	h.advance(5 * time.Second)
+	h.advance(pastTheStartPeriod)
 	return h
 }
 
 func TestASignedRequestOutsideTheWindowGetsReasonClockAndTheSignedDifferenceOnEveryRouteAMachineKeyOpens(t *testing.T) {
 	for routeName, route := range routesAMachineKeyOpens {
-		for _, offset := range []int64{75, -75, 61, -61, 3600, -3600} {
+		for _, offset := range []int64{6, -6, 75, -75, 61, -61, 3600, -3600} {
 			for _, machine := range []string{"linux-box", "ghost-box"} {
 				t.Run(routeName+" "+strconv.FormatInt(offset, 10)+" "+machine, func(t *testing.T) {
-					h := startedPastTheStartSecond(t)
+					h := startedPastTheStartPeriod(t)
 					key := h.joinMachine("linux-box")
 					authorization := machineAuthorization(key, machine, h.now.Unix()+offset, route.method, route.path, route.body)
 					status, raw := h.sendWithAuthorization(route.method, route.path, authorization, route.body)
@@ -111,8 +111,8 @@ var insideWindowCauses = []insideWindowCause{
 	{"a revoked machine", func(h *harness, keys map[string]ed25519.PrivateKey, route signedRoute) string {
 		return machineAuthorization(keys["old-box"], "old-box", h.now.Unix(), route.method, route.path, route.body)
 	}},
-	{"a time in the start second", func(h *harness, keys map[string]ed25519.PrivateKey, route signedRoute) string {
-		return machineAuthorization(keys["linux-box"], "linux-box", h.now.Unix()-5, route.method, route.path, route.body)
+	{"a time at the end of the start period", func(h *harness, keys map[string]ed25519.PrivateKey, route signedRoute) string {
+		return machineAuthorization(keys["linux-box"], "linux-box", h.now.Unix()-1, route.method, route.path, route.body)
 	}},
 	{"a wrong key", func(h *harness, keys map[string]ed25519.PrivateKey, route signedRoute) string {
 		return machineAuthorization(keys["stranger"], "linux-box", h.now.Unix(), route.method, route.path, route.body)
@@ -164,7 +164,7 @@ func machinesForRefusals(t *testing.T, h *harness) map[string]ed25519.PrivateKey
 func TestEveryRefusalInsideTheWindowGetsReasonRefusedAndOneBodyOnEveryRouteAMachineKeyOpens(t *testing.T) {
 	for routeName, route := range routesAMachineKeyOpens {
 		t.Run(routeName, func(t *testing.T) {
-			h := startedPastTheStartSecond(t)
+			h := startedPastTheStartPeriod(t)
 			keys := machinesForRefusals(t, h)
 			bodies := map[string]string{}
 			for _, cause := range insideWindowCauses {
@@ -200,11 +200,12 @@ func TestEveryRefusalInsideTheWindowGetsReasonRefusedAndOneBodyOnEveryRouteAMach
 	}
 }
 
-func TestASignedRequestJustInsideTheWindowIsAcceptedAndCarriesNoRefusal(t *testing.T) {
+func TestASignedRequestJustInsideTheDefaultWindowOfFiveSecondsIsAcceptedAndCarriesNoRefusal(t *testing.T) {
 	for routeName, route := range routesAMachineKeyOpens {
-		for _, offset := range []int64{60, -4} {
+		for _, offset := range []int64{5, -5} {
 			t.Run(routeName+" "+strconv.FormatInt(offset, 10), func(t *testing.T) {
-				h := startedPastTheStartSecond(t)
+				h := startedPastTheStartPeriod(t)
+				h.advance(5 * time.Second)
 				key := h.joinMachine("linux-box")
 				authorization := machineAuthorization(key, "linux-box", h.now.Unix()+offset, route.method, route.path, route.body)
 				if status, raw := h.sendWithAuthorization(route.method, route.path, authorization, route.body); status != http.StatusOK {

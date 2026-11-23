@@ -22,17 +22,32 @@ const (
 type refusalAnswer struct {
 	name         string
 	body         string
-	signed       int
+	retried      bool
 	clock        bool
 	shownAsGiven string
 }
 
+const (
+	fewestSignedOverTheRetries = 6
+	mostSignedOverTheRetries   = 8
+)
+
+func (answer refusalAnswer) checkSignedCount(t *testing.T, got int) {
+	t.Helper()
+	switch {
+	case answer.retried && (got < fewestSignedOverTheRetries || got > mostSignedOverTheRetries):
+		t.Errorf("%d signed registrations, want the first and a retry about once a second until 6 seconds after it, %d to %d in all: %s", got, fewestSignedOverTheRetries, mostSignedOverTheRetries, answer.body)
+	case !answer.retried && got != 1:
+		t.Errorf("%d signed registrations, want 1 and no retry on reason clock: %s", got, answer.body)
+	}
+}
+
 var refusalAnswers = []refusalAnswer{
-	{"refused with a reworded message", `{"error":"the switchboard turned this request away","reason":"refused"}`, 2, false, ""},
-	{"clock with the former generic text", `{"error":"` + formerMachineRefusal + `","reason":"clock","clock_difference":437}`, 1, true, ""},
-	{"no reason with the former clock text", `{"error":"` + formerClockRefusal + `"}`, 2, false, formerClockRefusal},
-	{"an unknown reason", `{"error":"` + formerClockRefusal + `","reason":"weather","clock_difference":75}`, 2, false, formerClockRefusal},
-	{"clock with a difference in quotes", `{"error":"` + formerClockRefusal + `","reason":"clock","clock_difference":"75"}`, 2, false, formerClockRefusal},
+	{"refused with a reworded message", `{"error":"the switchboard turned this request away","reason":"refused"}`, true, false, ""},
+	{"clock with the former generic text", `{"error":"` + formerMachineRefusal + `","reason":"clock","clock_difference":437}`, false, true, ""},
+	{"no reason with the former clock text", `{"error":"` + formerClockRefusal + `"}`, true, false, formerClockRefusal},
+	{"an unknown reason", `{"error":"` + formerClockRefusal + `","reason":"weather","clock_difference":75}`, true, false, formerClockRefusal},
+	{"clock with a difference in quotes", `{"error":"` + formerClockRefusal + `","reason":"clock","clock_difference":"75"}`, true, false, formerClockRefusal},
 }
 
 type refusingSwitchboard struct {
@@ -114,9 +129,7 @@ func TestLandlineRegisterOnAMachineWithAKeyRetriesAndAdvisesByTheReasonOfA401And
 			if err == nil {
 				t.Fatalf("register succeeded against a switchboard that refuses everything: %s", out)
 			}
-			if got := fake.signedRequests("POST /v1/register"); got != answer.signed {
-				t.Errorf("%d signed registrations, want %d: %s", got, answer.signed, answer.body)
-			}
+			answer.checkSignedCount(t, fake.signedRequests("POST /v1/register"))
 			checkRefusalAdvice(t, answer, out)
 		})
 	}
@@ -146,9 +159,7 @@ func TestLandlineMCPOnAMachineWithAKeyRetriesAndAdvisesByTheReasonOfA401AndNever
 			for _, part := range decoded.Result.Content {
 				shown += part.Text
 			}
-			if got := fake.signedRequests("POST /v1/register"); got != answer.signed {
-				t.Errorf("%d signed registrations, want %d: %s", got, answer.signed, answer.body)
-			}
+			answer.checkSignedCount(t, fake.signedRequests("POST /v1/register"))
 			checkRefusalAdvice(t, answer, shown)
 		})
 	}

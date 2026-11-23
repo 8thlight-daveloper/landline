@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"runtime"
 	"testing"
-	"time"
 )
 
 const stagingAttempts = 50
@@ -75,7 +74,7 @@ func TestARequestSignedByARevokedKeyGetsNoTokenWhenItsNameWasJoinedAgainWithANew
 			caught := 0
 			for attempt := 0; attempt < stagingAttempts && caught == 0; attempt++ {
 				h := start(t)
-				h.advance(2 * time.Second)
+				h.advance(pastTheStartPeriod)
 				oldKey := h.joinMachine("linux-box")
 				newPublic, _, err := ed25519.GenerateKey(rand.Reader)
 				if err != nil {

@@ -21,7 +21,7 @@ func readTOML(t *testing.T, text string) (saved, error) {
 
 func TestAServerTableIsSkippedAndItsKeysAreNeverTakenAsTopLevelKeys(t *testing.T) {
 	got, err := readTOML(t, "# mine\nsecret = \""+tableSecret+"\"\nhost = \"saved\"\nport = 1\n\n[server]\n# where the log goes\n"+
-		"log = \"~/landline-logs/log.jsonl\"\nkeepalive = \"15s\"\ndelivery-timeout = \"20s\"\ngrace = \"2m\"\ninvite-lifetime = \"5m\"\nsignature-window = \"60s\"\n"+
+		"log = \"~/landline-logs/log.jsonl\"\nkeepalive = \"15s\"\ndelivery-timeout = \"20s\"\ngrace = \"2m\"\ninvite-lifetime = \"5m\"\nsignature-window = \"5s\"\n"+
 		"host = \"192.0.2.1\"\nport = 1234\nsecret = \"a-table-secret-is-never-read\"\nmachine = \"table-box\"\n")
 	if err != nil {
 		t.Fatalf("a [server] table is an error: %v", err)

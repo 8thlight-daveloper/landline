@@ -66,7 +66,7 @@ func startHostWithEnv(t *testing.T, extra []string, flags ...string) *hostRig {
 	if out, err := runIn(t, bin, env, home, args...); err != nil {
 		t.Fatalf("up: %v %s", err, safe(string(out)))
 	}
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	host, port := hostAndPort(t, addr)
 	values, _ := readTomlValues(t, configTomlOf(home))
 	return &hostRig{t: t, bin: bin, home: home, env: env, addr: addr, host: host, port: port, secret: values["secret"], url: "http://" + addr, began: began}
@@ -1528,16 +1528,16 @@ func TestASignatureThatCoversAnotherBodyPathMethodNameOrKeyIsRefused(t *testing.
 	}
 }
 
-func TestATimeMoreThanSixtySecondsAheadIsRefusedWithAMessageThatNamesTheClockAndTheGapAndFiftyFiveIsAccepted(t *testing.T) {
+func TestATimeMoreThanTheDefaultFiveSecondsAheadIsRefusedWithAMessageThatNamesTheClockAndTheGapAndFourIsAccepted(t *testing.T) {
 	t.Parallel()
 	h := startHost(t)
 	m := h.machine("linux-box")
-	status, body := h.signed(m, time.Now().Unix()+65, "POST", "/v1/register", registerBody("alpha"))
-	if status != http.StatusUnauthorized || !strings.Contains(strings.ToLower(body), "clock") || !regexp.MustCompile(`(^|\D)(6[3-9]|70)(\D|$)`).MatchString(body) {
-		t.Errorf("a time 65 seconds ahead: %d, want 401 with a message that names the clock and a difference of about 65 seconds", status)
+	status, body := h.signed(m, time.Now().Unix()+9, "POST", "/v1/register", registerBody("alpha"))
+	if status != http.StatusUnauthorized || !strings.Contains(strings.ToLower(body), "clock") || !regexp.MustCompile(`(^|\D)([7-9])(\D|$)`).MatchString(body) {
+		t.Errorf("a time 9 seconds ahead under the default window: %d %s, want 401 with a message that names the clock and a difference of about 9 seconds", status, body)
 	}
-	if status := h.signedStatus(m, time.Now().Unix()+55, "POST", "/v1/register", registerBody("bravo")); status != http.StatusOK {
-		t.Errorf("a time 55 seconds ahead: %d", status)
+	if status := h.signedStatus(m, time.Now().Unix()+4, "POST", "/v1/register", registerBody("bravo")); status != http.StatusOK {
+		t.Errorf("a time 4 seconds ahead under the default window: %d", status)
 	}
 }
 
@@ -1571,7 +1571,7 @@ func TestRestartAndRotateSecretPassTheSignatureWindowOn(t *testing.T) {
 	if out, err := h2.run("server", "rotate-secret", "--signature-window", "3s"); err != nil {
 		t.Fatalf("rotate-secret: %v %s", err, safe(string(out)))
 	}
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if status := h2.signedStatus(m2, time.Now().Unix(), "GET", "/v1/build", nil); status != http.StatusOK {
 		t.Errorf("after rotate-secret --signature-window 3s, a request timed now answered %d", status)
 	}
@@ -1595,16 +1595,61 @@ func TestASignatureIsStillRememberedPastOneWindowWhenItsTimeIsAWindowAhead(t *te
 	}
 }
 
-func TestASignatureTimedBeforeTheSwitchboardStartedIsRefusedEvenWithinSixtySeconds(t *testing.T) {
+func TestASignatureTimedBeforeARestartIsRefusedAfterItAndOneTimedPastTheStartPeriodIsAccepted(t *testing.T) {
+	t.Parallel()
+	h := startHostWith(t, "--signature-window", "5s")
+	m := h.machine("linux-box")
+	early := time.Now().Add(-4 * time.Second).Unix()
+	h.restartWithoutWaiting()
+	if status := h.signedStatus(m, early, "POST", "/v1/register", registerBody("alpha")); !refused(status) {
+		t.Errorf("a signature timed 4 seconds before the switchboard restarted answered %d", status)
+	}
+	waitPastTheStartPeriod()
+	if status := h.signedStatus(m, time.Now().Unix(), "POST", "/v1/register", registerBody("alpha")); status != http.StatusOK {
+		t.Errorf("a signature timed now answered %d", status)
+	}
+}
+
+func (h *hostRig) restartWithoutWaiting(flags ...string) {
+	h.t.Helper()
+	if out, err := h.run(append([]string{"server", "restart"}, flags...)...); err != nil {
+		h.t.Fatalf("restart: %v %s", err, h.clean(out))
+	}
+}
+
+func TestEverySignedRequestIsRefusedWithReasonRefusedInTheFirstFiveSecondsAfterARestartAndAcceptedAfter(t *testing.T) {
 	t.Parallel()
 	h := startHost(t)
 	m := h.machine("linux-box")
-	early := h.began.Add(-10 * time.Second).Unix()
-	if status := h.signedStatus(m, early, "POST", "/v1/register", registerBody("alpha")); !refused(status) {
-		t.Errorf("a signature timed 10 seconds before the switchboard started answered %d", status)
+	before := time.Now()
+	h.restartWithoutWaiting()
+	if took := time.Since(before); took > 2*time.Second {
+		t.Skipf("restart took %s, too long to sign two seconds after its start second and inside its start period", took)
 	}
-	if status := h.signedStatus(m, time.Now().Unix(), "POST", "/v1/register", registerBody("alpha")); status != http.StatusOK {
-		t.Errorf("a signature timed now answered %d", status)
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(2 * time.Second)))
+	status, body := h.signed(m, time.Now().Unix(), "POST", "/v1/observers", []byte(`{"kind":"tui"}`))
+	var answer struct{ Reason string }
+	json.Unmarshal([]byte(body), &answer)
+	if status != http.StatusUnauthorized || answer.Reason != "refused" {
+		t.Errorf("a request timed two seconds after the start second of a restart: %d %s, want 401 with reason refused", status, body)
+	}
+	waitPastTheStartPeriod()
+	if status := h.signedStatus(m, time.Now().Unix(), "POST", "/v1/observers", []byte(`{"kind":"tui"}`)); status != http.StatusOK {
+		t.Errorf("a request timed now, past the start period: %d", status)
+	}
+}
+
+func TestACopyOfARequestFromAMachineWhoseClockRunsAheadIsRefusedAfterARestart(t *testing.T) {
+	t.Parallel()
+	h := startHost(t)
+	m := h.machine("linux-box")
+	headers := map[string]string{"Authorization": machineAuth(m.key(), m.name, time.Now().Unix()+4, "GET", "/v1/build", nil)}
+	if status := h.statusOnly("GET", "/v1/build", nil, headers); status != http.StatusOK {
+		t.Fatalf("a time 4 seconds ahead inside the default window of 5 seconds: %d", status)
+	}
+	h.restartWithoutWaiting()
+	if status := h.statusOnly("GET", "/v1/build", nil, headers); !refused(status) {
+		t.Errorf("a copy of a request accepted before the restart, from a clock 4 seconds ahead, was accepted after it: %d", status)
 	}
 }
 
@@ -1637,11 +1682,11 @@ func (h *hostRig) restartAndSettle(flags ...string) {
 	if out, err := h.run(append([]string{"server", "restart"}, flags...)...); err != nil {
 		h.t.Fatalf("restart: %v %s", err, h.clean(out))
 	}
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 }
 
-func waitPastTheStartSecond() {
-	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+func waitPastTheStartPeriod() {
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(6 * time.Second)))
 }
 
 var hyphenatedCode = regexp.MustCompile(`[2-9A-HJKMNP-Za-hjkmnp-z]{4}-[2-9A-HJKMNP-Za-hjkmnp-z]{4}`)

@@ -20,7 +20,7 @@ const tableFile = "# mine\n" +
 	"delivery-timeout = \"20s\"\n" +
 	"grace = \"2m\"\n" +
 	"invite-lifetime = \"5m\"\n" +
-	"signature-window = \"60s\"\n"
+	"signature-window = \"5s\"\n"
 
 func lineNumberIn(err error, number string) bool {
 	return err != nil && regexp.MustCompile(`config\.toml line `+number+`\b`).MatchString(err.Error())

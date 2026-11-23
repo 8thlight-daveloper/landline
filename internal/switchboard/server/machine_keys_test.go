@@ -121,7 +121,7 @@ func TestASignedRegistrationOrObserverRacingARevokeOfItsMachineNeverLeavesALiveT
 	} {
 		t.Run(route.path, func(t *testing.T) {
 			h := start(t)
-			h.advance(2 * time.Second)
+			h.advance(pastTheStartPeriod)
 			body := paddedBody(route.fields)
 			signedCall := func(key ed25519.PrivateKey) (int, []byte) {
 				return h.sendWithAuthorization("POST", route.path, machineAuthorization(key, "linux-box", h.now.Unix(), "POST", route.path, body), body)
@@ -167,7 +167,7 @@ func TestRevokingAMachineClosesTheStreamOpenedWithItsTokenAfterTheAgentRegistere
 	for _, again := range []string{"through another machine", "with the shared secret"} {
 		t.Run(again, func(t *testing.T) {
 			h := start(t)
-			h.advance(2 * time.Second)
+			h.advance(pastTheStartPeriod)
 			alphaBox := h.joinMachine("alpha-box")
 			bravoBox := h.joinMachine("bravo-box")
 			first := h.signedRegister(alphaBox, "alpha-box", "alpha")
@@ -201,7 +201,7 @@ func TestRevokingAMachineClosesTheStreamOpenedWithItsTokenAfterTheAgentRegistere
 func TestAStreamOpenedWhileItsMachineIsRevokedNeverStaysOpenAfterTheRevoke(t *testing.T) {
 	const rounds, streams = 100, 24
 	h := start(t)
-	h.advance(2 * time.Second)
+	h.advance(pastTheStartPeriod)
 	type opened struct {
 		status int
 		ended  <-chan struct{}
@@ -360,7 +360,9 @@ func TestASuccessfulInviteReadsTheClockOnce(t *testing.T) {
 	}
 }
 
-func TestASignatureAcceptedInTheSecondOfARestartIsRefusedByTheNewProcess(t *testing.T) {
+const pastTheStartPeriod = 6 * time.Second
+
+func TestASignatureAcceptedAtTheEndOfTheStartPeriodOfARestartIsRefusedByTheNewProcess(t *testing.T) {
 	machinesPath := filepath.Join(t.TempDir(), "machines.json")
 	second := time.Date(2026, 11, 10, 12, 0, 10, 0, time.UTC)
 	clock := &settableClock{now: second.Add(-10 * time.Second)}
@@ -370,22 +372,22 @@ func TestASignatureAcceptedInTheSecondOfARestartIsRefusedByTheNewProcess(t *test
 	}
 	old := startWith(t, onClock)
 	key := old.joinMachine("linux-box")
-	clock.set(second.Add(300 * time.Millisecond))
+	clock.set(second.Add(4300 * time.Millisecond))
 	body := []byte(`{"id":"alpha","harness":"claude-code","host":"mac"}`)
-	authorization := machineAuthorization(key, "linux-box", second.Unix(), "POST", "/v1/register", body)
+	authorization := machineAuthorization(key, "linux-box", second.Unix()+5, "POST", "/v1/register", body)
 	if status, raw := old.sendWithAuthorization("POST", "/v1/register", authorization, body); status != http.StatusOK {
-		t.Fatalf("the first process refused a signature in second %d: %d %s", second.Unix(), status, raw)
+		t.Fatalf("the first process refused a signature timed %d: %d %s", second.Unix()+5, status, raw)
 	}
 	old.srv.Close()
 	clock.set(second.Add(500 * time.Millisecond))
 	restarted := startWith(t, onClock)
-	clock.set(second.Add(600 * time.Millisecond))
+	clock.set(second.Add(5600 * time.Millisecond))
 	if status, raw := restarted.sendWithAuthorization("POST", "/v1/register", authorization, body); status != http.StatusUnauthorized {
-		t.Errorf("a process started in second %d accepted a copy of a signature timed in that second: %d %s", second.Unix(), status, raw)
+		t.Errorf("a process started in second %d accepted a copy of a signature timed 5 seconds after that second: %d %s", second.Unix(), status, raw)
 	}
-	clock.set(second.Add(1200 * time.Millisecond))
-	later := machineAuthorization(key, "linux-box", second.Unix()+1, "POST", "/v1/register", body)
+	clock.set(second.Add(6200 * time.Millisecond))
+	later := machineAuthorization(key, "linux-box", second.Unix()+6, "POST", "/v1/register", body)
 	if status, raw := restarted.sendWithAuthorization("POST", "/v1/register", later, body); status != http.StatusOK {
-		t.Errorf("a signature timed in the second after the start: %d %s", status, raw)
+		t.Errorf("a signature timed 6 seconds after the start second: %d %s", status, raw)
 	}
 }

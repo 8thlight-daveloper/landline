@@ -262,7 +262,7 @@ func (c *configuredHome) moveMachinesBeside(logDir string) string {
 func (c *configuredHome) joinedMachineBesideAnOldLog(logDir string) (*hostRig, *machineRig, string) {
 	c.t.Helper()
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	h := c.asHost()
 	m := h.machine("linux-box")
 	c.mustLandline("server", "down")
@@ -344,7 +344,7 @@ func TestTheSignatureWindowAndInviteLifetimeOfTheServerTableHoldOnEveryStartPath
 	t.Parallel()
 	c := newConfiguredHome(t, "signature-window = \"3s\"\ninvite-lifetime = \"2s\"\n")
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	h := c.asHost()
 	m := h.machine("linux-box")
 	windowHolds := func(path string) {
@@ -367,13 +367,13 @@ func TestTheSignatureWindowAndInviteLifetimeOfTheServerTableHoldOnEveryStartPath
 	if out, err := h.run("server", "rotate-secret"); err != nil {
 		t.Fatalf("rotate-secret: %v %s", err, h.clean(out))
 	}
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	windowHolds("server rotate-secret")
 	if out, err := h.run("server", "down"); err != nil {
 		t.Fatalf("down: %v %s", err, h.clean(out))
 	}
 	c.startSwitchboard()
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	windowHolds("the binary with no arguments")
 }
 
@@ -381,14 +381,17 @@ func TestAServerTableThatOmitsAKeyLeavesTheDefaultForThatKey(t *testing.T) {
 	t.Parallel()
 	c := newConfiguredHome(t, "invite-lifetime = \"5m\"\n")
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if !exists(c.dataFile("log.jsonl")) {
 		t.Errorf("a [server] table with no log did not leave the log at %s", c.dataFile("log.jsonl"))
 	}
 	h := c.asHost()
 	m := h.machine("linux-box")
-	if status := h.signedStatus(m, time.Now().Unix()+10, "GET", "/v1/build", nil); status != 200 {
-		t.Errorf("a [server] table with no signature-window refused a time 10 seconds ahead (%d), want the default window", status)
+	if status := h.signedStatus(m, time.Now().Unix()+4, "GET", "/v1/build", nil); status != 200 {
+		t.Errorf("a [server] table with no signature-window refused a time 4 seconds ahead (%d), want the default window of 5 seconds", status)
+	}
+	if status := h.signedStatus(m, time.Now().Unix()+8, "GET", "/v1/build", nil); !refused(status) {
+		t.Errorf("a [server] table with no signature-window accepted a time 8 seconds ahead (%d), want the default window of 5 seconds", status)
 	}
 }
 
@@ -402,6 +405,10 @@ var badServerValues = map[string]struct{ line, echo string }{
 	"a grace that is no duration":   {`grace = "zebra"`, "zebra"},
 	"an invite lifetime number":     {`invite-lifetime = 300`, "300"},
 	"an empty signature window":     {`signature-window = ""`, `signature-window = ""`},
+	"a signature window of 0s":      {`signature-window = "0s"`, `"0s"`},
+	"a signature window of 500ms":   {`signature-window = "500ms"`, "500ms"},
+	"a signature window of 6s":      {`signature-window = "6s"`, `"6s"`},
+	"a signature window of 60s":     {`signature-window = "60s"`, "60s"},
 	"a duration without a unit":     {`keepalive = "15"`, `"15"`},
 	"a second server table":         {"[server]", ""},
 	"a key given twice in [server]": {"# chosen by hand\nkeepalive = \"15s\"", ""},
@@ -551,7 +558,7 @@ func TestMachinesJSONLivesInTheDataDirectoryWhateverTheLogFlagOrTheTableSays(t *
 		} else {
 			c.mustLandline("server", "up", "--log", custom)
 		}
-		waitPastTheStartSecond()
+		waitPastTheStartPeriod()
 		h := c.asHost()
 		if strings.Contains(listedMachines(t, h), "linux-box") {
 			t.Fatalf("%s: a fresh switchboard lists a machine", how)
@@ -574,7 +581,7 @@ func TestAMachinesJSONBesideTheFlagLogIsCopiedToTheDataDirectoryAtStartAndTheOld
 	before := stateOf(t, old)
 	wantNames := machineNames(t, old)
 	c.mustLandline("server", "up", "--log", filepath.Join(customDir, "log.jsonl"))
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if !exists(c.dataFile("machines.json")) {
 		t.Fatalf("the start did not copy %s to %s", old, c.dataFile("machines.json"))
 	}
@@ -593,7 +600,7 @@ func TestAMachinesJSONBesideTheFlagLogIsCopiedToTheDataDirectoryAtStartAndTheOld
 	}
 	c.mustLandline("server", "down")
 	c.mustLandline("server", "up", "--log", filepath.Join(customDir, "log.jsonl"))
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if len(linesNaming(c.switchboardOut(), old)) == 0 {
 		t.Errorf("a start with both files did not name the old file %s:\n%s", old, c.switchboardOut())
 	}
@@ -612,7 +619,7 @@ func TestAMachinesJSONBesideTheTableLogIsCopiedWhenUpRunsWithNoFlags(t *testing.
 	before := stateOf(t, old)
 	c.writeTable("log = \"~/custom-logs/log.jsonl\"\n")
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if !exists(c.dataFile("machines.json")) || strings.Join(machineNames(t, c.dataFile("machines.json")), ",") != strings.Join(machineNames(t, old), ",") {
 		t.Errorf("up with no flags did not copy the machines.json beside the log of [server]")
 	}
@@ -628,7 +635,7 @@ func TestWhenBothFilesExistTheDataDirectoryOneWinsAndEachStartNamesTheOldOne(t *
 	t.Parallel()
 	c := newConfiguredHome(t, "")
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	h := c.asHost()
 	oldBox := h.machine("old-box")
 	c.mustLandline("server", "down")
@@ -642,14 +649,14 @@ func TestWhenBothFilesExistTheDataDirectoryOneWinsAndEachStartNamesTheOldOne(t *
 	}
 	before := stateOf(t, old)
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if out, err := h.run("server", "revoke", "old-box"); err != nil {
 		t.Fatalf("revoke: %v %s", err, h.clean(out))
 	}
 	newBox := h.machine("new-box")
 	c.mustLandline("server", "down")
 	c.mustLandline("server", "up", "--log", filepath.Join(customDir, "log.jsonl"))
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if listed := listedMachines(t, h); !strings.Contains(listed, "new-box") || strings.Contains(listed, "old-box") {
 		t.Errorf("with both files, the switchboard did not read only the data directory's: %s", listed)
 	}
@@ -715,7 +722,7 @@ func TestRotateSecretStopStartAndTheServiceKeepTheMachinesAndTheLogOfASwitchboar
 	t.Parallel()
 	c := newConfiguredHome(t, "# by hand\nlog = \"~/table-logs/log.jsonl\"\n")
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	h := c.asHost()
 	m := h.machine("linux-box")
 	m.registerAgent("alpha")
@@ -724,7 +731,7 @@ func TestRotateSecretStopStartAndTheServiceKeepTheMachinesAndTheLogOfASwitchboar
 	if out, err := h.run("server", "rotate-secret"); err != nil || !strings.Contains(out, "rotated the switchboard secret") {
 		t.Fatalf("rotate-secret with no flags, as the menu runs it: %v %s", err, h.clean(out))
 	}
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if !exists(c.path("table-logs/log.jsonl")) || exists(c.dataFile("log.jsonl")) {
 		t.Errorf("the rotation did not start the switchboard on the log of [server]")
 	}
@@ -736,13 +743,13 @@ func TestRotateSecretStopStartAndTheServiceKeepTheMachinesAndTheLogOfASwitchboar
 	}
 	c.mustLandline("server", "down")
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if !m.registers("charlie") {
 		t.Errorf("after the menu's Stop then Start, the joined machine is locked out")
 	}
 	c.mustLandline("server", "down")
 	c.startSwitchboard()
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if !m.registers("delta") {
 		t.Errorf("under the binary run with no arguments, as the service runs it, the joined machine is locked out")
 	}
@@ -752,13 +759,13 @@ func TestRotateSecretAfterAOneRunLogFlagStartsOnTheTableLogAndKeepsTheMachines(t
 	t.Parallel()
 	c := newConfiguredHome(t, "log = \"~/table-logs/log.jsonl\"\n")
 	c.mustLandline("server", "up", "--log", c.path("flag-logs/log.jsonl"))
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	h := c.asHost()
 	m := h.machine("linux-box")
 	if out, err := h.run("server", "rotate-secret"); err != nil {
 		t.Fatalf("rotate-secret: %v %s", err, h.clean(out))
 	}
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if !exists(c.path("table-logs/log.jsonl")) {
 		t.Errorf("rotate-secret with no flags kept the last run's --log instead of the log of [server]")
 	}
@@ -771,7 +778,7 @@ func TestRotateSecretIgnoresAListeningLineInSwitchboardOutThatNamesAnotherLog(t 
 	t.Parallel()
 	c := newConfiguredHome(t, "")
 	c.mustLandline("server", "up")
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	h := c.asHost()
 	m := h.machine("linux-box")
 	elsewhere := c.path("elsewhere/log.jsonl")
@@ -783,7 +790,7 @@ func TestRotateSecretIgnoresAListeningLineInSwitchboardOutThatNamesAnotherLog(t 
 	if out, err := h.run("server", "rotate-secret"); err != nil {
 		t.Fatalf("rotate-secret: %v %s", err, h.clean(out))
 	}
-	waitPastTheStartSecond()
+	waitPastTheStartPeriod()
 	if exists(elsewhere) || !exists(c.dataFile("log.jsonl")) {
 		t.Errorf("rotate-secret took the log from the listening line in switchboard.out")
 	}
@@ -887,5 +894,47 @@ func TestMenuTextReadsAConfigWithAServerTableAndTreatsASecondServerTableAsUnread
 	writeConfigFile(t, rig.home, "config.toml", good+"[server]\n")
 	if got := rig.menu(t); !strings.HasPrefix(got, "icon: jack dimmed\n") || strings.Contains(got, "Running at") {
 		t.Errorf("the menu read a file with a second [server] line:\n%s", got)
+	}
+}
+
+func TestASignatureWindowFlagOutsideOneToFiveSecondsStopsTheBinaryWithExitOneBeforeItListens(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{"0s", "500ms", "6s", "60s"} {
+		c := newConfiguredHome(t, "")
+		result := c.switchboardExit("--signature-window", bad)
+		if result.code != 1 || !strings.Contains(result.stderr, "signature-window") {
+			t.Errorf("--signature-window %s: %d %q, want 1 and an error that names signature-window", bad, result.code, result.stderr)
+		}
+		if answers(c.addr) {
+			t.Errorf("--signature-window %s: something listens at %s", bad, c.addr)
+		}
+		up := c.landline("server", "up", "--signature-window", bad)
+		if up.code == 0 || answers(c.addr) || exists(c.dataFile("switchboard.pid")) {
+			t.Errorf("server up --signature-window %s: %d, want a refusal that starts no switchboard", bad, up.code)
+		}
+	}
+}
+
+func TestTheBinaryExitsThreeWhenItCannotListenAndOneWhenItFailsToStartForAnotherReason(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { taken.Close() })
+	if result := c.switchboardExit("--addr", taken.Addr().String()); result.code != 3 {
+		t.Errorf("an address another process holds: %d %q, want 3", result.code, result.stderr)
+	}
+	blocker := c.path("a-file")
+	if err := os.WriteFile(blocker, []byte("not a folder\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if result := c.switchboardExit("--log", filepath.Join(blocker, "log.jsonl")); result.code != 1 {
+		t.Errorf("a log that cannot be opened: %d %q, want 1", result.code, result.stderr)
+	}
+	c.writeTable("signature-window = \"6s\"\n")
+	if result := c.switchboardExit(); result.code != 1 {
+		t.Errorf("a signature-window of 6s in [server]: %d %q, want 1", result.code, result.stderr)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 const serverTable = "\n[server]\n" +
@@ -15,7 +16,7 @@ const serverTable = "\n[server]\n" +
 	"delivery-timeout = \"20s\"\n" +
 	"grace = \"3m\"\n" +
 	"invite-lifetime = \"5m\"\n" +
-	"signature-window = \"60s\"\n"
+	"signature-window = \"5s\"\n"
 
 func (r *rotation) appendToConfig(t *testing.T, text string) string {
 	t.Helper()
@@ -83,6 +84,10 @@ func TestABadValueInTheServerTableStopsUpRestartAndRotateSecretBeforeTheyChangeA
 		"a grace that is no time":   {`grace = "zebra"`, "zebra"},
 		"an invite lifetime number": {`invite-lifetime = 300`, "300"},
 		"an empty signature window": {`signature-window = ""`, `signature-window = ""`},
+		"a signature window of 0s":  {`signature-window = "0s"`, `"0s"`},
+		"a signature window 500ms":  {`signature-window = "500ms"`, "500ms"},
+		"a signature window of 6s":  {`signature-window = "6s"`, `"6s"`},
+		"a signature window of 60s": {`signature-window = "60s"`, "60s"},
 		"a duration with no unit":   {`keepalive = "15"`, `"15"`},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -140,11 +145,11 @@ func TestTheFlagLineIsPrintedOnStandardOutputBeforeTheResultOnlyForAFlagThatDiff
 	if !strings.Contains(lines[0], "restart") || !strings.Contains(lines[0], "rotate-secret") {
 		t.Errorf("the line does not say that restart and rotate-secret use the value in config.toml: %q", lines[0])
 	}
-	if code := r.run("restart", "--signature-window", "1m", "--delivery-timeout", "21s"); code != 0 {
+	if code := r.run("restart", "--signature-window", "5000ms", "--delivery-timeout", "21s"); code != 0 {
 		t.Fatalf("restart: %d %s", code, r.err.String())
 	}
 	if len(flagLines(r.out.String(), "--delivery-timeout")) != 1 || len(flagLines(r.out.String(), "--signature-window")) != 0 {
-		t.Errorf("restart: want one line for --delivery-timeout and none for --signature-window 1m: %q", r.out.String())
+		t.Errorf("restart: want one line for --delivery-timeout and none for --signature-window 5000ms: %q", r.out.String())
 	}
 	if lines := strings.Split(strings.TrimSuffix(r.out.String(), "\n"), "\n"); !strings.Contains(lines[len(lines)-1], "the switchboard is running") {
 		t.Errorf("restart: the result line is not last: %q", r.out.String())
@@ -154,7 +159,7 @@ func TestTheFlagLineIsPrintedOnStandardOutputBeforeTheResultOnlyForAFlagThatDiff
 func TestTheFlagLineComparesWithTheDefaultWhenTheTableHasNoValue(t *testing.T) {
 	address := listening(t)
 	r := newRotation(t, "http://"+address)
-	if code := r.run("up", "--grace", "120s", "--keepalive", "15s", "--delivery-timeout", "20s", "--invite-lifetime", "5m", "--signature-window", "1m", "--log", r.env.Home+"/.local/share/landline/log.jsonl"); code != 0 {
+	if code := r.run("up", "--grace", "120s", "--keepalive", "15s", "--delivery-timeout", "20s", "--invite-lifetime", "5m", "--signature-window", "5s", "--log", r.env.Home+"/.local/share/landline/log.jsonl"); code != 0 {
 		t.Fatalf("up: %d %s", code, r.err.String())
 	}
 	if lines := strings.Split(strings.TrimSuffix(r.out.String(), "\n"), "\n"); len(lines) != 1 {
@@ -165,5 +170,67 @@ func TestTheFlagLineComparesWithTheDefaultWhenTheTableHasNoValue(t *testing.T) {
 	}
 	if len(flagLines(r.out.String(), "--grace")) != 1 {
 		t.Errorf("a --grace that differs from the default printed no line: %q", r.out.String())
+	}
+}
+
+func TestASignatureWindowFlagOutsideOneToFiveSecondsStopsUpAndRestartBeforeTheyChangeAnything(t *testing.T) {
+	for _, bad := range []string{"0s", "500ms", "999ms", "5001ms", "6s", "60s"} {
+		t.Run(bad, func(t *testing.T) {
+			address := listening(t)
+			r := newRotation(t, "http://"+address)
+			if code := r.run("up", "--signature-window", bad); code == 0 || r.running() {
+				t.Errorf("up --signature-window %s: code %d, running %v, want a refusal and no switchboard", bad, code, r.running())
+			}
+			if code := r.run("up"); code != 0 {
+				t.Fatalf("up: %d %s", code, r.err.String())
+			}
+			before := r.pid(t)
+			written := r.configText(t)
+			for _, command := range []string{"restart", "rotate-secret"} {
+				if code := r.run(command, "--signature-window", bad); code == 0 {
+					t.Errorf("%s --signature-window %s: code 0, want a refusal", command, bad)
+				}
+				if !r.running() || r.pid(t) != before {
+					t.Errorf("%s --signature-window %s stopped or replaced the running switchboard", command, bad)
+				}
+				if r.configText(t) != written {
+					t.Errorf("%s --signature-window %s changed config.toml", command, bad)
+				}
+			}
+		})
+	}
+}
+
+func TestTheSignatureWindowIsFiveSecondsByDefaultAndTakesOneToFiveSecondsFromTheFlagOrTheTable(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	env := Env{ConfigDir: t.TempDir(), Home: home, Host: "mac"}
+	settings, _, err := SwitchboardSettings(env, map[string]string{})
+	if err != nil || settings.Timing.SignatureWindow != 5*time.Second {
+		t.Fatalf("no table and no flag: %v %v, want 5s", settings.Timing.SignatureWindow, err)
+	}
+	for _, good := range []string{"1s", "1500ms", "5s", "5000ms"} {
+		want, _ := time.ParseDuration(good)
+		if settings, _, err := SwitchboardSettings(env, map[string]string{"--signature-window": good}); err != nil || settings.Timing.SignatureWindow != want {
+			t.Errorf("--signature-window %s: %v %v", good, settings.Timing.SignatureWindow, err)
+		}
+		writeFile(t, env.ConfigDir, "config.toml", "[server]\nsignature-window = \""+good+"\"\n")
+		if settings, _, err := SwitchboardSettings(env, map[string]string{}); err != nil || settings.Timing.SignatureWindow != want {
+			t.Errorf("signature-window = %q: %v %v", good, settings.Timing.SignatureWindow, err)
+		}
+		os.Remove(configPath(env))
+	}
+	for _, bad := range []string{"0s", "500ms", "999ms", "5001ms", "6s", "60s"} {
+		if _, _, err := SwitchboardSettings(env, map[string]string{"--signature-window": bad}); err == nil {
+			t.Errorf("--signature-window %s was accepted", bad)
+		}
+		writeFile(t, env.ConfigDir, "config.toml", "[server]\nsignature-window = \""+bad+"\"\n")
+		if _, _, err := SwitchboardSettings(env, map[string]string{}); !lineNumberIn(err, "2") {
+			t.Errorf("signature-window = %q: %v, want an error at config.toml line 2", bad, err)
+		}
+		if _, _, err := SwitchboardSettings(env, map[string]string{"--signature-window": "3s"}); !lineNumberIn(err, "2") {
+			t.Errorf("signature-window = %q with --signature-window 3s: %v, want the table's error at line 2", bad, err)
+		}
+		os.Remove(configPath(env))
 	}
 }

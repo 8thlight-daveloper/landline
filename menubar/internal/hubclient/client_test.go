@@ -124,6 +124,7 @@ func TestAgentsReportsARefusedSecretWithoutPrintingIt(t *testing.T) {
 }
 
 func TestAgentsReportsARefusedMachineKeyAndSaysToJoinAgain(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(newStubHub("right-right-right-right"))
 	defer server.Close()
 	_, key, err := ed25519.GenerateKey(rand.Reader)

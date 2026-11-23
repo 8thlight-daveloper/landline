@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -569,25 +570,89 @@ func TestVerifyChecksTheWindowBeforeTheStartRule(t *testing.T) {
 	}
 }
 
-func TestVerifyRefusesATimeInOrBeforeTheSecondTheSwitchboardStartedAndAcceptsATimeAfterIt(t *testing.T) {
+func TestVerifyRefusesEveryTimeUpToFiveSecondsAfterTheStartSecondAndAcceptsTheNextWhateverTheWindow(t *testing.T) {
+	t.Parallel()
+	state := machineState(t)
+	for _, started := range []time.Time{t0, t0.Add(700 * time.Millisecond), t0.Add(999 * time.Millisecond)} {
+		for _, window := range []time.Duration{time.Second, time.Second + 900*time.Millisecond, 5 * time.Second, 5*time.Second + 900*time.Millisecond, 60 * time.Second} {
+			at := fmt.Sprintf("start %s, window %v", started.Format("15:04:05.000"), window)
+			for offset := int64(-1); offset <= 5; offset++ {
+				now := t0.Add(time.Duration(offset)*time.Second + 300*time.Millisecond)
+				got, name, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+offset).request(), now, started, window)
+				if !errors.Is(err, model.ErrBeforeStart) || name != "" || !reflect.DeepEqual(snapshot(got), snapshot(state)) {
+					t.Errorf("%s: a time %d seconds after the start second, arriving with it: %q %v, want model.ErrBeforeStart and the value unchanged", at, offset, name, err)
+				}
+			}
+			late := t0.Add(6*time.Second + 300*time.Millisecond)
+			if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+5).request(), late, started, window); !errors.Is(err, model.ErrBeforeStart) {
+				t.Errorf("%s: a time 5 seconds after the start second, arriving one second after the period: %v, want model.ErrBeforeStart, because the rule reads the time in the request", at, err)
+			}
+			if _, name, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+6).request(), late, started, window); err != nil || name != "linux-box" {
+				t.Errorf("%s: a time 6 seconds after the start second: %q %v, want it accepted", at, name, err)
+			}
+		}
+	}
+}
+
+func TestVerifyReadsTheStartPeriodFromTheTimeInTheRequestAndNotFromTheMomentItArrives(t *testing.T) {
 	t.Parallel()
 	state := machineState(t)
 	started := t0.Add(700 * time.Millisecond)
-	now := t0.Add(1800 * time.Millisecond)
-	if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()-1).request(), now, started, window); !errors.Is(err, model.ErrBeforeStart) {
-		t.Errorf("a time in the second before the start: %v", err)
+	window := 5 * time.Second
+	if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+5).request(), t0.Add(10*time.Second+300*time.Millisecond), started, window); !errors.Is(err, model.ErrBeforeStart) {
+		t.Errorf("a time in the start period arriving 5 seconds after it: %v, want model.ErrBeforeStart", err)
 	}
-	got, name, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()).request(), now, started, window)
-	if !errors.Is(err, model.ErrBeforeStart) || name != "" || !reflect.DeepEqual(snapshot(got), snapshot(state)) {
-		t.Errorf("a time in the second of the start: %q %v", name, err)
+	if _, name, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+6).request(), t0.Add(1300*time.Millisecond), started, window); err != nil || name != "linux-box" {
+		t.Errorf("a time after the start period from a clock 5 seconds ahead, arriving inside the period: %q %v, want it accepted", name, err)
 	}
-	for _, exact := range []time.Time{t0, t0.Add(999 * time.Millisecond)} {
-		if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()).request(), now, exact, window); !errors.Is(err, model.ErrBeforeStart) {
-			t.Errorf("a time equal to the second of a start at %v: %v", exact.Format(time.RFC3339Nano), err)
+}
+
+func TestVerifyRefusesACopyThatTheProcessBeforeARestartAcceptedFromAMachineWhoseClockRunsAhead(t *testing.T) {
+	t.Parallel()
+	window := 5 * time.Second
+	fresh := machineState(t)
+	oldStart := t0.Add(-time.Hour)
+	oldNow := t0.Add(500 * time.Millisecond)
+	restarted := t0.Add(800 * time.Millisecond)
+	copyArrives := t0.Add(time.Second)
+	for ahead := int64(1); ahead <= 5; ahead++ {
+		request := signedBy("linux-box", keyOf(1), t0.Unix()+ahead).request()
+		if _, _, err := newImpl().Verify(fresh, request, oldNow, oldStart, window); err != nil {
+			t.Fatalf("the process before the restart refused a clock %d seconds ahead: %v", ahead, err)
+		}
+		if _, name, err := newImpl().Verify(fresh, request, copyArrives, restarted, window); !errors.Is(err, model.ErrBeforeStart) {
+			t.Errorf("a copy of a request %d seconds ahead, which the process before the restart accepted, reached a process with an empty memory: %q %v, want model.ErrBeforeStart", ahead, name, err)
 		}
 	}
-	if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), t0.Unix()+1).request(), now, started, window); err != nil {
-		t.Errorf("a time in the second after the start: %v", err)
+}
+
+func TestVerifyKeepsTheOrderOfItsErrorsForATimeInTheStartPeriodAfterTheStartSecond(t *testing.T) {
+	t.Parallel()
+	state := machineState(t)
+	now := t0.Add(3300 * time.Millisecond)
+	if _, _, err := newImpl().Verify(state, signedBy("ghost-box", keyOf(1), t0.Unix()+3).request(), now, t0, 5*time.Second); !errors.Is(err, model.ErrUnknownMachine) {
+		t.Errorf("an unknown name with a time in the start period: %v, want model.ErrUnknownMachine", err)
+	}
+	if _, _, err := newImpl().Verify(state, signedBy("linux-box", keyOf(2), t0.Unix()+3).request(), now, t0, 5*time.Second); !errors.Is(err, model.ErrBeforeStart) {
+		t.Errorf("a bad signature with a time in the start period: %v, want model.ErrBeforeStart", err)
+	}
+}
+
+func TestVerifyRefusesEveryTimeWhenTheStartPeriodRunsPastTheLargestTimeWithoutWrapping(t *testing.T) {
+	t.Parallel()
+	state := machineState(t)
+	for _, startSecond := range []int64{math.MaxInt64 - 4, math.MaxInt64 - 2, math.MaxInt64} {
+		started := time.Unix(startSecond, 0)
+		now := time.Unix(math.MaxInt64, 0)
+		if started.Unix() != startSecond || now.Unix() != math.MaxInt64 {
+			t.Fatalf("fixture error: a time with %d seconds reads back as %d", startSecond, started.Unix())
+		}
+		for _, request := range []int64{math.MaxInt64 - 1, math.MaxInt64} {
+			got, name, err := newImpl().Verify(state, signedBy("linux-box", keyOf(1), request).request(), now, started, 5*time.Second)
+			if !errors.Is(err, model.ErrBeforeStart) || name != "" || !reflect.DeepEqual(snapshot(got), snapshot(state)) {
+				t.Errorf("start %d, time %d: %q %v, want model.ErrBeforeStart, because the time is not later than the start plus 5 seconds", startSecond, request, name, err)
+			}
+		}
 	}
 }
 
@@ -1235,6 +1300,7 @@ func TestVerifyCountsOnlyTheWholeSecondsOfAWindowThatHasAFraction(t *testing.T) 
 		{5*time.Second + 900*time.Millisecond, 5},
 		{60*time.Second + 999*time.Millisecond, 60},
 		{2*time.Second + time.Nanosecond, 2},
+		{time.Second + 999*time.Millisecond, 1},
 	} {
 		state := machineState(t)
 		for _, offset := range []int64{c.whole, -c.whole} {
