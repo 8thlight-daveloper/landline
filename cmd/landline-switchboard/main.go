@@ -54,14 +54,29 @@ func run(args []string) int {
 		return 2
 	}
 	addr := command.Or(values["--addr"], net.JoinHostPort(savedHost, strconv.Itoa(savedPort)))
-	timing, err := command.TimingFrom(values)
-	if err != nil {
+	if _, err := command.TimingFrom(values); err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
 		return 2
 	}
-	logPath := command.Or(values["--log"], filepath.Join(home, ".local", "share", "landline", "log.jsonl"))
-	host = command.Or(values["--host"], host)
+	settings, flagLines, err := command.SwitchboardSettings(env, values)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, name+":", err)
+		return 1
+	}
+	for _, line := range flagLines {
+		fmt.Fprintln(os.Stderr, name+":", line)
+	}
+	logPath, host, timing := settings.Log, settings.Host, settings.Timing
 	warnIfExposed(addr)
+	machinesPath := filepath.Join(filepath.Dir(command.DefaultLogPath(env)), "machines.json")
+	notice, err := server.CarryOverMachines(machinesPath, filepath.Join(filepath.Dir(logPath), "machines.json"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, name+":", err)
+		return 1
+	}
+	if notice != "" {
+		fmt.Fprintln(os.Stderr, name+":", notice)
+	}
 	log, err := store.Open(logPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
@@ -80,7 +95,7 @@ func run(args []string) int {
 		Secret: secret, Host: host,
 		KeepaliveInterval: timing.Keepalive, DeliveryTimeout: timing.DeliveryTimeout, Grace: timing.Grace,
 		InviteLifetime: timing.InviteLifetime, SignatureWindow: timing.SignatureWindow,
-		MachinesPath: filepath.Join(filepath.Dir(logPath), "machines.json"),
+		MachinesPath: machinesPath,
 		Notify:       command.NotifyToStderr,
 		Build:        server.BuildResponse{Version: version, Commit: commit, Date: date},
 	}, log)

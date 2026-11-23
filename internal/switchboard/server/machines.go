@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	machineScheme        = "Landline-Machine "
+	machineScheme        = "Landline-Machine"
 	maxRedeemBytes       = 4096
 	inviteRetries        = 10
 	machineRefusal       = "missing or wrong switchboard secret or machine signature"
@@ -43,6 +43,29 @@ type InviteResponse struct {
 
 type RedeemResponse struct {
 	Name string `json:"name"`
+}
+
+type MachineRefusal struct {
+	Error           string `json:"error"`
+	Reason          string `json:"reason"`
+	ClockDifference *int64 `json:"clock_difference,omitempty"`
+}
+
+const (
+	reasonClock   = "clock"
+	reasonRefused = "refused"
+)
+
+func refuseMachine(w http.ResponseWriter) {
+	write(w, http.StatusUnauthorized, MachineRefusal{Error: machineRefusal, Reason: reasonRefused})
+}
+
+func refuseMachineClock(w http.ResponseWriter, skew *model.ClockSkewError) {
+	write(w, http.StatusUnauthorized, MachineRefusal{Error: skew.Error(), Reason: reasonClock, ClockDifference: &skew.Seconds})
+}
+
+func machineSigned(header string) bool {
+	return header == machineScheme || strings.HasPrefix(header, machineScheme+" ")
 }
 
 type MachineInfo struct {
@@ -66,6 +89,34 @@ func readMachines(path string) ([]model.Machine, error) {
 		return nil, fmt.Errorf("%s is not a list of machines: %v", path, err)
 	}
 	return machines, nil
+}
+
+func CarryOverMachines(current, former string) (string, error) {
+	if sameFile(current, former) {
+		return "", nil
+	}
+	_, currentErr := os.Stat(current)
+	_, formerErr := os.Stat(former)
+	switch {
+	case errors.Is(formerErr, os.ErrNotExist):
+		return "", nil
+	case !errors.Is(currentErr, os.ErrNotExist):
+		return fmt.Sprintf("%s is no longer read, because the switchboard reads %s. You may delete %s", former, current, former), nil
+	}
+	machines, err := readMachines(former)
+	if err != nil {
+		return "", err
+	}
+	if err := writeMachines(current, machines); err != nil {
+		return "", fmt.Errorf("the machines of %s could not be copied to %s: %v", former, current, err)
+	}
+	return fmt.Sprintf("copied the machines of %s to %s, and now reads %s. %s is left as it was", former, current, current, former), nil
+}
+
+func sameFile(one, other string) bool {
+	oneAbsolute, oneErr := filepath.Abs(one)
+	otherAbsolute, otherErr := filepath.Abs(other)
+	return oneErr == nil && otherErr == nil && oneAbsolute == otherAbsolute
 }
 
 func writeMachines(path string, machines []model.Machine) error {
@@ -108,7 +159,7 @@ func (s *Server) secretOrMachine(w http.ResponseWriter, r *http.Request) (string
 	if s.isSecret(r) {
 		return "", true
 	}
-	if header := r.Header.Get("Authorization"); strings.HasPrefix(header, machineScheme) {
+	if header := r.Header.Get("Authorization"); machineSigned(header) {
 		return s.verifyMachine(w, r, header)
 	}
 	return "", s.secretOnly(w, r)
@@ -124,7 +175,7 @@ func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header st
 	body, bodyErr := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
 	nonce, nonceErr := base64.StdEncoding.DecodeString(fields["nonce"])
 	if bodyErr != nil || timeErr != nil || signatureErr != nil || nonceErr != nil || len(nonce) != 16 || fields["name"] == "" {
-		fail(w, http.StatusUnauthorized, machineRefusal)
+		refuseMachine(w)
 		return "", false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
@@ -140,9 +191,9 @@ func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header st
 	case err == nil:
 		return name, true
 	case errors.As(err, &skew):
-		fail(w, http.StatusUnauthorized, skew.Error())
+		refuseMachineClock(w, skew)
 	default:
-		fail(w, http.StatusUnauthorized, machineRefusal)
+		refuseMachine(w)
 	}
 	return "", false
 }

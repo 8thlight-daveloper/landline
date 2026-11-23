@@ -20,9 +20,13 @@ import (
 type StatusError struct {
 	Status  int
 	Message string
+	Refusal *MachineRefusal
 }
 
 func (e *StatusError) Error() string {
+	if e.Refusal != nil {
+		return e.Refusal.advice(e.Message)
+	}
 	if e.Message == "" {
 		return fmt.Sprintf("the switchboard answered %d", e.Status)
 	}
@@ -47,8 +51,6 @@ func (c *Client) do(method, path string, in, out any) error {
 	return c.doWith(true, method, path, in, out)
 }
 
-const machineRefusal = "missing or wrong switchboard secret or machine signature"
-
 func (c *Client) doWith(authorized bool, method, path string, in, out any) error {
 	var raw []byte
 	if in != nil {
@@ -61,7 +63,7 @@ func (c *Client) doWith(authorized bool, method, path string, in, out any) error
 	err := c.send(authorized, method, path, raw, out)
 	var refused *StatusError
 	signed := authorized && c.Signer != nil && signedRoute(method, path)
-	if signed && errors.As(err, &refused) && refused.Status == nethttp.StatusUnauthorized && refused.Message == machineRefusal {
+	if signed && errors.As(err, &refused) && refused.Refusal != nil && !refused.Refusal.Clock {
 		time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
 		err = c.send(authorized, method, path, raw, out)
 	}
@@ -94,11 +96,16 @@ func (c *Client) send(authorized bool, method, path string, raw []byte, out any)
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if resp.StatusCode != nethttp.StatusOK {
+		failure := &StatusError{Status: resp.StatusCode}
 		var e model.ErrorResponse
-		if json.Unmarshal(data, &e) == nil && e.Error != "" {
-			return &StatusError{Status: resp.StatusCode, Message: e.Error}
+		if json.Unmarshal(data, &e) == nil {
+			failure.Message = e.Error
 		}
-		return &StatusError{Status: resp.StatusCode}
+		if resp.StatusCode == nethttp.StatusUnauthorized && strings.HasPrefix(req.Header.Get("Authorization"), machineScheme) {
+			refusal := machineRefusalIn(data)
+			failure.Refusal = &refusal
+		}
+		return failure
 	}
 	if out == nil {
 		return nil

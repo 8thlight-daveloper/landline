@@ -24,8 +24,6 @@ const (
 
 var ErrControlSecret = errors.New("the switchboard secret contains a control character")
 
-const machineRefusal = "missing or wrong switchboard secret or machine signature"
-
 var ErrNoSecret = errors.New("there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET")
 
 type Client struct {
@@ -178,10 +176,8 @@ func (c *Client) registerOnce() (string, bool, error) {
 	}
 	switch {
 	case status == http.StatusUnauthorized && credential.Key != nil:
-		if refusal := refusalIn(raw); refusal != "" && refusal != machineRefusal {
-			return "", false, errors.New(refusal)
-		}
-		return "", true, errors.New("the switchboard refused this machine's key. Run landline server join <host:port> --code <code> to join again")
+		refusal := machineRefusalIn(raw)
+		return "", !refusal.clock, errors.New(refusal.advice())
 	case status == http.StatusUnauthorized:
 		return "", false, errors.New("the switchboard refused the switchboard secret")
 	case status != http.StatusOK:
@@ -201,12 +197,41 @@ func (c *Client) registerOnce() (string, bool, error) {
 	return answer.Token, false, nil
 }
 
-func refusalIn(raw []byte) string {
-	var answer struct {
-		Error string `json:"error"`
+type machineRefusal struct {
+	message         string
+	clock           bool
+	clockDifference int64
+}
+
+func machineRefusalIn(raw []byte) machineRefusal {
+	var fields map[string]json.RawMessage
+	json.Unmarshal(raw, &fields)
+	var message, reason string
+	json.Unmarshal(fields["error"], &message)
+	refusal := machineRefusal{message: clean.Text(message)}
+	if json.Unmarshal(fields["reason"], &reason) != nil || reason != "clock" {
+		return refusal
 	}
-	json.Unmarshal(raw, &answer)
-	return clean.Text(answer.Error)
+	if string(fields["clock_difference"]) == "null" || json.Unmarshal(fields["clock_difference"], &refusal.clockDifference) != nil {
+		return refusal
+	}
+	refusal.clock = true
+	return refusal
+}
+
+func (r machineRefusal) advice() string {
+	if r.clock {
+		seconds, direction := uint64(r.clockDifference), "ahead of"
+		if r.clockDifference < 0 {
+			seconds, direction = uint64(-r.clockDifference), "behind"
+		}
+		return fmt.Sprintf("the clock of this machine runs %d seconds %s the switchboard's. Set the clock", seconds, direction)
+	}
+	generic := "the switchboard refused this machine's key. The shared secret may have been rotated, this machine may have been revoked, or its clock may run behind the switchboard's. If the refusal persists after one retry, run landline server join <host:port> --code <code> to join again"
+	if r.message == "" {
+		return generic
+	}
+	return r.message + ". " + generic
 }
 
 func (c *Client) list(token string) ([]Agent, int, error) {

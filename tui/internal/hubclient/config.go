@@ -21,11 +21,14 @@ type saved struct {
 
 var (
 	keyLine     = regexp.MustCompile(`^([A-Za-z0-9_-]+)\s*=\s*(.*)$`)
+	tableLine   = regexp.MustCompile(`^\[([A-Za-z0-9_-]+)\]$`)
 	stringValue = regexp.MustCompile(`^"([^"\\]*)"$`)
 	wholeNumber = regexp.MustCompile(`^-?[0-9]+$`)
 )
 
-const wrongShape = "this line is not a blank line, a comment that starts with #, or a key set to text in quotes or to a whole number"
+const wrongShape = "this line is not a blank line, a comment that starts with #, a table name in brackets, or a key set to text in quotes or to a whole number"
+
+const serverTable = "server"
 
 func readSaved(directory string) (saved, error) {
 	path := filepath.Join(directory, "config.toml")
@@ -41,9 +44,20 @@ func readSaved(directory string) (saved, error) {
 
 func parseSaved(path, text string) (saved, error) {
 	var config saved
+	table := ""
+	seenServer := false
+	serverKeys := map[string]bool{}
 	for number, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if opened := tableLine.FindStringSubmatch(line); opened != nil {
+			table = opened[1]
+			if table == serverTable && seenServer {
+				return saved{}, fmt.Errorf("%s line %d: [server] is given a second time", path, number+1)
+			}
+			seenServer = seenServer || table == serverTable
 			continue
 		}
 		found := keyLine.FindStringSubmatch(line)
@@ -53,7 +67,16 @@ func parseSaved(path, text string) (saved, error) {
 		key, value := found[1], found[2]
 		quoted := stringValue.FindStringSubmatch(value)
 		isNumber := wholeNumber.MatchString(value)
+		if table == serverTable {
+			if serverKeys[key] {
+				return saved{}, fmt.Errorf("%s line %d: %s is given a second time in [server]", path, number+1, key)
+			}
+			serverKeys[key] = true
+		}
 		switch {
+		case quoted == nil && !isNumber:
+			return saved{}, fmt.Errorf("%s line %d: %s", path, number+1, wrongShape)
+		case table != "":
 		case key == "secret" || key == "host" || key == "machine":
 			if quoted == nil {
 				return saved{}, fmt.Errorf("%s line %d: %s must be text in quotes", path, number+1, key)
@@ -72,8 +95,6 @@ func parseSaved(path, text string) (saved, error) {
 				return saved{}, fmt.Errorf("%s line %d: port must be a whole number from 1 to 65535", path, number+1)
 			}
 			config.Port = port
-		case quoted == nil && !isNumber:
-			return saved{}, fmt.Errorf("%s line %d: %s", path, number+1, wrongShape)
 		}
 	}
 	return config, nil

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -64,6 +65,7 @@ func legacyConfigPath(env Env) string { return filepath.Join(env.ConfigDir, "con
 
 var (
 	keyLine     = regexp.MustCompile(`^([A-Za-z0-9_-]+)\s*=\s*(.*)$`)
+	tableLine   = regexp.MustCompile(`^\[([A-Za-z0-9_-]+)\]$`)
 	stringValue = regexp.MustCompile(`^"([^"\\]*)"$`)
 	wholeNumber = regexp.MustCompile(`^-?[0-9]+$`)
 )
@@ -79,24 +81,61 @@ func ReadConfig(env Env) (Config, error) {
 	return Config{}, fmt.Errorf("%s cannot be read: %v", configPath(env), err)
 }
 
+const (
+	wrongShape      = "this line is not a blank line, a comment that starts with #, a table name in brackets, or a key set to text in quotes or to a whole number"
+	serverTableName = "server"
+)
+
+type tableKey struct {
+	index      int
+	key, value string
+}
+
 func parseConfig(path, text string) (Config, error) {
+	config, _, err := parseConfigTables(path, text)
+	return config, err
+}
+
+func parseConfigTables(path, text string) (Config, []tableKey, error) {
 	var config Config
+	var server []tableKey
+	table := ""
+	seenServer := false
 	for number, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if opened := tableLine.FindStringSubmatch(line); opened != nil {
+			table = opened[1]
+			if table == serverTableName && seenServer {
+				return Config{}, nil, lineError(path, number, "[server] is given a second time")
+			}
+			seenServer = seenServer || table == serverTableName
+			continue
+		}
 		found := keyLine.FindStringSubmatch(line)
 		if found == nil {
-			return Config{}, lineError(path, number, "this line is not a blank line, a comment that starts with #, or a key set to text in quotes or to a whole number")
+			return Config{}, nil, lineError(path, number, wrongShape)
 		}
 		key, value := found[1], found[2]
 		quoted := stringValue.FindStringSubmatch(value)
 		isNumber := wholeNumber.MatchString(value)
+		if table == serverTableName {
+			for _, earlier := range server {
+				if earlier.key == key {
+					return Config{}, nil, lineError(path, number, key+" is given a second time in [server]")
+				}
+			}
+			server = append(server, tableKey{index: number, key: key, value: value})
+		}
 		switch {
+		case quoted == nil && !isNumber:
+			return Config{}, nil, lineError(path, number, wrongShape)
+		case table != "":
 		case key == "secret" || key == "host" || key == "machine":
 			if quoted == nil {
-				return Config{}, lineError(path, number, key+" must be text in quotes")
+				return Config{}, nil, lineError(path, number, key+" must be text in quotes")
 			}
 			switch key {
 			case "secret":
@@ -109,14 +148,12 @@ func parseConfig(path, text string) (Config, error) {
 		case key == "port":
 			port, convertErr := strconv.Atoi(value)
 			if !isNumber || convertErr != nil || port < 1 || port > 65535 {
-				return Config{}, lineError(path, number, "port must be a whole number from 1 to 65535")
+				return Config{}, nil, lineError(path, number, "port must be a whole number from 1 to 65535")
 			}
 			config.Port = port
-		case quoted == nil && !isNumber:
-			return Config{}, lineError(path, number, "this line is not a blank line, a comment that starts with #, or a key set to text in quotes or to a whole number")
 		}
 	}
-	return config, nil
+	return config, server, nil
 }
 
 func lineError(path string, index int, problem string) error {
@@ -247,9 +284,14 @@ func renderConfig(config Config) []string {
 
 func setKey(lines []string, key, value string) []string {
 	replaced := false
+	firstTable := len(lines)
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if found := keyLine.FindStringSubmatch(trimmed); found != nil && found[1] == key && !strings.HasPrefix(trimmed, "#") {
+		if tableLine.MatchString(trimmed) {
+			firstTable = i
+			break
+		}
+		if found := keyLine.FindStringSubmatch(trimmed); found != nil && found[1] == key {
 			lines[i] = key + " = " + value
 			replaced = true
 		}
@@ -257,7 +299,15 @@ func setKey(lines []string, key, value string) []string {
 	if replaced {
 		return lines
 	}
-	return append(lines, key+" = "+value)
+	return slices.Insert(lines, topLevelEnd(lines, firstTable), key+" = "+value)
+}
+
+func topLevelEnd(lines []string, firstTable int) int {
+	end := firstTable
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	return end
 }
 
 func withConfig(env Env) Env {

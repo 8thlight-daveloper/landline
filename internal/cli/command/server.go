@@ -22,11 +22,15 @@ const serverUsage = `landline server <command>
                     --grace D, --invite-lifetime D and --signature-window D, which take durations such as 200ms or 15s.
                     --grace is how long the switchboard keeps an agent after it was last seen, 2 minutes by default.
                     Without --addr it listens on the host and port saved in config.toml. Without a saved host it uses
-                    127.0.0.1, and without a saved port the port in LANDLINE_PORT or 8787. It saves the address after it listens
+                    127.0.0.1, and without a saved port the port in LANDLINE_PORT or 8787. It saves the address after it listens.
+                    The switchboard takes the log and the timings from the [server] table of config.toml, with the keys
+                    log, keepalive, delivery-timeout, grace, invite-lifetime, and signature-window. A flag overrides the
+                    table for one run and is never saved
   down              stop the switchboard that "up" started
-  restart [flags]   stop that switchboard and start it again with the flags given. It keeps no agents, so each one registers again
-  rotate-secret [flags]   replace the secret and restart the switchboard with the flags given. The old secret stops working
-                    at once and every agent must register again
+  restart [flags]   stop that switchboard and start it again with the [server] table and the flags given. It keeps no
+                    agents, so each one registers again
+  rotate-secret [flags]   replace the secret and restart the switchboard with the [server] table and the flags given. The old
+                    secret stops working at once and every agent must register again
   invite --name N   make a code that lets another machine join as N, and print the join command for it
   machines          list the machines that joined, with a fingerprint of each key
   revoke N|--all    remove a machine, or every machine, and end its tokens and streams
@@ -158,6 +162,11 @@ func serverUp(args []string, env Env, dataDir string) int {
 		fmt.Fprintln(env.Stderr, "landline server up:", err)
 		return 2
 	}
+	_, flagLines, err := SwitchboardSettings(env, values)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, "landline server up:", err)
+		return 1
+	}
 	switchboard, err := findBinary(SwitchboardBinaryName)
 	if err != nil {
 		fmt.Fprintln(env.Stderr, "landline server up:", err)
@@ -180,6 +189,7 @@ func serverUp(args []string, env Env, dataDir string) int {
 	}
 	defer out.Close()
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	printLines(env, flagLines)
 	if values["--addr"] == "" {
 		args = append([]string{"--addr", addr}, args...)
 	}
@@ -237,6 +247,12 @@ func upFailed(env Env, dataDir, outPath string, fromSavedAddress bool) int {
 	return 1
 }
 
+func printLines(env Env, lines []string) {
+	for _, line := range lines {
+		fmt.Fprintln(env.Stdout, line)
+	}
+}
+
 func serverDown(env Env, dataDir string) int {
 	pid, running := switchboardPID(dataDir)
 	if !running {
@@ -261,6 +277,10 @@ func serverRestart(args []string, env Env, dataDir string) int {
 	if err := checkSwitchboardFlags(args); err != nil {
 		fmt.Fprintln(env.Stderr, "landline server restart:", err)
 		return 2
+	}
+	if _, err := readServerTable(env); err != nil {
+		fmt.Fprintln(env.Stderr, "landline server restart:", err)
+		return 1
 	}
 	if _, err := findBinary(SwitchboardBinaryName); err != nil {
 		fmt.Fprintln(env.Stderr, "landline server restart:", err)

@@ -321,7 +321,7 @@ func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if machine != "" && !s.machineActiveLocked(machine) {
-		fail(w, http.StatusUnauthorized, machineRefusal)
+		refuseMachine(w)
 		return
 	}
 	now := requestTime(r)
@@ -386,7 +386,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if machine != "" && !s.machineActiveLocked(machine) {
-		fail(w, http.StatusUnauthorized, machineRefusal)
+		refuseMachine(w)
 		return
 	}
 	now := requestTime(r)

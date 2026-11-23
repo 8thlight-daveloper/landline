@@ -4,10 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -20,6 +17,12 @@ func serverRotateSecret(args []string, env Env, dataDir string) int {
 		return 2
 	}
 	config, err := ReadConfig(env)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, name, err)
+		return 1
+	}
+	values, _ := FlagValues(args, SwitchboardFlags...)
+	_, flagLines, err := SwitchboardSettings(env, values)
 	if err != nil {
 		fmt.Fprintln(env.Stderr, name, err)
 		return 1
@@ -49,13 +52,10 @@ func serverRotateSecret(args []string, env Env, dataDir string) int {
 			}
 		}
 	}
-	values, _ := FlagValues(args, SwitchboardFlags...)
 	if values["--addr"] == "" {
 		args = append([]string{"--addr", address}, args...)
 	}
-	if logPath := runningLogPath(dataDir); values["--log"] == "" && logPath != "" {
-		args = append([]string{"--log", logPath}, args...)
-	}
+	printLines(env, flagLines)
 	quiet := env
 	quiet.Stdout = io.Discard
 	if code := serverDown(quiet, dataDir); code != 0 {
@@ -108,32 +108,4 @@ func addressAnswers(address string) bool {
 	}
 	connection.Close()
 	return true
-}
-
-const (
-	listeningMarker = " listening on "
-	logMarker       = "\", log "
-	asGivenMarker   = ", address as given "
-)
-
-func runningLogPath(dataDir string) string {
-	if _, owned := switchboardPID(dataDir); !owned {
-		return ""
-	}
-	raw, err := os.ReadFile(filepath.Join(dataDir, "switchboard.out"))
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if !strings.HasPrefix(line, SwitchboardBinaryName+listeningMarker) {
-			continue
-		}
-		_, rest, found := strings.Cut(line, logMarker)
-		if !found {
-			return ""
-		}
-		logPath, _, _ := strings.Cut(rest, asGivenMarker)
-		return logPath
-	}
-	return ""
 }
