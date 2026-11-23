@@ -1,7 +1,7 @@
 # Agent instructions
 
-Read first: `README.md`, `docs/architecture/README.md`, `docs/stack/README.md`, the ADRs in `docs/decisions/`, and
-`.agents/rules/regenerative.md`.
+Read first: `README.md`, `docs/architecture/README.md`, `docs/stack/README.md`, the ADRs in `docs/decisions/`,
+`docs/reference/coding-principles.md`, and `.agents/rules/regenerative.md`.
 
 The rules in `.agents/rules/regenerative.md` are part of these instructions and apply to every task. This file adds the
 project's document pointers and its own rules. It may add to those rules and may not relax them.
@@ -15,6 +15,7 @@ The documents a person chooses. The shared rules and skills read them from here.
 | ---------------------- | -------------------------------------- |
 | Product principles     | `docs/reference/product-principles.md` |
 | Further behavior rules | none                                   |
+| Coding principles      | `docs/reference/coding-principles.md`  |
 | Testing stack doc      | `docs/stack/testing.md`                |
 | Issue sizing examples  | none                                   |
 | Future directions      | `docs/future/`                         |

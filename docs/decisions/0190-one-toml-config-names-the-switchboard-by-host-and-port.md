@@ -5,6 +5,7 @@ approval: person
 approver: {kind: person, name: dnawara}
 affects: [cli/command, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0140', '0170']
+partly-superseded-by: ['0220']
 note: Drafted on 2026-11-18. It replaces config.json with config.toml, a stored format, and removes the rule that a non-loopback address means this machine joined another switchboard.
 ---
 
@@ -35,7 +36,7 @@ The file is also edited by hand, and JSON has no comments.
 
 ```toml
 secret = "..."
-host = "davelight-mbp"
+host = "alpha-host"
 port = 8787
 ```
 

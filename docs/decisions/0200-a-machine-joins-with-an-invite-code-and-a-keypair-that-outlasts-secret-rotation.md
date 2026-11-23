@@ -5,7 +5,8 @@ approval: person
 approver: {kind: person, name: dnawara}
 affects: [machine/registry, cli/command, switchboard/server, client/http, mcp/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0090', '0170', '0190']
-note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. It has security consequences and needs the person's approval of the amendment.
+partly-superseded-by: ['0220']
+note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component.
 ---
 
 # 0200. A machine joins with an invite code and a keypair that outlasts secret rotation
@@ -131,6 +132,11 @@ on the `401` and retries, as `landline-mcp` and the screen do after a rotation. 
 behind the switchboard's, with `d` inside the window, is refused for about `d` seconds after every start, including the
 restart that `rotate-secret` makes. It gets the `401` and the message above, and its requests pass once the
 switchboard's clock is more than `d` seconds past the start. A clock that runs ahead is not refused by this rule.
+
+On the refusal `missing or wrong switchboard secret or machine signature`, a client (the `landline` commands,
+`landline-mcp`, the screen, and the menu bar) names the possible causes, among them a rotated secret, a revoked machine,
+and a clock that runs behind the switchboard's, and tells the person to join again only if the refusal persists after
+its one retry.
 
 After a request registers, the agent or observer token works as it does today, and the switchboard records which machine
 it came from.
