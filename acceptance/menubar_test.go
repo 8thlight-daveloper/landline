@@ -917,7 +917,7 @@ func TestMenuTextTreatsAConfigFileWithABadLineAsUnreadableEvenWhenAnHTTPSwitchbo
 	good := tomlFor(host, port, secret)
 	for name, content := range map[string]string{
 		"a string port":        tomlFor(host, "", secret) + `port = "` + port + `"` + "\n",
-		"a section header":     good + "[section]\n",
+		"a dotted table name":  good + "[a.b]\n",
 		"a trailing comment":   good + "extra = 1 # note\n",
 		"a line that is no kv": good + "not toml at all\n",
 	} {

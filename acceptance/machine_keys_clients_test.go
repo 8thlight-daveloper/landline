@@ -17,8 +17,11 @@ func TestRotateSecretFromTheMenuWithNoFlagsKeepsTheMachinesOfASwitchboardStarted
 	h := startHostWith(t, "--log", logPath)
 	m := h.machine("linux-box")
 	m.registerAgent("alpha")
-	if _, err := os.Stat(filepath.Join(filepath.Dir(logPath), "machines.json")); err != nil {
-		t.Fatalf("machines.json is not next to the custom log before the rotation: %v", err)
+	if _, err := os.Stat(h.dataFile("machines.json")); err != nil {
+		t.Fatalf("machines.json is not in the data directory before the rotation: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(logPath), "machines.json")); err == nil {
+		t.Fatal("machines.json was written next to the custom log")
 	}
 
 	out, err := h.run("server", "rotate-secret")

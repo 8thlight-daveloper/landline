@@ -120,7 +120,7 @@ func TestTheReaderAcceptsBlankLinesCommentsAndUnknownKeysAndRefusesEverythingEls
 		"port = 87.87":            "line 1",
 		"port = 8787 # note":      "line 1",
 		"host = 'h'":              "line 1",
-		"[section]":               "line 1",
+		"[a.b]":                   "line 1",
 		"list = [1, 2]":           "line 1",
 		"just words":              "line 1",
 		"# ok\n\nhost = \"h\"\n!": "line 4",

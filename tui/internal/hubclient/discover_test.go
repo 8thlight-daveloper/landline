@@ -107,7 +107,7 @@ func TestDiscoverRefusesALineThatIsNotBlankACommentOrAKeyWithATextOrNumberValueA
 	for text, line := range map[string]string{
 		"host = h\n": "line 1", "host = 5\n": "line 1", "secret = 12345\n": "line 1", "port = \"8787\"\n": "line 1",
 		"port = 0\n": "line 1", "port = 87.87\n": "line 1", "port = 8787 # hunter2\n": "line 1", "host = 'hunter2'\n": "line 1",
-		"[hunter2]\n": "line 1", "list = [1, hunter2]\n": "line 1", "# ok\n\nthis is hunter2\n": "line 3",
+		"[a.hunter2]\n": "line 1", "list = [1, hunter2]\n": "line 1", "# ok\n\nthis is hunter2\n": "line 3",
 	} {
 		_, _, err := Discover(env(nil), home(t, text))
 		if err == nil || !strings.Contains(err.Error(), "config.toml line "+line[len("line "):]) || strings.Contains(err.Error(), "hunter2") || strings.Contains(err.Error(), "12345") {

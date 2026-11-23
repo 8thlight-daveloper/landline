@@ -757,7 +757,7 @@ func TestEveryClientRefusesAMalformedConfigTomlNamingTheFileAndNeverEchoingTheLi
 func TestEveryLineThatIsNotABlankACommentOrAKeyWithAStringOrIntegerIsRefusedAtItsLine(t *testing.T) {
 	t.Parallel()
 	bin := build(t)
-	tokens := map[string]string{`port = 8787 # note`: "# note", `[section]`: "[section]", `list = [1, 2]`: "[1, 2]", `host = '127.0.0.1'`: "'127.0.0.1'", `port = 87.87`: "87.87"}
+	tokens := map[string]string{`port = 8787 # note`: "# note", `[a.b]`: "[a.b]", `list = [1, 2]`: "[1, 2]", `host = '127.0.0.1'`: "'127.0.0.1'", `port = 87.87`: "87.87"}
 	for bad, token := range tokens {
 		for _, command := range clientCommands {
 			home := t.TempDir()

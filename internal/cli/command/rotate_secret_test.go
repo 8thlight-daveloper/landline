@@ -203,7 +203,7 @@ func TestRotateSecretStopsSavesAndStartsAndPrintsOneLineWithNoSecret(t *testing.
 		t.Fatalf("up: %d %s", code, r.err.String())
 	}
 	before := r.pid(t)
-	if code := r.run("rotate-secret", "--grace", "3m"); code != 0 {
+	if code := r.run("rotate-secret", "--grace", "2m"); code != 0 {
 		t.Fatalf("rotate: %d %s", code, r.err.String())
 	}
 	if r.out.String() != rotatedMessage+"\n" || r.err.Len() != 0 {
@@ -225,7 +225,7 @@ func TestRotateSecretStopsSavesAndStartsAndPrintsOneLineWithNoSecret(t *testing.
 	if !strings.Contains(r.recorded(t, "config-at-start"), config.Secret) {
 		t.Fatal("the new switchboard started before the new secret was saved")
 	}
-	if args := strings.Fields(r.recorded(t, "args")); !reflect.DeepEqual(args, []string{"--addr", address, "--grace", "3m"}) {
+	if args := strings.Fields(r.recorded(t, "args")); !reflect.DeepEqual(args, []string{"--addr", address, "--grace", "2m"}) {
 		t.Fatalf("switchboard arguments: %v", args)
 	}
 }
