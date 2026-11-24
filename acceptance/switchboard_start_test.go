@@ -295,3 +295,39 @@ func (c *configuredHome) blocker() string {
 	}
 	return path
 }
+
+func TestALogThatIsADanglingLinkOrACaseVariantOfTheFutureMachinesFileStopsTheStartAndLeavesNoMachinesFile(t *testing.T) {
+	t.Parallel()
+	cases := map[string]func(c *configuredHome) string{
+		"a dangling link to machines.json": func(c *configuredHome) string {
+			return c.symlink(c.dataFile("machines.json"), c.path("links/log.jsonl"))
+		},
+		"Machines.json on a case-insensitive disk": func(c *configuredHome) string {
+			probe := c.dataFile("case-probe")
+			c.writeDataFile("case-probe", "")
+			if !exists(filepath.Join(c.dataDir(), "CASE-PROBE")) {
+				t.Skip("the temporary disk is case-sensitive")
+			}
+			os.Remove(probe)
+			return filepath.Join(c.dataDir(), "Machines.json")
+		},
+	}
+	for name, logOf := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := newConfiguredHome(t, "")
+			if err := os.MkdirAll(c.dataDir(), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			logPath := logOf(c)
+			result := c.switchboardExit("--log", logPath)
+			if result.code != 1 || !strings.Contains(result.stderr, logPath) || !strings.Contains(result.stderr, "machines.json") {
+				t.Errorf("--log %s: %d %q, want 1 and a message that names the log and machines.json", logPath, result.code, result.stderr)
+			}
+			if exists(c.dataFile("machines.json")) && readFileOrFail(t, c.dataFile("machines.json")) == "" {
+				t.Errorf("the refused start left an empty machines.json")
+			}
+			c.startSwitchboard()
+		})
+	}
+}

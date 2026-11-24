@@ -325,3 +325,33 @@ func TestJoinWithACodeOverLoopbackFromAHomeWithNoSwitchboardLockJoins(t *testing
 		t.Errorf("join --code %s: key saved %v, %d requests, want a key and one request", address, exists(filepath.Join(configDirOf(home), "machine.key")), reached.Load())
 	}
 }
+
+func TestTheMenuBarShowsTheRedirectTextWhenOnlyTheBuildRouteRedirects(t *testing.T) {
+	t.Parallel()
+	var reachedTarget atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reachedTarget.Add(1) }))
+	t.Cleanup(target.Close)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/observers":
+			w.Write([]byte(`{"token":"observer-token"}`))
+		case "/v1/agents":
+			w.Write([]byte(`[]`))
+		default:
+			http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+		}
+	}))
+	t.Cleanup(server.Close)
+	address := server.Listener.Addr().String()
+	want := "the switchboard at " + address + " answered with a redirect, which Landline does not follow" + disabledMark
+	rig := newMenubarRig(t, defaultFlags(t), server.URL, landlineNextToBinary)
+	result := rig.run(t, "menu", "--text")
+	lines := strings.Split(result.stdout, "\n")
+	if result.code != 0 || len(lines) < 2 || lines[1] != want {
+		t.Errorf("%+v, want the state line %q", result, want)
+	}
+	if got := reachedTarget.Load(); got != 0 {
+		t.Errorf("the place the redirect names got %d requests, want none", got)
+	}
+}

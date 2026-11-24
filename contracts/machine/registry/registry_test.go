@@ -1645,3 +1645,12 @@ func TestEditingAnInheritedSeenSignatureInAResultLeavesThePriorStateAlone(t *tes
 		}
 	}
 }
+
+func TestInviteAcceptsEveryDigitAfterTheFirstLetter(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"alpha9", "a0123456789", "b9876543210", "a0-1-2-3-4-5-6-7-8-9", "z" + strings.Repeat("0123456789", 3) + "9"} {
+		if _, code, err := newImpl().Invite(model.Machines{}, name, random(8), t0, lifetime); err != nil || code == "" {
+			t.Errorf("%q (%d characters): %v, want an invite", name, len(name), err)
+		}
+	}
+}
