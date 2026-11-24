@@ -106,7 +106,7 @@ func Run(args []string, env Env) int {
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintln(env.Stderr, "landline:", printable(err.Error()))
+		fmt.Fprintln(env.Stderr, "landline:", printableLine(err.Error()))
 		return 1
 	}
 	return 0
@@ -164,7 +164,7 @@ func register(args []string, env Env) error {
 	if err := saveSession(env, out.ID, session{URL: url, Token: out.Token}); err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "registered %s\n", printable(out.ID))
+	fmt.Fprintf(env.Stdout, "registered %s\n", printableLine(out.ID))
 	return nil
 }
 
@@ -274,12 +274,12 @@ func send(args []string, env Env) error {
 	if err != nil {
 		return forgotten(err)
 	}
-	fmt.Fprintf(env.Stdout, "sent %s (seq %d) to %s", printable(out.ID), out.Seq, printable(strings.Join(out.Recipients, ", ")))
+	fmt.Fprintf(env.Stdout, "sent %s (seq %d) to %s", printableLine(out.ID), out.Seq, printableLine(strings.Join(out.Recipients, ", ")))
 	fmt.Fprintln(env.Stdout)
 	return nil
 }
 
-func Printable(text string) string { return printable(text) }
+func Printable(text string) string { return printableLine(text) }
 
 func logRead(args []string, env Env) error {
 	set := flags("log", env)
@@ -296,9 +296,9 @@ func logRead(args []string, env Env) error {
 		return err
 	}
 	for _, e := range entries {
-		line := fmt.Sprintf("%d\t%s\t%s -> %s\t%s\t%s", e.Seq, e.Time.Format("2006-01-02T15:04:05Z07:00"), printable(string(e.From)), printable(e.To), printable(e.Thread), printable(string(e.Kind)))
+		line := fmt.Sprintf("%d\t%s\t%s -> %s\t%s\t%s", e.Seq, e.Time.Format("2006-01-02T15:04:05Z07:00"), printableLine(string(e.From)), printableLine(e.To), printableLine(e.Thread), printableLine(string(e.Kind)))
 		if e.Result != "" {
-			line += "\t" + printable(e.Result)
+			line += "\t" + printableLine(e.Result)
 		}
 		fmt.Fprintln(env.Stdout, line)
 		for _, line := range strings.Split(printable(e.Body), "\n") {

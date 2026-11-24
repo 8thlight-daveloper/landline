@@ -44,7 +44,26 @@ type Client struct {
 }
 
 func New(url, token string) *Client {
-	return &Client{URL: url, Token: token, http: &nethttp.Client{Timeout: 90 * time.Second}, streaming: &nethttp.Client{}}
+	return &Client{
+		URL: url, Token: token,
+		http:      &nethttp.Client{Timeout: 90 * time.Second, CheckRedirect: neverFollow},
+		streaming: &nethttp.Client{CheckRedirect: neverFollow},
+	}
+}
+
+func neverFollow(*nethttp.Request, []*nethttp.Request) error { return nethttp.ErrUseLastResponse }
+
+type RedirectError struct{ Address string }
+
+func (e *RedirectError) Error() string {
+	return "the switchboard at " + e.Address + " answered with a redirect, which Landline does not follow"
+}
+
+func redirected(resp *nethttp.Response) error {
+	if resp.StatusCode < 300 || resp.StatusCode > 399 {
+		return nil
+	}
+	return &RedirectError{Address: resp.Request.URL.Host}
 }
 
 func (c *Client) do(method, path string, in, out any) error {
@@ -106,6 +125,9 @@ func (c *Client) send(authorized bool, method, path string, raw []byte, out any)
 		return err
 	}
 	defer resp.Body.Close()
+	if err := redirected(resp); err != nil {
+		return err
+	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if resp.StatusCode != nethttp.StatusOK {
 		failure := &StatusError{Status: resp.StatusCode}
@@ -174,6 +196,9 @@ func (c *Client) Stream(ctx context.Context, handle func(model.Delivery)) error 
 		return err
 	}
 	defer resp.Body.Close()
+	if err := redirected(resp); err != nil {
+		return err
+	}
 	if resp.StatusCode != nethttp.StatusOK {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		var e model.ErrorResponse

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -132,7 +133,7 @@ func New(cfg Config, store Store) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		cfg: cfg, store: store, machines: newMachineRegistry(), started: cfg.Now(), machineTokens: map[string]string{},
+		cfg: cfg, store: store, machines: newMachineRegistry(), started: notYetListening, machineTokens: map[string]string{},
 		state:  model.Machines{Active: loaded},
 		tokens: map[string]string{}, observers: map[string]time.Time{}, attach: map[string]*attachChallenge{},
 		streams: map[string]*stream{}, pending: map[string]*pendingDelivery{},
@@ -140,6 +141,15 @@ func New(cfg Config, store Store) (*Server, error) {
 		seq:  store.LastSeq(),
 	}
 	return s, nil
+}
+
+var notYetListening = time.Unix(math.MaxInt64, 0)
+
+func (s *Server) Listening() {
+	now := s.cfg.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.started = now
 }
 
 func randomHex(n int) string {

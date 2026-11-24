@@ -18,6 +18,8 @@ var skillFolder embed.FS
 
 const skillRoot = "skills/landline"
 
+const managedReferencesFolder = "references"
+
 var skillFileNames = []string{"SKILL.md", "references/register.md", "references/agent.md"}
 
 var earlierShippedSkills = map[string]bool{
@@ -74,7 +76,7 @@ func linkTarget(path string) (string, bool) {
 }
 
 func keptLink(out io.Writer, path, target string) {
-	fmt.Fprintf(out, "kept %s, a link to %s, which is yours\n", path, target)
+	fmt.Fprintf(out, "kept %s, a link to %s, which is yours\n", printableLine(path), printableLine(target))
 }
 
 func installSkillFolder(harness string, env Env) (string, error) {
@@ -105,7 +107,7 @@ func installSkillFile(dir, name string, env Env) error {
 	}
 	if existing, err := os.ReadFile(path); err == nil {
 		if !isManagedSkillFile(name, existing) {
-			fmt.Fprintf(env.Stdout, "kept %s, which is not managed by landline setup\n", path)
+			fmt.Fprintf(env.Stdout, "kept %s, which is not managed by landline setup\n", printableLine(path))
 			return nil
 		}
 	} else if !os.IsNotExist(err) {
@@ -135,14 +137,12 @@ func removeSkillFolder(harness string, env Env) error {
 		keptLink(env.Stdout, dir, target)
 		return nil
 	}
-	var folders []string
 	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		switch {
 		case entry.IsDir():
-			folders = append(folders, path)
 		case entry.Type()&fs.ModeSymlink != 0:
 			target, _ := os.Readlink(path)
 			keptLink(env.Stdout, path, target)
@@ -156,9 +156,9 @@ func removeSkillFolder(harness string, env Env) error {
 				return os.Remove(path)
 			}
 			if relative == "SKILL.md" {
-				fmt.Fprintf(env.Stdout, "kept %s, which is not managed by landline setup\n", path)
+				fmt.Fprintf(env.Stdout, "kept %s, which is not managed by landline setup\n", printableLine(path))
 			} else {
-				fmt.Fprintf(env.Stdout, "kept %s\n", path)
+				fmt.Fprintf(env.Stdout, "kept %s\n", printableLine(path))
 			}
 		}
 		return nil
@@ -166,9 +166,8 @@ func removeSkillFolder(harness string, env Env) error {
 	if err != nil {
 		return err
 	}
-	for i := len(folders) - 1; i >= 0; i-- {
-		removeEmptyDir(folders[i])
-	}
+	removeEmptyDir(filepath.Join(dir, managedReferencesFolder))
+	removeEmptyDir(dir)
 	return nil
 }
 

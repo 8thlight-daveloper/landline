@@ -51,12 +51,12 @@ func run(args []string) int {
 	savedHost, savedPort, err := saved.Listen(os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
-		return 2
+		return 1
 	}
 	addr := command.Or(values["--addr"], net.JoinHostPort(savedHost, strconv.Itoa(savedPort)))
 	if _, err := command.TimingFrom(values); err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
-		return 2
+		return 1
 	}
 	settings, flagLines, err := command.SwitchboardSettings(env, values)
 	if err != nil {
@@ -68,7 +68,19 @@ func run(args []string) int {
 	}
 	logPath, host, timing := settings.Log, settings.Host, settings.Timing
 	warnIfExposed(addr)
-	machinesPath := filepath.Join(filepath.Dir(command.DefaultLogPath(env)), "machines.json")
+	dataDirectory := filepath.Dir(command.DefaultLogPath(env))
+	machinesPath := filepath.Join(dataDirectory, "machines.json")
+	lockPath := filepath.Join(dataDirectory, "switchboard.lock")
+	lock, err := server.LockDataDirectory(lockPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, name+":", err)
+		return 1
+	}
+	defer lock.Release()
+	if err := server.CheckLogIsItsOwnFile(logPath, machinesPath, lockPath); err != nil {
+		fmt.Fprintln(os.Stderr, name+":", err)
+		return 1
+	}
 	notice, err := server.CarryOverMachines(machinesPath, filepath.Join(filepath.Dir(logPath), "machines.json"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
@@ -108,6 +120,7 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "%s: cannot listen on %s: %v\n", name, addr, err)
 		return command.ExitCannotListen
 	}
+	switchboard.Listening()
 	fmt.Fprint(os.Stderr, command.BannerFor(os.Stderr))
 	fmt.Fprintf(os.Stderr, "%s listening on %s, host %q, log %s%s\n", name, listener.Addr(), host, logPath, asGiven(addr, listener.Addr().String(), resolved))
 	srv := &http.Server{Handler: switchboard.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}

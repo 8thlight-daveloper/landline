@@ -41,9 +41,9 @@ func adminClient(command string, env Env) (*client.Client, Config, int) {
 func refusalText(err error) string {
 	var refused *client.StatusError
 	if errors.As(err, &refused) && refused.Message != "" {
-		return printable(refused.Message)
+		return printableLine(refused.Message)
 	}
-	return printable(err.Error())
+	return printableLine(err.Error())
 }
 
 func serverInvite(args []string, env Env) int {
@@ -70,7 +70,7 @@ func serverInvite(args []string, env Env) int {
 	if contacted, parseErr := url.Parse(HubURL(env)); parseErr == nil && contacted.Host != "" {
 		address = contacted.Host
 	}
-	fmt.Fprintf(env.Stdout, "landline server join %s --code %s\n", address, printable(made.Code))
+	fmt.Fprintf(env.Stdout, "landline server join %s --code %s\n", address, printableLine(made.Code))
 	return 0
 }
 
@@ -89,7 +89,7 @@ func serverMachines(args []string, env Env) int {
 		return 1
 	}
 	for _, machine := range listed {
-		fmt.Fprintf(env.Stdout, "%s\t%s\t%s\n", printable(machine.Name), printable(machine.Fingerprint), printable(machine.Created))
+		fmt.Fprintf(env.Stdout, "%s\t%s\t%s\n", printableLine(machine.Name), printableLine(machine.Fingerprint), printableLine(machine.Created))
 	}
 	return 0
 }

@@ -70,7 +70,7 @@ func (c *Client) currentCredential() Credential {
 	reread := c.rereadCredential
 	c.mu.Unlock()
 	if reread != nil {
-		if address, fresh := reread(); address != "" && !fresh.empty() {
+		if address, fresh := reread(); address != "" {
 			c.mu.Lock()
 			if address != c.address {
 				c.address, c.token = address, ""

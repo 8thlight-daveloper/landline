@@ -13,9 +13,11 @@ import (
 type Source interface {
 	Agents() ([]hubclient.Agent, error)
 	Build() (hubclient.Build, bool, error)
+	Address() string
 }
 
 type Observed struct {
+	Address           string
 	Reachable         bool
 	KeyRefusal        string
 	CredentialProblem string
@@ -26,7 +28,7 @@ type Observed struct {
 }
 
 func Observe(source Source, landlineFound bool) Observed {
-	observed := Observed{LandlineFound: landlineFound}
+	observed := Observed{LandlineFound: landlineFound, Address: source.Address()}
 	agents, err := source.Agents()
 	var refusal hubclient.KeyRefusal
 	if errors.As(err, &refusal) {
@@ -68,10 +70,16 @@ func New(address string, app buildinfo.Build) *Session {
 }
 
 func (s *Session) Apply(observed Observed) {
-	local := s.isLocal(s.address)
+	s.mu.Lock()
+	address := s.address
+	s.mu.Unlock()
+	if observed.Address != "" {
+		address = observed.Address
+	}
+	local := s.isLocal(address)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.observed, s.local = observed, local
+	s.address, s.observed, s.local = address, observed, local
 	switch {
 	case s.skip:
 		s.skip = false

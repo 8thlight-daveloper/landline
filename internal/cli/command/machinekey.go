@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	client "github.com/8thlight-daveloper/landline/internal/client/http"
@@ -62,7 +63,7 @@ type savedFile struct {
 	existed bool
 }
 
-func snapshotJoinFiles(env Env) (func() error, error) {
+func snapshotJoinFiles(env Env) (func(changed []string) error, error) {
 	paths := []string{machineKeyPath(env), configPath(env)}
 	saved := make([]savedFile, len(paths))
 	for i, path := range paths {
@@ -76,10 +77,13 @@ func snapshotJoinFiles(env Env) (func() error, error) {
 			saved[i].content, saved[i].mode, saved[i].existed = raw, info.Mode().Perm(), true
 		}
 	}
-	return func() error {
+	return func(changed []string) error {
 		var failures []error
 		for _, file := range saved {
 			os.Remove(file.path + ".tmp")
+			if !slices.Contains(changed, file.path) {
+				continue
+			}
 			if err := file.putBack(); err != nil {
 				failures = append(failures, fmt.Errorf("%s could not be put back: %v", file.path, err))
 			}

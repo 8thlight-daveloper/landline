@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	machineregistry "github.com/8thlight-daveloper/landline/internal/machine/registry"
@@ -88,6 +89,9 @@ func readMachines(path string) ([]model.Machine, error) {
 	if err := json.Unmarshal(raw, &machines); err != nil {
 		return nil, fmt.Errorf("%s is not a list of machines: %v", path, err)
 	}
+	if machines == nil {
+		return nil, fmt.Errorf("%s is not a list of machines", path)
+	}
 	return machines, nil
 }
 
@@ -116,8 +120,41 @@ func CarryOverMachines(current, former string) (string, error) {
 func sameFile(one, other string) bool {
 	oneAbsolute, oneErr := filepath.Abs(one)
 	otherAbsolute, otherErr := filepath.Abs(other)
-	return oneErr == nil && otherErr == nil && oneAbsolute == otherAbsolute
+	if oneErr == nil && otherErr == nil && oneAbsolute == otherAbsolute {
+		return true
+	}
+	oneInfo, oneErr := os.Stat(one)
+	otherInfo, otherErr := os.Stat(other)
+	return oneErr == nil && otherErr == nil && os.SameFile(oneInfo, otherInfo)
 }
+
+func CheckLogIsItsOwnFile(logPath string, kept ...string) error {
+	for _, path := range kept {
+		if sameFile(logPath, path) {
+			return fmt.Errorf("the log path %s names the same file as %s. Choose another log path", logPath, path)
+		}
+	}
+	return nil
+}
+
+type DataDirectoryLock struct{ file *os.File }
+
+func LockDataDirectory(path string) (DataDirectoryLock, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return DataDirectoryLock{}, err
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return DataDirectoryLock{}, fmt.Errorf("%s cannot be opened: %v", path, err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		file.Close()
+		return DataDirectoryLock{}, fmt.Errorf("another switchboard is running on this machine, because it holds %s", path)
+	}
+	return DataDirectoryLock{file}, nil
+}
+
+func (lock DataDirectoryLock) Release() { lock.file.Close() }
 
 func writeMachines(path string, machines []model.Machine) error {
 	stored := make([]model.Machine, len(machines))
@@ -188,7 +225,7 @@ func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header st
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	request := model.SignedRequest{Name: fields["name"], Time: unix, Nonce: fields["nonce"], Signature: signature, Method: r.Method, Path: r.URL.RequestURI(), Body: body}
 	s.mu.Lock()
-	next, name, err := s.machines.Verify(s.state, request, requestTime(r), s.started, s.cfg.SignatureWindow)
+	next, name, err := s.machines.Verify(s.state, request, s.cfg.Now(), s.started, s.cfg.SignatureWindow)
 	var verified verifiedMachine
 	if err == nil {
 		s.state = next

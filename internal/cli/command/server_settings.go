@@ -116,7 +116,7 @@ func SwitchboardSettings(env Env, values map[string]string) (ServerSettings, []s
 	settings.Host = Or(values["--host"], env.Host)
 	var lines []string
 	if flag, set := values["--log"]; set {
-		settings.Log = flag
+		settings.Log = homeExpanded(env, flag)
 		if comparableLog(env, flag) != filepath.Clean(table.Log) {
 			lines = append(lines, flagLine("--log", "log"))
 		}

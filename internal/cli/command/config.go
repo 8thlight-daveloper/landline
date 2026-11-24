@@ -436,14 +436,16 @@ func forgetSecretLine(env Env) error {
 	return os.Rename(temporary, configPath(env))
 }
 
-func saveJoin(env Env, private ed25519.PrivateKey, host string, port int, name string) error {
+func saveJoin(env Env, private ed25519.PrivateKey, host string, port int, name string) ([]string, error) {
 	if err := writeMachineKey(env, private); err != nil {
-		return err
+		return nil, err
 	}
+	changed := []string{machineKeyPath(env)}
 	if err := SaveConfig(env, Config{Host: host, Port: port, Machine: name}); err != nil {
-		return err
+		return changed, err
 	}
-	return forgetSecretLine(env)
+	changed = append(changed, configPath(env))
+	return changed, forgetSecretLine(env)
 }
 
 func joinWithCode(env Env, host string, port int, code string) error {
@@ -467,8 +469,8 @@ func joinWithCode(env Env, host string, port int, code string) error {
 	if !machineNamePattern.MatchString(name) {
 		return fmt.Errorf("the switchboard answered with a machine name %q that is not allowed. Nothing was saved", name)
 	}
-	if err := saveJoin(env, private, host, port, name); err != nil {
-		if restoreErr := restore(); restoreErr != nil {
+	if changed, err := saveJoin(env, private, host, port, name); err != nil {
+		if restoreErr := restore(changed); restoreErr != nil {
 			return fmt.Errorf("%w. %v. The new machine %s stays on the switchboard until you run landline server revoke %s", err, restoreErr, name, name)
 		}
 		return fmt.Errorf("%w. The earlier key and config.toml were restored, and the new machine %s stays on the switchboard until you run landline server revoke %s", err, name, name)

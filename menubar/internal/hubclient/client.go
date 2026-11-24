@@ -79,7 +79,7 @@ func (c *Client) currentCredential() (Credential, error) {
 		if errors.As(err, &problem) {
 			return Credential{}, problem
 		}
-		if err == nil && address != "" && !fresh.empty() {
+		if err == nil && address != "" {
 			c.mu.Lock()
 			if address != c.address {
 				c.address, c.token = address, ""
