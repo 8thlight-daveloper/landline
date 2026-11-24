@@ -3,7 +3,7 @@ category: behavior
 status: accepted
 approval: person
 approver: {kind: person, name: dnawara}
-note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, which the person approved. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says. Amended on 2026-11-24 again after the fifth review, so that one machine runs one switchboard under a lock file, a log path cannot name the machines file, files are compared by identity, and every other start failure exits `1`. The second amendment of 2026-11-24 adds a stored file, and the person approved it on 2026-11-24. Amended on 2026-11-24 a third time, so that a command line the switchboard cannot parse exits `2`. The person approved the third amendment of 2026-11-24 on 2026-11-24. Amended on 2026-11-24 a fourth time after the sixth review, so that `up` reads only a line that begins with the switchboard's prefix, a value a person chose is printed on one line, and the log-path rule covers a machines file not yet made and the old one. The person approved it on 2026-11-24.
+note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, which the person approved. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says. Amended on 2026-11-24 again after the fifth review, so that one machine runs one switchboard under a lock file, a log path cannot name the machines file, files are compared by identity, and every other start failure exits `1`. The second amendment of 2026-11-24 adds a stored file, and the person approved it on 2026-11-24. Amended on 2026-11-24 a third time, so that a command line the switchboard cannot parse exits `2`. The person approved the third amendment of 2026-11-24 on 2026-11-24. Amended on 2026-11-24 a fourth time after the sixth review, so that `up` reads only a line that begins with the switchboard's prefix, a value a person chose is printed on one line, and the log-path rule covers a machines file not yet made and the old one. The person approved it on 2026-11-24. Amended on 2026-11-24 a fifth time after the eighth review, so that an empty `machines.json` at the new path does not hide machines in the old one, and no line advises deleting an old file that holds machines. The person approved it on 2026-11-24.
 affects: [cli/command, switchboard/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0110', '0140', '0170', '0190', '0200']
 partly-supersedes: ['0190', '0200']
@@ -155,7 +155,9 @@ changes.
 A switchboard that ran with a custom log before this change has its machines in a `machines.json` next to that log. When
 the switchboard starts, it applies this rule before it listens:
 
-1. When `~/.local/share/landline/machines.json` exists, the switchboard reads it, and no other.
+1. When `~/.local/share/landline/machines.json` exists and holds at least one machine, the switchboard reads it, and no
+   other. A file there that holds an empty list counts as absent for this rule, because the switchboard makes one at
+   start before it opens the log.
 1. When it does not exist and a `machines.json` exists in the folder of the log path in use for this run, from the flag,
    the table, or the default, the switchboard reads that file and writes its entries to
    `~/.local/share/landline/machines.json`. It prints one line that names both files and says that it now reads the new
@@ -166,6 +168,8 @@ the switchboard starts, it applies this rule before it listens:
 
 The old file and the new one are the same file when the file system says so, as when the log's folder is a symbolic link
 to the data directory. Then there is nothing to carry over, and the switchboard prints no line about an old file.
+
+The switchboard never advises deleting an old file that holds machines while the new one holds none.
 
 When both files exist and are not the same file, the new one wins, and the switchboard prints at each start one line
 that names the old file, says that it is no longer read, and says that a person may delete it. A person who used two

@@ -18,3 +18,8 @@ never belongs in this list.
 - **A log name that differs from `machines.json` only in case, on a case-insensitive disk.** Covered once the
   switchboard makes `machines.json` before it opens the log and compares files by identity. Listed so that a rebuild
   keeps that order.
+- **`server up` that cannot save the address.** When `up` starts the switchboard and then cannot write `config.toml`,
+  for example because a legacy `config.json` holds a secret with a quote or a backslash that `config.toml` cannot hold,
+  it exits `1` and leaves the switchboard it started running. Nothing is lost: `config.json` stays, and the switchboard
+  reads it. This predates
+  [0200](../decisions/0200-a-machine-joins-with-an-invite-code-and-a-keypair-that-outlasts-secret-rotation.md).
