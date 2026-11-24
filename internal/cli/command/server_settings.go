@@ -122,7 +122,7 @@ func SwitchboardSettings(env Env, values map[string]string) (ServerSettings, []s
 		}
 	}
 	if flag, set := values["--host"]; set && flag != env.Host {
-		lines = append(lines, "--host "+flag+" is not this machine's host name, and config.toml has no key for it. landline server restart, landline server rotate-secret, and the menu bar start the switchboard without it")
+		lines = append(lines, "--host "+printableLine(flag)+" is not this machine's host name, and config.toml has no key for it. landline server restart, landline server rotate-secret, and the menu bar start the switchboard without it")
 	}
 	for _, timing := range timingSettings {
 		if _, set := values["--"+timing.key]; !set {

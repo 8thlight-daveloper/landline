@@ -90,6 +90,18 @@ func run(args []string) int {
 	if notice != "" {
 		say(notice)
 	}
+	made, err := server.EnsureMachinesFile(machinesPath)
+	if err != nil {
+		say(err)
+		return 1
+	}
+	if err := server.CheckLogIsItsOwnFile(logPath, machinesPath, lockPath); err != nil {
+		if made {
+			os.Remove(machinesPath)
+		}
+		say(err)
+		return 1
+	}
 	log, err := store.Open(logPath)
 	if err != nil {
 		say(err)

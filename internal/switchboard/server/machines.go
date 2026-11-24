@@ -135,6 +135,16 @@ func sameIdentity(one, other string) bool {
 	return oneErr == nil && otherErr == nil && os.SameFile(oneInfo, otherInfo)
 }
 
+func EnsureMachinesFile(path string) (bool, error) {
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := writeMachines(path, nil); err != nil {
+		return false, fmt.Errorf("%s could not be made: %v", path, err)
+	}
+	return true, nil
+}
+
 func CheckLogIsItsOwnFile(logPath string, kept ...string) error {
 	for _, path := range kept {
 		if sameFile(logPath, path) {

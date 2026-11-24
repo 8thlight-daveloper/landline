@@ -172,6 +172,9 @@ func removeSkillFolder(harness string, env Env) error {
 }
 
 func removeEmptyDir(dir string) error {
+	if info, err := os.Lstat(dir); err != nil || !info.IsDir() {
+		return nil
+	}
 	err := os.Remove(dir)
 	if os.IsNotExist(err) || isDirectoryNotEmpty(err) {
 		return nil

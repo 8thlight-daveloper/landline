@@ -28,8 +28,9 @@ type Observed struct {
 }
 
 func Observe(source Source, landlineFound bool) Observed {
-	observed := Observed{LandlineFound: landlineFound, Address: source.Address()}
+	observed := Observed{LandlineFound: landlineFound}
 	agents, err := source.Agents()
+	observed.Address = source.Address()
 	var refusal hubclient.KeyRefusal
 	if errors.As(err, &refusal) {
 		observed.KeyRefusal = refusal.Text
@@ -39,9 +40,15 @@ func Observe(source Source, landlineFound bool) Observed {
 	if err != nil {
 		return observed
 	}
+	build, known, err := source.Build()
+	var redirect hubclient.RedirectError
+	if errors.As(err, &redirect) {
+		observed.Failure = redirect.Error()
+		return observed
+	}
 	observed.Reachable = true
 	observed.Agents = agentsview.Build(agents)
-	if build, known, err := source.Build(); err == nil && known {
+	if err == nil && known {
 		observed.Switchboard = model.Switchboard{
 			Known: true,
 			Build: buildinfo.Clean(buildinfo.Build{Version: build.Version, Commit: build.Commit}),

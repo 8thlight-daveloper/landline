@@ -50,6 +50,12 @@ func runServer(args []string, env Env) int {
 		return 2
 	}
 	dataDir := dataDirectory(env)
+	if startsASwitchboard(args[0]) {
+		if refusal := joinedHomeRefusal(env); refusal != "" {
+			fmt.Fprintf(env.Stderr, "landline server %s: %s\n", args[0], refusal)
+			return 1
+		}
+	}
 	switch args[0] {
 	case "up":
 		return serverUp(args[1:], env, dataDir)
@@ -76,6 +82,27 @@ func runServer(args []string, env Env) int {
 	}
 	fmt.Fprint(env.Stderr, serverUsage)
 	return 2
+}
+
+func startsASwitchboard(command string) bool {
+	return command == "up" || command == "restart" || command == "rotate-secret"
+}
+
+func joinedHomeRefusal(env Env) string {
+	if _, err := os.Lstat(machineKeyPath(env)); err != nil {
+		return ""
+	}
+	joined := "a switchboard"
+	if config, err := ReadConfig(env); err == nil {
+		host, port, listenErr := config.Listen(env.processEnvironment)
+		if listenErr == nil {
+			joined = "the switchboard at " + net.JoinHostPort(host, strconv.Itoa(port))
+		}
+		if config.Machine != "" {
+			joined += " as " + config.Machine
+		}
+	}
+	return printableLine(fmt.Sprintf("this home joined %s, because %s exists, and a switchboard started here would refuse every client in this home. Remove %s and the machine line in %s before running a switchboard here", joined, machineKeyPath(env), machineKeyPath(env), configPath(env)))
 }
 
 func newSecret() (string, error) {
