@@ -6,7 +6,7 @@ approver: {kind: person, name: dnawara}
 affects: [machine/registry, cli/command, switchboard/server, client/http, mcp/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0090', '0170', '0190']
 partly-superseded-by: ['0220']
-note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. Amended on 2026-11-23 again, so that a refusal carries a reason that clients read instead of its text. Amended on 2026-11-24, so that the window is 5 seconds at most and the switchboard refuses signed requests for one window after it starts. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. The second amendment of 2026-11-23 changes the wire format of four routes. Amended on 2026-11-24 again, so that the menu bar shows a short line for no credential.
+note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. Amended on 2026-11-23 again, so that a refusal carries a reason that clients read instead of its text. Amended on 2026-11-24, so that the window is 5 seconds at most and the switchboard refuses signed requests for one window after it starts. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. The second amendment of 2026-11-23 changes the wire format of four routes. Amended on 2026-11-24 again, so that the menu bar shows a short line for no credential. Amended on 2026-11-24 a third time after the fifth review, so that a client never follows a redirect, the start is the moment the switchboard listens, and a request's time is read under the lock. The person approved the third amendment of 2026-11-24 on 2026-11-24.
 ---
 
 # 0200. A machine joins with an invite code and a keypair that outlasts secret rotation
@@ -145,6 +145,11 @@ later than the end of the start period, and is refused. That holds for a copy fr
 for a copy accepted under a wider window before a person narrowed it. A time later than the start period is one the old
 process never accepted, and the memory of the new process covers it from then on.
 
+The second it started is the second the switchboard begins to listen, and not an earlier moment while it reads its
+settings. The switchboard reads every request's time, and checks and records its signature, under one lock and after it
+has read the whole body. A caller that sends its body slowly cannot have its request checked against signatures the
+switchboard has already forgotten.
+
 The rule reads the time in the request, and not the moment it arrives. A copy can arrive up to one window after the time
 it carries, so a rule on arrival alone would let a copy signed near the end of the period pass just after it.
 
@@ -255,6 +260,13 @@ the public key cross once. Agent tokens, observer tokens, message bodies, and si
 is encrypted by Tailscale. Off a tailnet, anyone on the path can read a token and use it until it ends, and a token
 stays alive while its holder keeps calling. This record does not make that use safe. A later record that adds TLS does,
 and Landline is not used off a tailnet before it.
+
+**A client never follows a redirect.** Every request a client sends to the switchboard, with an invite code, a secret, a
+token, or a signature or with none, treats an answer with a `3xx` status as a failure and sends nothing to the place it
+names. The client prints `the switchboard at <host:port> answered with a redirect, which Landline does not follow` and
+exits `1`, or, for `landline-mcp`, the screen, and the menu bar, reports it as the tool's or the screen's error.
+Landline supports no proxy or redirect between a client and the switchboard today, and a later record that adds one
+decides how a credential crosses it.
 
 ## Consequences
 

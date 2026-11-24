@@ -3,7 +3,7 @@ category: behavior
 status: accepted
 approval: person
 approver: {kind: person, name: dnawara}
-note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, and needs the person's approval. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says.
+note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, which the person approved. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says. Amended on 2026-11-24 again after the fifth review, so that one machine runs one switchboard under a lock file, a log path cannot name the machines file, files are compared by identity, and every other start failure exits `1`. The second amendment of 2026-11-24 adds a stored file, and the person approved it on 2026-11-24. Amended on 2026-11-24 a third time, so that a command line the switchboard cannot parse exits `2`. The person approved the third amendment of 2026-11-24 on 2026-11-24.
 affects: [cli/command, switchboard/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0110', '0140', '0170', '0190', '0200']
 partly-supersedes: ['0190', '0200']
@@ -135,6 +135,19 @@ through a temporary file that 0200 gives it. Only its location changes.
 The default log is in the same directory, so a switchboard that never had a custom log already keeps `machines.json` at
 this path.
 
+### One switchboard for each data directory
+
+**One machine runs one switchboard.** Before it reads `machines.json`, the switchboard takes an exclusive lock on
+`~/.local/share/landline/switchboard.lock`, a file it creates with mode `0600` and never deletes. It holds the lock
+until it exits, and the system releases it then, also after a crash. When another process holds the lock, the
+switchboard exits `1` with a message that names the lock file and says another switchboard is running on this machine.
+Two switchboards that shared `machines.json` would each erase the other's joins at their next save, and a signed request
+that one accepted could pass the other.
+
+A log path that names the same file as `machines.json` or the lock file stops the start with exit `1` and a message that
+names both. The switchboard compares files with the file system's identity, so a symbolic link or a second path to the
+same file counts as the same file.
+
 ### Carrying over an old `machines.json`
 
 A switchboard that ran with a custom log before this change has its machines in a `machines.json` next to that log. When
@@ -149,10 +162,13 @@ the switchboard starts, it applies this rule before it listens:
 1. When neither exists, the switchboard starts with no machines, as it does today.
 1. The switchboard never deletes, renames, or changes the old file.
 
-When both files exist and the old one is in another folder, the new one wins, and the switchboard prints at each start
-one line that names the old file, says that it is no longer read, and says that a person may delete it. A person who
-used two custom logs, each with its own `machines.json`, copies the one to keep to the new path before the first start.
-A file that cannot be read stops the start with today's error.
+The old file and the new one are the same file when the file system says so, as when the log's folder is a symbolic link
+to the data directory. Then there is nothing to carry over, and the switchboard prints no line about an old file.
+
+When both files exist and are not the same file, the new one wins, and the switchboard prints at each start one line
+that names the old file, says that it is no longer read, and says that a person may delete it. A person who used two
+custom logs, each with its own `machines.json`, copies the one to keep to the new path before the first start. A file
+that cannot be read stops the start with today's error.
 
 The switchboard writes the new file at start, and not at its next save, so that the next restart from the menu bar finds
 the machines whatever log it uses.
@@ -168,9 +184,10 @@ are removed. No program reads the `listening on` line for a setting.
 kind of dependency, and it is out of scope here. It needs its own record.
 
 `landline-switchboard` exits with status `3` when it cannot listen on its address, and with status `1` for every other
-failure to start. `up` gives the advice about the saved address when the switchboard exits with status `3`, and never
-decides it from the text in `switchboard.out`, by C1. The status is a format between programs, and a change to it needs
-a new record.
+failure to start, among them a setting it cannot read from a flag, the table, or the environment. A command line it
+cannot parse, such as an unknown flag, exits `2`, as for every Go program that uses the `flag` package. `up` gives the
+advice about the saved address when the switchboard exits with status `3`, and never decides it from the text in
+`switchboard.out`, by C1. The status is a format between programs, and a change to it needs a new record.
 
 ### The reader and writer of `config.toml`
 

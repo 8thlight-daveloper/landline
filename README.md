@@ -300,7 +300,9 @@ project's GitHub address is in the About panel, so a move of the repository chan
 
 ## Two hosts
 
-There is one switchboard, and every machine uses it. Keep it on localhost and reach it through an SSH tunnel, or let it
+There is one switchboard, and every machine uses it. A machine runs at most one switchboard. A second one refuses to
+start while the first holds its lock. Clients talk to the switchboard directly: Landline supports no proxy or redirect
+between them, and a client never follows a redirect. Keep it on localhost and reach it through an SSH tunnel, or let it
 listen on a private network address such as a Tailscale one. Traffic on a tailnet is already encrypted, and the
 switchboard prints a warning that it speaks plain HTTP. On the first machine, name the address once:
 
@@ -365,6 +367,7 @@ Landline keeps these files. The two folders are made with mode `0700`.
 | `config.json`                    | `~/.config/landline/`                                        | The old format, read only when there is no `config.toml`                                     | Nothing. The first save of `config.toml` removes it                            |        |
 | `log.jsonl`                      | `~/.local/share/landline/`, or `log` in `[server]`           | The append-only message log                                                                  | `landline-switchboard`                                                         | `0600` |
 | `machines.json`                  | `~/.local/share/landline/`, whatever the log path            | The joined machines: name, public key, and date                                              | `landline-switchboard`, on a join, a revoke, and a carry-over at start         | `0600` |
+| `switchboard.lock`               | `~/.local/share/landline/`                                   | The lock that keeps one switchboard running on this machine                                  | `landline-switchboard`, at start. It is never deleted                          | `0600` |
 | `switchboard.out`                | `~/.local/share/landline/`                                   | The switchboard's output                                                                     | `server up`, and the launchd agent                                             | `0600` |
 | `switchboard.pid`                | `~/.local/share/landline/`                                   | The process id of the switchboard that `server up` started                                   | `server up`. `server down` removes it                                          | `0600` |
 | `dev.landline.switchboard.plist` | `~/Library/LaunchAgents/`                                    | The launchd agent that starts the switchboard at login, on macOS                             | `server install`                                                               | `0644` |

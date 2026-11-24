@@ -43,11 +43,13 @@ whatever the log path
 ([0220](../decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)).
 It reads the file when it starts and writes it after a redeem or a revoke. When that file does not exist at start and a
 `machines.json` exists in the folder of the log path in use, it reads the old file and writes its entries to the new
-path before it listens. It never writes, renames, or deletes the old file. `cmd/landline-switchboard` passes both paths
-in. `cli/command` writes `$HOME/.config/landline/machine.key` on `landline server join --code`, and reads it to sign a
-registration and to refuse `join` without a code while a key is saved. `mcp/server` reads no file. `cmd/landline-mcp`
-signs through `cli/command`, which reads the key. `agent/viewer` and `menubar/viewer` read the key with their own copies
-of the reader. `client/http` and `machine/registry` read and write no file.
+path before it listens. It never writes, renames, or deletes the old file. Before it reads `machines.json`, it creates
+`$HOME/.local/share/landline/switchboard.lock` and holds an exclusive lock on it until it exits.
+`cmd/landline-switchboard` passes both paths in. `cli/command` writes `$HOME/.config/landline/machine.key` on
+`landline server join --code`, and reads it to sign a registration and to refuse `join` without a code while a key is
+saved. `mcp/server` reads no file. `cmd/landline-mcp` signs through `cli/command`, which reads the key. `agent/viewer`
+and `menubar/viewer` read the key with their own copies of the reader. `client/http` and `machine/registry` read and
+write no file.
 
 `$HOME/.config/landline/config.toml` holds the switchboard's settings in a `[server]` table
 ([0220](../decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)).
