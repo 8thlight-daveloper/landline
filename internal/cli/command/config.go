@@ -416,9 +416,11 @@ func forgetSecretLine(env Env) error {
 		return err
 	}
 	var kept []string
+	inTable := false
 	for _, line := range splitLines(string(raw)) {
 		trimmed := strings.TrimSpace(line)
-		if found := keyLine.FindStringSubmatch(trimmed); found != nil && found[1] == "secret" && !strings.HasPrefix(trimmed, "#") {
+		inTable = inTable || tableLine.MatchString(trimmed)
+		if found := keyLine.FindStringSubmatch(trimmed); !inTable && found != nil && found[1] == "secret" {
 			continue
 		}
 		kept = append(kept, line)
@@ -466,7 +468,9 @@ func joinWithCode(env Env, host string, port int, code string) error {
 		return fmt.Errorf("the switchboard answered with a machine name %q that is not allowed. Nothing was saved", name)
 	}
 	if err := saveJoin(env, private, host, port, name); err != nil {
-		restore()
+		if restoreErr := restore(); restoreErr != nil {
+			return fmt.Errorf("%w. %v. The new machine %s stays on the switchboard until you run landline server revoke %s", err, restoreErr, name, name)
+		}
 		return fmt.Errorf("%w. The earlier key and config.toml were restored, and the new machine %s stays on the switchboard until you run landline server revoke %s", err, name, name)
 	}
 	fmt.Fprintf(env.Stdout, "joined the switchboard at %s as %s. The key is saved in %s, readable only by you\n", address, name, machineKeyPath(env))

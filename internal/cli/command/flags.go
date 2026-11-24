@@ -26,6 +26,15 @@ type Timing struct {
 	Keepalive, DeliveryTimeout, Grace, InviteLifetime, SignatureWindow time.Duration
 }
 
+const (
+	shortestSignatureWindow = time.Second
+	longestSignatureWindow  = 5 * time.Second
+)
+
+func signatureWindowInRange(window time.Duration) bool {
+	return shortestSignatureWindow <= window && window <= longestSignatureWindow
+}
+
 func TimingFrom(values map[string]string) (Timing, error) {
 	var out Timing
 	for flag, target := range map[string]*time.Duration{"--keepalive": &out.Keepalive, "--delivery-timeout": &out.DeliveryTimeout, "--grace": &out.Grace, "--invite-lifetime": &out.InviteLifetime, "--signature-window": &out.SignatureWindow} {
@@ -34,7 +43,7 @@ func TimingFrom(values map[string]string) (Timing, error) {
 			continue
 		}
 		d, err := time.ParseDuration(raw)
-		if err != nil || d <= 0 {
+		if err != nil || (d <= 0 && flag != "--signature-window") {
 			return Timing{}, fmt.Errorf("%s needs a positive duration such as 200ms or 15s, not %q", flag, raw)
 		}
 		*target = d

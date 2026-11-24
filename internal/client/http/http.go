@@ -61,13 +61,25 @@ func (c *Client) doWith(authorized bool, method, path string, in, out any) error
 		}
 	}
 	err := c.send(authorized, method, path, raw, out)
-	var refused *StatusError
-	signed := authorized && c.Signer != nil && signedRoute(method, path)
-	if signed && errors.As(err, &refused) && refused.Refusal != nil && !refused.Refusal.Clock {
-		time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+	if !authorized || c.Signer == nil || !signedRoute(method, path) || !retryable(err) {
+		return err
+	}
+	lastRetry := time.Now().Add(refusalRetryPeriod)
+	for retryable(err) && time.Now().Before(lastRetry) {
+		time.Sleep(refusalRetryInterval)
 		err = c.send(authorized, method, path, raw, out)
 	}
 	return err
+}
+
+const (
+	refusalRetryInterval = time.Second
+	refusalRetryPeriod   = 6 * time.Second
+)
+
+func retryable(err error) bool {
+	var refused *StatusError
+	return errors.As(err, &refused) && refused.Refusal != nil && !refused.Refusal.Clock
 }
 
 func (c *Client) send(authorized bool, method, path string, raw []byte, out any) error {

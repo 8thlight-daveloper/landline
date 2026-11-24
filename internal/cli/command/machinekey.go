@@ -1,11 +1,13 @@
 package command
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,27 +55,69 @@ func writeMachineKey(env Env, key ed25519.PrivateKey) error {
 
 var machineNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
-func snapshotJoinFiles(env Env) (func(), error) {
+type savedFile struct {
+	path    string
+	content []byte
+	mode    fs.FileMode
+	existed bool
+}
+
+func snapshotJoinFiles(env Env) (func() error, error) {
 	paths := []string{machineKeyPath(env), configPath(env)}
-	contents := make([][]byte, len(paths))
+	saved := make([]savedFile, len(paths))
 	for i, path := range paths {
+		saved[i].path = path
+		info, statErr := os.Stat(path)
 		raw, err := os.ReadFile(path)
 		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("%s cannot be read, so a failed join could not put it back: %v. Nothing was saved and the code was not used", path, err)
 		}
-		contents[i] = raw
-	}
-	return func() {
-		for i, path := range paths {
-			os.Remove(path + ".tmp")
-			if contents[i] == nil {
-				os.Remove(path)
-				continue
-			}
-			os.WriteFile(path, contents[i], 0o600)
-			os.Chmod(path, 0o600)
+		if statErr == nil && err == nil {
+			saved[i].content, saved[i].mode, saved[i].existed = raw, info.Mode().Perm(), true
 		}
+	}
+	return func() error {
+		var failures []error
+		for _, file := range saved {
+			os.Remove(file.path + ".tmp")
+			if err := file.putBack(); err != nil {
+				failures = append(failures, fmt.Errorf("%s could not be put back: %v", file.path, err))
+			}
+		}
+		return errors.Join(failures...)
 	}, nil
+}
+
+func (file savedFile) unchanged() bool {
+	info, statErr := os.Stat(file.path)
+	if !file.existed {
+		return errors.Is(statErr, fs.ErrNotExist)
+	}
+	raw, readErr := os.ReadFile(file.path)
+	return statErr == nil && readErr == nil && info.Mode().Perm() == file.mode && bytes.Equal(raw, file.content)
+}
+
+func (file savedFile) putBack() error {
+	if file.unchanged() {
+		return nil
+	}
+	if !file.existed {
+		return os.Remove(file.path)
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(file.path), filepath.Base(file.path)+".*.restoring")
+	if err != nil {
+		return err
+	}
+	_, writeErr := temporary.Write(file.content)
+	closeErr := temporary.Close()
+	err = errors.Join(writeErr, closeErr, os.Chmod(temporary.Name(), file.mode))
+	if err == nil {
+		err = os.Rename(temporary.Name(), file.path)
+	}
+	if err != nil {
+		os.Remove(temporary.Name())
+	}
+	return err
 }
 
 func newMachineKey() (ed25519.PublicKey, ed25519.PrivateKey, error) {

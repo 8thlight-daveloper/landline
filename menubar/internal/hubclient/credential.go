@@ -43,15 +43,15 @@ func readCredential(directory string, getenv func(string) string, config saved) 
 		return Credential{Secret: config.Secret}, nil
 	}
 	if err != nil {
-		return Credential{}, fmt.Errorf("%s cannot be read: %v", path, err)
+		return Credential{}, CredentialProblem{fmt.Sprintf("%s cannot be read: %v", path, err)}
 	}
 	first, _, _ := strings.Cut(string(raw), "\n")
 	seed, decodeErr := base64.StdEncoding.DecodeString(strings.TrimSpace(first))
 	if decodeErr != nil || len(seed) != ed25519.SeedSize {
-		return Credential{}, fmt.Errorf("%s does not hold a 32 byte machine key in base64 on its first line", path)
+		return Credential{}, CredentialProblem{path + " does not hold a 32 byte machine key in base64 on its first line"}
 	}
 	if config.Machine == "" {
-		return Credential{}, fmt.Errorf("%s is saved but config.toml names no machine. Run landline server join again", path)
+		return Credential{}, CredentialProblem{path + " is saved but config.toml names no machine. Run landline server join again"}
 	}
 	return Credential{Machine: config.Machine, Key: ed25519.NewKeyFromSeed(seed)}, nil
 }

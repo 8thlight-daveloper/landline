@@ -320,7 +320,7 @@ func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if machine != "" && !s.machineActiveLocked(machine) {
+	if machine.signed() && !s.stillActiveLocked(machine) {
 		refuseMachine(w)
 		return
 	}
@@ -328,8 +328,8 @@ func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
 	s.expireLocked(now)
 	token := s.cfg.NewToken()
 	s.observers[token] = now
-	if machine != "" {
-		s.machineTokens[token] = machine
+	if machine.signed() {
+		s.machineTokens[token] = machine.name
 	}
 	write(w, http.StatusOK, ObserverResponse{Token: token})
 }
@@ -385,7 +385,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if machine != "" && !s.machineActiveLocked(machine) {
+	if machine.signed() && !s.stillActiveLocked(machine) {
 		refuseMachine(w)
 		return
 	}
@@ -415,8 +415,8 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	token := s.cfg.NewToken()
 	s.tokens[token] = id
-	if machine != "" {
-		s.machineTokens[token] = machine
+	if machine.signed() {
+		s.machineTokens[token] = machine.name
 	}
 	write(w, http.StatusOK, model.RegisterResponse{ID: id, Token: token})
 }

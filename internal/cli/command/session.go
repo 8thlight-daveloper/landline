@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,8 +140,14 @@ func (s *Session) ID() string {
 	return s.id
 }
 
+func unreachable(err error) bool {
+	var transport *net.OpError
+	var lookup *net.DNSError
+	return errors.As(err, &transport) || errors.As(err, &lookup)
+}
+
 func (s *Session) hubDown(err error) error {
-	if err != nil && (strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "no such host") || strings.Contains(err.Error(), "dial tcp")) {
+	if unreachable(err) {
 		return fmt.Errorf("the Landline switchboard is not running at %s. Run: landline server up", HubURL(s.env))
 	}
 	return err
@@ -208,6 +215,10 @@ func (s *Session) renewed(stale *client.Client) (*client.Client, error) {
 }
 
 func (s *Session) call(do func(*client.Client) error) error {
+	return cleanedError(s.callAsAnswered(do))
+}
+
+func (s *Session) callAsAnswered(do func(*client.Client) error) error {
 	current, err := s.current()
 	if err != nil {
 		return err

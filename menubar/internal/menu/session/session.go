@@ -16,11 +16,13 @@ type Source interface {
 }
 
 type Observed struct {
-	Reachable     bool
-	KeyRefusal    string
-	Agents        []agentsview.Row
-	Switchboard   model.Switchboard
-	LandlineFound bool
+	Reachable         bool
+	KeyRefusal        string
+	CredentialProblem string
+	NoCredential      bool
+	Agents            []agentsview.Row
+	Switchboard       model.Switchboard
+	LandlineFound     bool
 }
 
 func Observe(source Source, landlineFound bool) Observed {
@@ -30,6 +32,11 @@ func Observe(source Source, landlineFound bool) Observed {
 	if errors.As(err, &refusal) {
 		observed.KeyRefusal = refusal.Text
 	}
+	var problem hubclient.CredentialProblem
+	if errors.As(err, &problem) {
+		observed.CredentialProblem = problem.Text
+	}
+	observed.NoCredential = errors.Is(err, hubclient.ErrNoSecret)
 	if err != nil {
 		return observed
 	}
@@ -81,6 +88,15 @@ func (s *Session) Notify(text string) {
 	s.notice, s.skip = text, true
 }
 
+func (s *Session) NotifyFailure(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.observed.NoCredential {
+		text = model.NoCredentialLine
+	}
+	s.notice, s.skip = text, true
+}
+
 func (s *Session) Start() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -103,6 +119,6 @@ func (s *Session) Menu() model.Menu {
 	return model.Build(model.Input{
 		Address: s.address, Local: s.local, Reachable: s.observed.Reachable, Agents: s.observed.Agents,
 		Switchboard: s.observed.Switchboard, App: s.app, LandlineFound: s.observed.LandlineFound,
-		Busy: s.busy, Notice: s.notice,
+		Busy: s.busy, Notice: s.notice, CredentialProblem: s.observed.CredentialProblem, NoCredential: s.observed.NoCredential,
 	})
 }

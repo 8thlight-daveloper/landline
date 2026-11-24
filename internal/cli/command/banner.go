@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode"
 )
 
 var jackRows = []string{
@@ -91,11 +90,5 @@ func BannerFor(out *os.File) string {
 }
 
 func NotifyToStderr(line string) {
-	plain := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf) {
-			return ' '
-		}
-		return r
-	}, line)
-	fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), plain)
+	fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), printableLine(line))
 }

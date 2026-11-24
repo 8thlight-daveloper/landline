@@ -97,6 +97,8 @@ func ensureSecret(env Env, config Config) (Config, error) {
 	return config, SaveConfig(env, Config{Secret: secret})
 }
 
+const ExitCannotListen = 3
+
 func pidFile(dataDir string) string { return filepath.Join(dataDir, "switchboard.pid") }
 
 func switchboardPID(dataDir string) (int, bool) {
@@ -204,8 +206,10 @@ func serverUp(args []string, env Env, dataDir string) int {
 	pid := child.Process.Pid
 	os.WriteFile(pidFile(dataDir), []byte(strconv.Itoa(pid)), 0o600)
 	exited := make(chan struct{})
+	exitStatus := -1
 	go func() {
 		child.Wait()
+		exitStatus = child.ProcessState.ExitCode()
 		close(exited)
 	}()
 	deadline := time.Now().Add(20 * time.Second)
@@ -216,11 +220,11 @@ func serverUp(args []string, env Env, dataDir string) int {
 		}
 		select {
 		case <-exited:
-			return upFailed(env, dataDir, outPath, values["--addr"] == "")
+			return upFailed(env, dataDir, outPath, values["--addr"] == "" && exitStatus == ExitCannotListen)
 		default:
 		}
 		if time.Now().After(deadline) {
-			return upFailed(env, dataDir, outPath, values["--addr"] == "")
+			return upFailed(env, dataDir, outPath, false)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -235,13 +239,13 @@ func upListening(env Env, address Config, pid int, addr, outPath string) int {
 	return 0
 }
 
-func upFailed(env Env, dataDir, outPath string, fromSavedAddress bool) int {
+func upFailed(env Env, dataDir, outPath string, savedAddressTaken bool) int {
 	raw, _ := os.ReadFile(outPath)
 	if _, running := switchboardPID(dataDir); !running {
 		os.Remove(pidFile(dataDir))
 	}
-	fmt.Fprintf(env.Stderr, "the switchboard did not start:\n%s", raw)
-	if fromSavedAddress && strings.Contains(string(raw), "cannot listen on") {
+	fmt.Fprintf(env.Stderr, "the switchboard did not start:\n%s", printableLines(string(raw)))
+	if savedAddressTaken {
 		fmt.Fprintf(env.Stderr, "The address comes from %s. If it names a switchboard on another machine, edit host and port there to run one here, or pass --addr host:port.\n", configPath(env))
 	}
 	return 1
@@ -278,7 +282,8 @@ func serverRestart(args []string, env Env, dataDir string) int {
 		fmt.Fprintln(env.Stderr, "landline server restart:", err)
 		return 2
 	}
-	if _, err := readServerTable(env); err != nil {
+	values, _ := FlagValues(args, SwitchboardFlags...)
+	if _, _, err := SwitchboardSettings(env, values); err != nil {
 		fmt.Fprintln(env.Stderr, "landline server restart:", err)
 		return 1
 	}

@@ -44,7 +44,7 @@ func (r MachineRefusal) advice(message string) string {
 	if r.Clock {
 		return clockAdvice(r.ClockDifference)
 	}
-	generic := "the switchboard refused this machine's key. The shared secret may have been rotated, this machine may have been revoked, or its clock may run behind the switchboard's. If the refusal persists after one retry, run landline server join <host:port> --code <code> to join again"
+	generic := "the switchboard refused this machine's key. The shared secret may have been rotated, this machine may have been revoked, or its clock may run behind the switchboard's. If the refusal persists, run landline server join <host:port> --code <code> to join again"
 	if message == "" {
 		return generic
 	}

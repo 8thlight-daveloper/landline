@@ -27,7 +27,7 @@ const (
 	inviteRetries        = 10
 	machineRefusal       = "missing or wrong switchboard secret or machine signature"
 	defaultInviteTimeout = 5 * time.Minute
-	defaultWindow        = 60 * time.Second
+	defaultWindow        = 5 * time.Second
 )
 
 var machineHeaderField = regexp.MustCompile(`(name|time|nonce|signature)=([^,\s]+)`)
@@ -155,17 +155,24 @@ func (s *Server) saveMachinesLocked(state model.Machines) error {
 	return writeMachines(s.cfg.MachinesPath, state.Active)
 }
 
-func (s *Server) secretOrMachine(w http.ResponseWriter, r *http.Request) (string, bool) {
+type verifiedMachine struct {
+	name string
+	key  []byte
+}
+
+func (machine verifiedMachine) signed() bool { return machine.name != "" }
+
+func (s *Server) secretOrMachine(w http.ResponseWriter, r *http.Request) (verifiedMachine, bool) {
 	if s.isSecret(r) {
-		return "", true
+		return verifiedMachine{}, true
 	}
 	if header := r.Header.Get("Authorization"); machineSigned(header) {
 		return s.verifyMachine(w, r, header)
 	}
-	return "", s.secretOnly(w, r)
+	return verifiedMachine{}, s.secretOnly(w, r)
 }
 
-func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header string) (string, bool) {
+func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header string) (verifiedMachine, bool) {
 	fields := map[string]string{}
 	for _, found := range machineHeaderField.FindAllStringSubmatch(strings.TrimPrefix(header, machineScheme), -1) {
 		fields[found[1]] = found[2]
@@ -176,26 +183,28 @@ func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header st
 	nonce, nonceErr := base64.StdEncoding.DecodeString(fields["nonce"])
 	if bodyErr != nil || timeErr != nil || signatureErr != nil || nonceErr != nil || len(nonce) != 16 || fields["name"] == "" {
 		refuseMachine(w)
-		return "", false
+		return verifiedMachine{}, false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	request := model.SignedRequest{Name: fields["name"], Time: unix, Nonce: fields["nonce"], Signature: signature, Method: r.Method, Path: r.URL.RequestURI(), Body: body}
 	s.mu.Lock()
 	next, name, err := s.machines.Verify(s.state, request, requestTime(r), s.started, s.cfg.SignatureWindow)
+	var verified verifiedMachine
 	if err == nil {
 		s.state = next
+		verified = verifiedMachine{name: name, key: s.activeKeyLocked(name)}
 	}
 	s.mu.Unlock()
 	var skew *model.ClockSkewError
 	switch {
 	case err == nil:
-		return name, true
+		return verified, true
 	case errors.As(err, &skew):
 		refuseMachineClock(w, skew)
 	default:
 		refuseMachine(w)
 	}
-	return "", false
+	return verifiedMachine{}, false
 }
 
 func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
@@ -381,6 +390,15 @@ func newMachineSettings(cfg *Config) {
 
 func newMachineRegistry() machineregistry.Registry { return machineregistry.New() }
 
-func (s *Server) machineActiveLocked(name string) bool {
-	return slices.ContainsFunc(s.state.Active, func(machine model.Machine) bool { return machine.Name == name })
+func (s *Server) activeKeyLocked(name string) []byte {
+	i := slices.IndexFunc(s.state.Active, func(machine model.Machine) bool { return machine.Name == name })
+	if i < 0 {
+		return nil
+	}
+	return slices.Clone(s.state.Active[i].PublicKey)
+}
+
+func (s *Server) stillActiveLocked(machine verifiedMachine) bool {
+	key := s.activeKeyLocked(machine.name)
+	return key != nil && bytes.Equal(key, machine.key)
 }

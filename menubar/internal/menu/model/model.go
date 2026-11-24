@@ -9,12 +9,13 @@ import (
 )
 
 const (
-	maxTitleRunes   = 120
-	ellipsis        = "…"
-	notFoundTitle   = "landline not found. Run just install"
-	unreachableLine = "Switchboard unreachable"
-	unknownBuild    = "Switchboard (build unknown)"
-	differsSuffix   = " (differs from this app)"
+	maxTitleRunes    = 120
+	ellipsis         = "…"
+	notFoundTitle    = "landline not found. Run just install"
+	unreachableLine  = "Switchboard unreachable"
+	NoCredentialLine = "No switchboard credential"
+	unknownBuild     = "Switchboard (build unknown)"
+	differsSuffix    = " (differs from this app)"
 )
 
 type ActionKind int
@@ -63,15 +64,17 @@ type Switchboard struct {
 }
 
 type Input struct {
-	Address       string
-	Local         bool
-	Reachable     bool
-	Agents        []agentsview.Row
-	Switchboard   Switchboard
-	App           buildinfo.Build
-	LandlineFound bool
-	Busy          bool
-	Notice        string
+	Address           string
+	Local             bool
+	Reachable         bool
+	Agents            []agentsview.Row
+	Switchboard       Switchboard
+	App               buildinfo.Build
+	LandlineFound     bool
+	Busy              bool
+	Notice            string
+	CredentialProblem string
+	NoCredential      bool
 }
 
 func Build(in Input) Menu {
@@ -81,7 +84,7 @@ func Build(in Input) Menu {
 			menu.Items = append(menu.Items, agentItem(row))
 		}
 	} else {
-		menu.Items = append(menu.Items, disabled(unreachableLine))
+		menu.Items = append(menu.Items, disabled(stateLineWhenUnreachable(in)))
 	}
 	if len(menu.Items) > 0 {
 		menu.Items = append(menu.Items, separator())
@@ -97,6 +100,16 @@ func Build(in Input) Menu {
 		action("Quit", Action{Kind: Quit}),
 	)
 	return menu
+}
+
+func stateLineWhenUnreachable(in Input) string {
+	switch {
+	case in.NoCredential:
+		return NoCredentialLine
+	case in.CredentialProblem != "":
+		return in.CredentialProblem
+	}
+	return unreachableLine
 }
 
 func iconFor(in Input) Icon {

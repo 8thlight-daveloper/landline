@@ -172,7 +172,7 @@ func (s *Screen) run(action model.Action) {
 	switch {
 	case err != nil:
 	case failure != "":
-		s.config.Session.Notify(failure)
+		s.config.Session.NotifyFailure(failure)
 	case action.Done != "":
 		s.config.Session.Notify(action.Done)
 	}

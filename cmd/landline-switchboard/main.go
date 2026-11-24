@@ -106,7 +106,7 @@ func run(args []string) int {
 	listener, resolved, err := listenOn(addr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: cannot listen on %s: %v\n", name, addr, err)
-		return 1
+		return command.ExitCannotListen
 	}
 	fmt.Fprint(os.Stderr, command.BannerFor(os.Stderr))
 	fmt.Fprintf(os.Stderr, "%s listening on %s, host %q, log %s%s\n", name, listener.Addr(), host, logPath, asGiven(addr, listener.Addr().String(), resolved))

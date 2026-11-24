@@ -20,7 +20,7 @@ var defaultTiming = Timing{
 	DeliveryTimeout: 20 * time.Second,
 	Grace:           2 * time.Minute,
 	InviteLifetime:  5 * time.Minute,
-	SignatureWindow: 60 * time.Second,
+	SignatureWindow: 5 * time.Second,
 }
 
 type timingSetting struct {
@@ -72,10 +72,17 @@ func readServerTable(env Env) (ServerSettings, error) {
 			if parseErr != nil || duration <= 0 {
 				return ServerSettings{}, lineError(path, line.index, timing.key+" must be a positive duration in quotes with a unit, such as 200ms, 15s, or 5m")
 			}
+			if timing.key == "signature-window" && !signatureWindowInRange(duration) {
+				return ServerSettings{}, lineError(path, line.index, signatureWindowRange("signature-window"))
+			}
 			*timing.target(&settings.Timing) = duration
 		}
 	}
 	return settings, nil
+}
+
+func signatureWindowRange(name string) string {
+	return name + " must be from " + shortestSignatureWindow.String() + " to " + longestSignatureWindow.String() + ", such as 5s"
 }
 
 func homeExpanded(env Env, path string) string {
@@ -101,6 +108,9 @@ func SwitchboardSettings(env Env, values map[string]string) (ServerSettings, []s
 	given, err := TimingFrom(values)
 	if err != nil {
 		return ServerSettings{}, nil, err
+	}
+	if _, set := values["--signature-window"]; set && !signatureWindowInRange(given.SignatureWindow) {
+		return ServerSettings{}, nil, errors.New(signatureWindowRange("--signature-window"))
 	}
 	settings := table
 	settings.Host = Or(values["--host"], env.Host)

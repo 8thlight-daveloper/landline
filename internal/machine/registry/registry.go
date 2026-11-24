@@ -38,7 +38,13 @@ func cloneState(state model.Machines) model.Machines {
 }
 
 func activeIndex(state model.Machines, name string) int {
-	return slices.IndexFunc(state.Active, func(machine model.Machine) bool { return machine.Name == name })
+	found := -1
+	for i, machine := range state.Active {
+		if machine.Name == name && found < 0 {
+			found = i
+		}
+	}
+	return found
 }
 
 func (Registry) Invite(state model.Machines, name string, random []byte, now time.Time, lifetime time.Duration) (model.Machines, string, error) {
@@ -143,6 +149,15 @@ func clockDifference(request, now int64) int64 {
 	return request - now
 }
 
+const startPeriodSeconds = 5
+
+func inStartPeriod(requestTime int64, started time.Time) bool {
+	if started.Unix() > math.MaxInt64-startPeriodSeconds {
+		return true
+	}
+	return requestTime <= started.Unix()+startPeriodSeconds
+}
+
 func signedText(request model.SignedRequest) []byte {
 	digest := sha256.Sum256(request.Body)
 	return []byte(strings.Join([]string{
@@ -167,7 +182,7 @@ func (Registry) Verify(state model.Machines, request model.SignedRequest, now, s
 	switch {
 	case i < 0:
 		return state, "", model.ErrUnknownMachine
-	case request.Time <= started.Unix():
+	case inStartPeriod(request.Time, started):
 		return state, "", model.ErrBeforeStart
 	case !verified:
 		return state, "", model.ErrBadSignature

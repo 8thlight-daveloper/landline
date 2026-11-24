@@ -141,11 +141,20 @@ func (c *Client) currentToken() (string, error) {
 	return c.register()
 }
 
+const (
+	refusalRetryInterval = time.Second
+	refusalRetryPeriod   = 6 * time.Second
+)
+
 func (c *Client) register() (string, error) {
 	token, keyRefused, err := c.registerOnce()
-	if keyRefused {
-		time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
-		token, _, err = c.registerOnce()
+	if !keyRefused {
+		return token, err
+	}
+	lastRetry := time.Now().Add(refusalRetryPeriod)
+	for keyRefused && time.Now().Before(lastRetry) {
+		time.Sleep(refusalRetryInterval)
+		token, keyRefused, err = c.registerOnce()
 	}
 	return token, err
 }
@@ -227,7 +236,7 @@ func (r machineRefusal) advice() string {
 		}
 		return fmt.Sprintf("the clock of this machine runs %d seconds %s the switchboard's. Set the clock", seconds, direction)
 	}
-	generic := "the switchboard refused this machine's key. The shared secret may have been rotated, this machine may have been revoked, or its clock may run behind the switchboard's. If the refusal persists after one retry, run landline server join <host:port> --code <code> to join again"
+	generic := "the switchboard refused this machine's key. The shared secret may have been rotated, this machine may have been revoked, or its clock may run behind the switchboard's. If the refusal persists, run landline server join <host:port> --code <code> to join again"
 	if r.message == "" {
 		return generic
 	}

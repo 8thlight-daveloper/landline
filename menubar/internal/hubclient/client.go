@@ -24,7 +24,11 @@ const (
 
 var ErrControlSecret = errors.New("the switchboard secret contains a control character")
 
-var ErrNoSecret = errors.New("there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET")
+type CredentialProblem struct{ Text string }
+
+func (p CredentialProblem) Error() string { return p.Text }
+
+var ErrNoSecret error = CredentialProblem{"there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET"}
 
 type Client struct {
 	address string
@@ -36,7 +40,7 @@ type Client struct {
 
 	machine          string
 	key              ed25519.PrivateKey
-	rereadCredential func() (string, Credential)
+	rereadCredential func() (string, Credential, error)
 }
 
 func New(address, secret string) *Client {
@@ -59,18 +63,23 @@ func NewWith(address string, credential Credential) *Client {
 	return client
 }
 
-func (c *Client) RereadCredentialWith(reread func() (string, Credential)) {
+func (c *Client) RereadCredentialWith(reread func() (string, Credential, error)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.rereadCredential = reread
 }
 
-func (c *Client) currentCredential() Credential {
+func (c *Client) currentCredential() (Credential, error) {
 	c.mu.Lock()
 	reread := c.rereadCredential
 	c.mu.Unlock()
 	if reread != nil {
-		if address, fresh := reread(); address != "" && !fresh.empty() {
+		address, fresh, err := reread()
+		var problem CredentialProblem
+		if errors.As(err, &problem) {
+			return Credential{}, problem
+		}
+		if err == nil && address != "" && !fresh.empty() {
 			c.mu.Lock()
 			if address != c.address {
 				c.address, c.token = address, ""
@@ -83,7 +92,7 @@ func (c *Client) currentCredential() Credential {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return Credential{Secret: c.secret, Machine: c.machine, Key: c.key}
+	return Credential{Secret: c.secret, Machine: c.machine, Key: c.key}, nil
 }
 
 func (c *Client) RereadSecretWith(reread func() string) {
@@ -163,17 +172,29 @@ func (c *Client) currentToken() (string, error) {
 	return c.register()
 }
 
+const (
+	refusalRetryInterval = time.Second
+	refusalRetryPeriod   = 6 * time.Second
+)
+
 func (c *Client) register() (string, error) {
 	token, keyRefused, err := c.registerOnce()
-	if keyRefused {
-		time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
-		token, _, err = c.registerOnce()
+	if !keyRefused {
+		return token, err
+	}
+	lastRetry := time.Now().Add(refusalRetryPeriod)
+	for keyRefused && time.Now().Before(lastRetry) {
+		time.Sleep(refusalRetryInterval)
+		token, keyRefused, err = c.registerOnce()
 	}
 	return token, err
 }
 
 func (c *Client) registerOnce() (string, bool, error) {
-	credential := c.currentCredential()
+	credential, problem := c.currentCredential()
+	if problem != nil {
+		return "", false, problem
+	}
 	if credential.empty() {
 		return "", false, ErrNoSecret
 	}
@@ -253,7 +274,7 @@ func (r machineRefusal) advice() string {
 		}
 		return fmt.Sprintf("the clock of this machine runs %d seconds %s the switchboard's. Set the clock", seconds, direction)
 	}
-	generic := "the switchboard refused this machine's key. The shared secret may have been rotated, this machine may have been revoked, or its clock may run behind the switchboard's. If the refusal persists after one retry, run landline server join <host:port> --code <code> to join again"
+	generic := "the switchboard refused this machine's key. The shared secret may have been rotated, this machine may have been revoked, or its clock may run behind the switchboard's. If the refusal persists, run landline server join <host:port> --code <code> to join again"
 	if r.message == "" {
 		return generic
 	}

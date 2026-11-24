@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode"
 
 	client "github.com/8thlight-daveloper/landline/internal/client/http"
 	"github.com/8thlight-daveloper/landline/internal/model"
@@ -107,7 +106,7 @@ func Run(args []string, env Env) int {
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintln(env.Stderr, "landline:", err)
+		fmt.Fprintln(env.Stderr, "landline:", printable(err.Error()))
 		return 1
 	}
 	return 0
@@ -165,7 +164,7 @@ func register(args []string, env Env) error {
 	if err := saveSession(env, out.ID, session{URL: url, Token: out.Token}); err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "registered %s\n", out.ID)
+	fmt.Fprintf(env.Stdout, "registered %s\n", printable(out.ID))
 	return nil
 }
 
@@ -189,7 +188,31 @@ func saveSession(env Env, id string, s session) error {
 type Direct struct{ *client.Client }
 
 func (d Direct) Deliveries(ctx context.Context, handle func(model.Delivery)) error {
-	return d.Stream(ctx, handle)
+	return cleanedError(d.Stream(ctx, handle))
+}
+
+func (d Direct) Send(body model.SendBody) (model.SendResponse, error) {
+	out, err := d.Client.Send(body)
+	return out, cleanedError(err)
+}
+
+func (d Direct) Agents() ([]model.AgentInfo, error) {
+	out, err := d.Client.Agents()
+	return out, cleanedError(err)
+}
+
+func (d Direct) Attach(request model.AttachRequest) (model.AttachResponse, error) {
+	out, err := d.Client.Attach(request)
+	return out, cleanedError(err)
+}
+
+func (d Direct) Status(request model.StatusRequest) (model.StatusResponse, error) {
+	out, err := d.Client.Status(request)
+	return out, cleanedError(err)
+}
+
+func (d Direct) Report(id string, report model.DeliveryReport) error {
+	return cleanedError(d.Client.Report(id, report))
 }
 
 func Connect(as string, env Env) (Direct, error) {
@@ -257,18 +280,6 @@ func send(args []string, env Env) error {
 }
 
 func Printable(text string) string { return printable(text) }
-
-func printable(text string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r == '\n' || r == '\t' || r == 0x200c || r == 0x200d || r == 0xad:
-			return r
-		case unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf):
-			return ' '
-		}
-		return r
-	}, text)
-}
 
 func logRead(args []string, env Env) error {
 	set := flags("log", env)
