@@ -127,8 +127,9 @@ func TestTheScreenReportsARedirectAndSendsNothingToItsTarget(t *testing.T) {
 			redirect := startRedirectingSwitchboard(t)
 			_, env := homeFor(t, redirect.host, redirect.port)
 			result := runBin(t, bin, env, "agents", "--json")
-			if result.code != 1 || !strings.Contains(result.stderr, "redirect") {
-				t.Errorf("agents --json: %+v, want exit 1 and the redirect named", result)
+			shown := strings.TrimSpace(result.stderr)
+			if result.code != 1 || !strings.HasSuffix(shown, redirect.message()) || strings.Contains(shown, "\n") {
+				t.Errorf("agents --json: %+v, want exit 1 and one line that ends with %q", result, redirect.message())
 			}
 			if got := redirect.reached.Load(); got != 0 {
 				t.Errorf("the place the redirect names got %d requests, want none", got)
@@ -142,8 +143,9 @@ func TestTheMenuBarSendsNothingToTheTargetOfARedirect(t *testing.T) {
 	redirect := startRedirectingSwitchboard(t)
 	rig := newMenubarRig(t, defaultFlags(t), "http://"+redirect.address, landlineNextToBinary)
 	result := rig.run(t, "menu", "--text")
-	if result.code != 0 || strings.Contains(result.stdout, "Running at") {
-		t.Errorf("%+v, want the menu of a switchboard it cannot use", result)
+	lines := strings.Split(result.stdout, "\n")
+	if result.code != 0 || len(lines) < 2 || lines[1] != redirect.message()+disabledMark {
+		t.Errorf("%+v, want the state line %q where the menu shows a failure to reach the switchboard", result, redirect.message()+disabledMark)
 	}
 	if got := redirect.reached.Load(); got != 0 {
 		t.Errorf("the place the redirect names got %d requests, want none", got)
@@ -238,5 +240,88 @@ func TestAFailedJoinKeepsAConfigEditMadeWhileTheRequestWasInFlight(t *testing.T)
 	}
 	if got := readFileOrFail(t, configTomlOf(home)); got != edited {
 		t.Errorf("the failed join put back config.toml over an edit it did not make:\n%s\nwant:\n%s", scrub(got), scrub(edited))
+	}
+}
+
+func TestAnAdministrationRefusalPrintsTheSavedHostCleaned(t *testing.T) {
+	t.Parallel()
+	bin := build(t)
+	for _, args := range [][]string{{"server", "machines"}, {"server", "rotate-secret"}, {"server", "invite", "--name", "bravo"}, {"server", "revoke", "bravo"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			writeConfigFile(t, home, "config.toml", "secret = \""+secret+"\"\nhost = \"alpha-host\tbravo\x1b[2J\x07end\"\nport = 8787\n")
+			out, err := runIn(t, bin, isolatedEnv(home), home, args...)
+			if exitCodeOf(err) != 1 || !strings.Contains(out, "alpha-host") {
+				t.Errorf("%v: exit %d %q, want 1 and a refusal that names the saved host", args, exitCodeOf(err), out)
+			}
+			if strings.ContainsAny(out, "\t\x1b\x07") {
+				t.Errorf("%v: a control character in the saved host reached the terminal: %q", args, out)
+			}
+		})
+	}
+}
+
+func startAcceptingRedeem(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	reached := &atomic.Int32{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"alpha"}`))
+	}))
+	t.Cleanup(server.Close)
+	return server.Listener.Addr().String(), reached
+}
+
+func TestJoinWithACodeRefusesAndChangesNoFileWhileThisHomeHoldsASwitchboardLock(t *testing.T) {
+	t.Parallel()
+	cases := map[string]func(c *configuredHome){
+		"held by a running switchboard": func(c *configuredHome) {
+			c.startSwitchboard()
+			if !exists(c.dataFile("switchboard.lock")) {
+				t.Fatalf("the running switchboard made no %s", c.dataFile("switchboard.lock"))
+			}
+		},
+		"left by a switchboard that stopped": func(c *configuredHome) {
+			c.writeDataFile("switchboard.lock", "")
+		},
+	}
+	for name, prepare := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := newConfiguredHome(t, "")
+			prepare(c)
+			address, reached := startAcceptingRedeem(t)
+			original := c.configText()
+			result := c.landline("server", "join", address, "--code", "ABCD-EFGH")
+			said := result.stdout + result.stderr
+			if result.code != 1 || !strings.Contains(said, "switchboard.lock") || !strings.Contains(said, "secret") {
+				t.Errorf("join --code: %d %q, want 1 and a message that names switchboard.lock and says this home uses the shared secret", result.code, said)
+			}
+			if got := c.configText(); got != original {
+				t.Errorf("join --code changed config.toml:\n%s", scrub(got))
+			}
+			if exists(filepath.Join(configDirOf(c.home), "machine.key")) {
+				t.Errorf("join --code saved a machine key")
+			}
+			if got := reached.Load(); got != 0 {
+				t.Errorf("the switchboard named in the join got %d requests, want none", got)
+			}
+		})
+	}
+}
+
+func TestJoinWithACodeOverLoopbackFromAHomeWithNoSwitchboardLockJoins(t *testing.T) {
+	t.Parallel()
+	bin := build(t)
+	address, reached := startAcceptingRedeem(t)
+	home := t.TempDir()
+	out, err := runIn(t, bin, isolatedEnv(home), home, "server", "join", address, "--code", "ABCD-EFGH")
+	if err != nil || !strings.Contains(out, "joined the switchboard at "+address+" as alpha") {
+		t.Errorf("join --code %s: %v %q, want a join", address, err, out)
+	}
+	if !exists(filepath.Join(configDirOf(home), "machine.key")) || reached.Load() != 1 {
+		t.Errorf("join --code %s: key saved %v, %d requests, want a key and one request", address, exists(filepath.Join(configDirOf(home), "machine.key")), reached.Load())
 	}
 }

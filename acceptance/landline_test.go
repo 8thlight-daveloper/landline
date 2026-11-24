@@ -635,7 +635,50 @@ func (w *world) firstCodexMessage() string {
 	return ""
 }
 
+func homeProblem(home string) string {
+	if home == "" {
+		return "HOME is not set"
+	}
+	resolved, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		resolved = home
+	}
+	if real, err := os.UserHomeDir(); err == nil {
+		if realResolved, err := filepath.EvalSymlinks(real); err == nil && (resolved == realResolved || home == real) {
+			return "HOME is the real home directory " + real
+		}
+	}
+	temp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		temp = os.TempDir()
+	}
+	if !strings.HasPrefix(resolved, strings.TrimRight(temp, "/")+"/") {
+		return "HOME " + home + " is not under the temporary directory " + temp
+	}
+	return ""
+}
+
+func homeOf(env []string) string {
+	home := ""
+	for _, pair := range env {
+		if value, found := strings.CutPrefix(pair, "HOME="); found {
+			home = value
+		}
+	}
+	return home
+}
+
+func requireTempHome(t *testing.T, env []string) {
+	t.Helper()
+	if problem := homeProblem(homeOf(env)); problem != "" {
+		t.Fatalf("refusing to run a landline binary: %s", problem)
+	}
+}
+
 func isolatedEnv(home string) []string {
+	if problem := homeProblem(home); problem != "" {
+		panic("refusing to build an environment for a landline binary: " + problem)
+	}
 	var out []string
 	for _, pair := range os.Environ() {
 		if strings.HasPrefix(pair, "LANDLINE_") || strings.HasPrefix(pair, "HOME=") || strings.HasPrefix(pair, "NO_COLOR=") ||
@@ -649,6 +692,7 @@ func isolatedEnv(home string) []string {
 
 func runIn(t *testing.T, bin string, env []string, dir string, args ...string) (string, error) {
 	t.Helper()
+	requireTempHome(t, env)
 	cmd := exec.Command(bin, args...)
 	cmd.Env, cmd.Dir = env, dir
 	var out bytes.Buffer
@@ -2749,6 +2793,7 @@ type binResult struct {
 
 func runBin(t *testing.T, bin string, env []string, args ...string) binResult {
 	t.Helper()
+	requireTempHome(t, env)
 	cmd := exec.Command(bin, args...)
 	cmd.Env = env
 	var out, errb bytes.Buffer

@@ -1605,3 +1605,43 @@ func TestEditingAMachineKeyInAResultLeavesThePriorStateAlone(t *testing.T) {
 		}
 	}
 }
+
+func TestEditingAnInheritedSeenSignatureInAResultLeavesThePriorStateAlone(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	calls := map[string]func(model.Machines, []string) model.Machines{
+		"Invite": func(state model.Machines, _ []string) model.Machines {
+			next, _, _ := r.Invite(state, "four-box", random(72), t0, lifetime)
+			return next
+		},
+		"Redeem": func(state model.Machines, codes []string) model.Machines {
+			next, _, _ := r.Redeem(state, codes[0], publicOf(3), t0)
+			return next
+		},
+		"Revoke": func(state model.Machines, _ []string) model.Machines {
+			next, _ := r.Revoke(state, "one-box")
+			return next
+		},
+		"Verify": func(state model.Machines, _ []string) model.Machines {
+			next, _, _ := r.Verify(state, signedBy("alpha-box", keyOf(1), t0.Unix()).request(), t0, t0.Add(-time.Hour), window)
+			return next
+		},
+	}
+	for name, call := range calls {
+		state, codes := richState(t)
+		result := call(state, codes)
+		edited := 0
+		for i := range result.Seen {
+			if bytes.Equal(result.Seen[i].Signature, []byte{1, 1}) || bytes.Equal(result.Seen[i].Signature, []byte{2, 2}) {
+				result.Seen[i].Signature[0] ^= 0xff
+				edited++
+			}
+		}
+		if edited != 2 {
+			t.Fatalf("%s: the result keeps %d of the 2 inherited signatures, want both", name, edited)
+		}
+		if !bytes.Equal(state.Seen[0].Signature, []byte{1, 1}) || !bytes.Equal(state.Seen[1].Signature, []byte{2, 2}) {
+			t.Errorf("%s: editing a signature in the result changed the prior state's signature", name)
+		}
+	}
+}

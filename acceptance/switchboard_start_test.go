@@ -218,3 +218,80 @@ func (c *configuredHome) landlineIn(dir string, args ...string) binResult {
 	moved.home = dir
 	return moved.landline(args...)
 }
+
+func TestALogPathThatWouldBeMachinesJSONOnceMadeStopsTheStartAndMakesNoMachinesFile(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	if err := os.MkdirAll(c.dataDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	aliased := c.symlink(c.dataDir(), c.path("aliased"))
+	logPath := filepath.Join(aliased, "machines.json")
+	result := c.switchboardExit("--log", logPath)
+	if result.code != 1 || !strings.Contains(result.stderr, logPath) || !strings.Contains(result.stderr, "machines.json") {
+		t.Errorf("--log %s on a fresh install: %d %q, want 1 and a message that names the log and machines.json", logPath, result.code, result.stderr)
+	}
+	if exists(c.dataFile("machines.json")) {
+		t.Errorf("the refused start made %s: %q", c.dataFile("machines.json"), readFileOrFail(t, c.dataFile("machines.json")))
+	}
+}
+
+func TestALogPathThatNamesTheOldMachinesFileBesideACustomLogStopsTheStartAndLeavesItsBytes(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	customDir := c.path("custom-logs")
+	if err := os.MkdirAll(customDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(customDir, "machines.json")
+	const oldBytes = "[]\n"
+	if err := os.WriteFile(old, []byte(oldBytes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := c.switchboardExit("--log", old)
+	if result.code != 1 || !strings.Contains(result.stderr, old) {
+		t.Errorf("--log %s: %d %q, want 1 and a message that names it", old, result.code, result.stderr)
+	}
+	if got := readFileOrFail(t, old); got != oldBytes {
+		t.Errorf("the old machines.json changed: %q, want %q", got, oldBytes)
+	}
+}
+
+const listeningPrefix = "landline-switchboard: listening on "
+
+func TestUpNeverReportsASwitchboardThatFailedBecauseAValueItPrintedHoldsListeningOn(t *testing.T) {
+	t.Parallel()
+	cases := map[string]func(c *configuredHome) []string{
+		"a host label": func(c *configuredHome) []string {
+			return []string{"--host", "listening on", "--log", filepath.Join(c.blocker(), "log.jsonl")}
+		},
+		"a log path with a line feed": func(c *configuredHome) []string {
+			return []string{"--log", filepath.Join(c.blocker(), "x\n"+listeningPrefix+"127.0.0.1:1, host \"alpha-host\"", "log.jsonl")}
+		},
+	}
+	for name, argsOf := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := newConfiguredHome(t, "")
+			result := c.landline(append([]string{"server", "up"}, argsOf(c)...)...)
+			if result.code == 0 || strings.Contains(result.stdout, "the switchboard is running") {
+				t.Errorf("up reported a switchboard that cannot open its log: %+v", result)
+			}
+			for _, line := range strings.Split(c.switchboardOut(), "\n") {
+				if strings.HasPrefix(line, listeningPrefix) || strings.HasPrefix(line, "listening on") {
+					t.Errorf("a value the person chose began a line of switchboard.out: %q", c.switchboardOut())
+					break
+				}
+			}
+		})
+	}
+}
+
+func (c *configuredHome) blocker() string {
+	c.t.Helper()
+	path := c.path("a-file")
+	if err := os.WriteFile(path, []byte("not a folder\n"), 0o600); err != nil {
+		c.t.Fatal(err)
+	}
+	return path
+}

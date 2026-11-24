@@ -36,11 +36,11 @@ func TestAfterEveryCredentialIsRemovedTheNextRegistrationIsNotSignedWithTheCache
 	held := Credential{Machine: "linux-box", Key: key}
 	var removed atomic.Bool
 	client := NewWith(server.URL, held)
-	client.RereadCredentialWith(func() (string, Credential) {
+	client.RereadCredentialWith(func() (string, Credential, error) {
 		if removed.Load() {
-			return server.URL, Credential{}
+			return server.URL, Credential{}, nil
 		}
-		return server.URL, held
+		return server.URL, held, nil
 	})
 	if _, err := client.Agents(); err != nil || signed.Load() != 1 {
 		t.Fatalf("with the key: %v, %d signed registrations", err, signed.Load())

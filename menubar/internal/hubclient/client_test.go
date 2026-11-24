@@ -249,8 +249,9 @@ func TestARedirectIsAnErrorThatNeverEchoesLocationAndIsNeverFollowed(t *testing.
 		client := New(server.URL, "s3cret-s3cret-s3cret")
 		_, err := client.Agents()
 		server.Close()
-		if err == nil || err.Error() != "the switchboard answered with a redirect" || strings.Contains(err.Error(), "pwned") {
-			t.Fatalf("%d: got %v", status, err)
+		want := "the switchboard at " + strings.TrimPrefix(server.URL, "http://") + " answered with a redirect, which Landline does not follow"
+		if err == nil || err.Error() != want || strings.Contains(err.Error(), "pwned") {
+			t.Fatalf("%d: got %v, want %q", status, err, want)
 		}
 		if requests != 1 {
 			t.Fatalf("%d: %d requests, the redirect was followed or retried", status, requests)

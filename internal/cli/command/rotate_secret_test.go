@@ -105,7 +105,7 @@ printf '%s\n' "$@" > "$STUB_RECORD/args"
 cat "$STUB_CONFIG" > "$STUB_RECORD/config-at-start"
 if [ "$STUB_MODE" = fail ]; then echo "stub refuses to start"; exit 1; fi
 if [ "$STUB_MODE" != hang ]; then
-echo "landline-switchboard listening on stub"
+echo "landline-switchboard: listening on stub"
 fi
 if [ "$STUB_MODE" = stubborn ]; then trap '' TERM; sleep 5; exit 0; fi
 trap 'kill $!; exit 0' TERM

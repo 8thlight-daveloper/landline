@@ -105,7 +105,8 @@ func TestAHostileDialErrorReachesStandardErrorOnlyCleaned(t *testing.T) {
 	}))
 	defer server.Close()
 	code, out, errs := invoke(t, server.URL, "agents", "--json")
-	if code != 1 || out != "" || !strings.Contains(errs, "the switchboard answered with a redirect") {
+	want := "the switchboard at " + strings.TrimPrefix(server.URL, "http://") + " answered with a redirect, which Landline does not follow"
+	if code != 1 || out != "" || !strings.Contains(errs, want) {
 		t.Fatalf("code %d out %q err %q", code, out, errs)
 	}
 	if strings.Contains(errs, "evil") || strings.Contains(errs, "pwned") {
