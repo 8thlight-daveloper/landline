@@ -8,23 +8,32 @@ message. The types are in `internal/model/wire.go`.
 
 ## Authentication
 
-Unchanged. An agent route takes `Authorization: Bearer <agent token>`, the token from `POST /v1/register`. A switchboard
-route takes `Authorization: Bearer <switchboard secret>`.
+An agent route takes `Authorization: Bearer <agent token>`, the token from `POST /v1/register`. A switchboard route
+takes `Authorization: Bearer <switchboard secret>`. The four routes that open a session, `POST /v1/register`,
+`POST /v1/observers`, `GET /v1/log`, and `GET /v1/build`, also take a machine signature in place of the secret
+([0200](../decisions/0200-a-machine-joins-with-an-invite-code-and-a-keypair-that-outlasts-secret-rotation.md)). The
+machine routes take the secret and never a signature, except the redeem route, which takes no header. The section
+[Machines](#machines) has the header, the signed text, and the refusal.
 
 ## Routes
 
-| Route                             | Auth                     | Does                                                                                    |
-| --------------------------------- | ------------------------ | --------------------------------------------------------------------------------------- |
-| `POST /v1/register`               | secret                   | Registers an agent. It takes no delivery fields and carries the build values (below)    |
-| `POST /v1/observers`              | secret                   | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}`          |
-| `POST /v1/attach`                 | agent token              | Records claims and answers `project_peers`. A Codex proof sends its code as a challenge |
-| `POST /v1/status`                 | agent token              | Sets or clears the agent's task (below)                                                 |
-| `GET /v1/stream`                  | agent token              | Opens the delivery stream (below)                                                       |
-| `POST /v1/deliveries/{id}/report` | agent token              | The MCP process reports one delivery. Body is `DeliveryReport`                          |
-| `POST /v1/send`                   | agent token              | Sends to one recipient and waits for the delivery report                                |
-| `GET /v1/agents`                  | agent or observer token  | Lists agents, each with `connected`, and `task` and `task_at` when set                  |
-| `GET /v1/log`                     | secret                   | Reads the log. Each entry has `result`                                                  |
-| `GET /v1/build`                   | secret or observer token | Answers the switchboard's own build (below)                                             |
+| Route                             | Auth                                 | Does                                                                                    |
+| --------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------- |
+| `POST /v1/register`               | secret or signature                  | Registers an agent. It takes no delivery fields and carries the build values (below)    |
+| `POST /v1/observers`              | secret or signature                  | Registers an observer. Body is `{"kind": "tui"}`, answer is `{"token": "..."}`          |
+| `POST /v1/attach`                 | agent token                          | Records claims and answers `project_peers`. A Codex proof sends its code as a challenge |
+| `POST /v1/status`                 | agent token                          | Sets or clears the agent's task (below)                                                 |
+| `GET /v1/stream`                  | agent token                          | Opens the delivery stream (below)                                                       |
+| `POST /v1/deliveries/{id}/report` | agent token                          | The MCP process reports one delivery. Body is `DeliveryReport`                          |
+| `POST /v1/send`                   | agent token                          | Sends to one recipient and waits for the delivery report                                |
+| `GET /v1/agents`                  | agent or observer token              | Lists agents, each with `connected`, and `task` and `task_at` when set                  |
+| `GET /v1/log`                     | secret or signature                  | Reads the log. Each entry has `result`                                                  |
+| `GET /v1/build`                   | secret, signature, or observer token | Answers the switchboard's own build (below)                                             |
+| `POST /v1/machines`               | secret                               | Makes an invite code for a named machine (below)                                        |
+| `PATCH /v1/machines`              | none, the invite code is in the body | Redeems an invite code with the machine's public key (below)                            |
+| `GET /v1/machines`                | secret                               | Lists active machines (below)                                                           |
+| `DELETE /v1/machines/{name}`      | secret                               | Revokes one machine, pending or active, and ends its tokens and streams (below)         |
+| `DELETE /v1/machines`             | secret                               | Revokes every machine (below)                                                           |
 
 Removed: `GET /v1/inbox`, `GET /v1/wakes`, `POST /v1/wakes/{id}/ack`.
 
@@ -43,9 +52,10 @@ client that sends `name` or `label` fails loudly.
 
 ### Registering
 
-`POST /v1/register` takes the switchboard secret and a body with `harness`, `host`, `session`, the optional attributes
-(`folder`, `branch`, `worktree`, `harness_version`, `model`, `effort`, `project`, and the build values below), and
-exactly one of `id` and `seed`. Giving both or neither is `400`. It answers `{"id": "...", "token": "..."}`.
+`POST /v1/register` takes the switchboard secret or a machine signature and a body with `harness`, `host`, `session`,
+the optional attributes (`folder`, `branch`, `worktree`, `harness_version`, `model`, `effort`, `project`, and the build
+values below), and exactly one of `id` and `seed`. Giving both or neither is `400`. It answers
+`{"id": "...", "token": "..."}`.
 
 - A registration by `id` takes that id if it is valid: 1 to 32 lowercase letters, digits, `-`, or `_`, starting with a
   letter or digit, and not `all`. It replaces any earlier registration of that id, so the token changes and the task is
@@ -211,19 +221,20 @@ three.
 The switchboard enforces the field rules only. The shapes in the table come from the build, which no flag, environment
 variable, or `landline_register` argument can override.
 
-The switchboard keeps no state file. A switchboard restart forgets every agent and token, and each agent registers again
-and gets a new id. The switchboard does not issue an id that a present agent holds, including one in its grace, and a
-forgotten id may be issued again.
+The switchboard keeps no agent state on disk. Its only state file is `machines.json`, the list of joined machines
+([Machines](#machines)). A switchboard restart forgets every agent and token, and each agent registers again and gets a
+new id. The switchboard does not issue an id that a present agent holds, including one in its grace, and a forgotten id
+may be issued again.
 
 ## Observers
 
 [0090](../decisions/0090-observers-read-the-agent-list-and-the-tui-is-a-separate-binary.md) adds a client that is not an
 agent, such as a terminal viewer.
 
-- `POST /v1/observers` takes the switchboard secret and a body `{"kind": "tui"}`, and answers `200` with
-  `{"token": "<observer token>"}`. `kind` is required and follows the free-text rules of the registry: at most 64 bytes,
-  no control, line or paragraph separator, or format characters, and not empty after trimming white space. Otherwise the
-  switchboard answers `400`. A missing or wrong secret is `401`.
+- `POST /v1/observers` takes the switchboard secret or a machine signature and a body `{"kind": "tui"}`, and answers
+  `200` with `{"token": "<observer token>"}`. `kind` is required and follows the free-text rules of the registry: at
+  most 64 bytes, no control, line or paragraph separator, or format characters, and not empty after trimming white
+  space. Otherwise the switchboard answers `400`. A missing or wrong secret is `401`.
 - An observer is not an agent. It has no id and no stream, and it never appears in `GET /v1/agents`.
 - An observer token is read-only. `GET /v1/agents` answers it with the list an agent gets. Every other route, including
   the secret routes, refuses it with `403` and `{"error": "..."}` that says the token is read-only. An unknown token is
@@ -231,14 +242,15 @@ agent, such as a terminal viewer.
 - The switchboard holds observers in memory only. An observer is forgotten after 2 minutes (`--grace`) without a
   request, and the boundary is inclusive as for agents. Every request with its token, refused or not, resets that time.
   The switchboard checks this before every request, against its own clock, and the token then answers `401`. A
-  switchboard restart forgets every observer. A client registers again with the switchboard secret on a `401`.
+  switchboard restart forgets every observer. A client registers again with the switchboard secret or a machine
+  signature on a `401`.
 
 ## The build
 
 [0140](../decisions/0140-a-macos-menu-bar-item-shows-agents-runs-the-switchboard-and-sets-up-harnesses.md) adds a route
 that reports the build of the running switchboard.
 
-- `GET /v1/build` takes the switchboard secret or an observer token and answers `200` with
+- `GET /v1/build` takes the switchboard secret, a machine signature, or an observer token and answers `200` with
   `{"version": "0.2.0", "commit": "<40 hex>", "date": "<RFC 3339>"}`. The values are the ones
   [0100](../decisions/0100-a-build-names-itself-by-version-commit-and-date.md) stamps. A value the build lacks is an
   empty string, and an unstamped build answers `dev` as its version.
@@ -247,10 +259,115 @@ that reports the build of the running switchboard.
 
 ## Timing flags
 
-`landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, and `--grace`, each a Go
-duration such as `200ms`, for the 15 second keepalive, the 20 second report wait, and the 2 minute grace. A zero,
-negative, or unparsable value is refused. They exist so a test can run the timing rules fast. `LANDLINE_PORT` sets the
-default port, 8787, for a switchboard with no `--addr` and for a client with no saved switchboard.
+`landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, `--grace`,
+`--invite-lifetime`, and `--signature-window`, each a Go duration such as `200ms`, for the 15 second keepalive, the 20
+second report wait, the 2 minute grace, the 5 minute invite lifetime, and the 5 second signature window. A zero,
+negative, or unparsable value is refused, and so is a signature window below 1 second or above 5 seconds. The same
+settings live in the `[server]` table of `config.toml`, and a flag overrides the table for one run
+([0220](../decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md),
+[config-toml.md](config-toml.md)). They exist so a test can run the timing rules fast. `LANDLINE_PORT` sets the default
+port, 8787, for a switchboard with no `--addr` and for a client with no saved switchboard.
+
+## Machines
+
+[0200](../decisions/0200-a-machine-joins-with-an-invite-code-and-a-keypair-that-outlasts-secret-rotation.md) lets a
+machine join with an invite code and prove who it is with an Ed25519 key. The switchboard keeps only the public half. A
+machine is pending after an invite and active after its code is redeemed. A machine name is 1 to 32 lower case letters,
+digits, and hyphens, and starts with a letter.
+
+### Invite
+
+`POST /v1/machines` takes the secret and `{"name": "alpha"}`, and answers `200` with `{"name": "alpha", "code": "..."}`.
+The code is eight characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, single use, and valid for 5 minutes
+(`--invite-lifetime`). The switchboard keeps invites in memory, so a restart cancels them.
+
+- A name that breaks the rule is `400`. A name that a pending or active machine holds is `409`.
+- A machine signature on this route, or on any machine route below except the redeem, gets `401` with
+  `{"error": "missing or wrong switchboard secret"}`. An observer token gets `403`.
+
+### Redeem
+
+`PATCH /v1/machines` takes no `Authorization` header and the body `{"code": "...", "public_key": "<base64>"}`, where the
+key is the standard base64 of the 32 public key bytes. It answers `200` with `{"name": "alpha"}`, and the machine is
+active.
+
+- Every request that does not name a valid pending code gets `401` and `{"error": "invalid or expired invite code"}`,
+  whatever the reason: a missing, malformed, wrong, used, or expired code, or a body that is not JSON.
+- A valid code with a missing or malformed public key gets `400`. It does not use up the code.
+- After 5 failed redeems since the last good redeem or the last cancel, the switchboard cancels every waiting invite.
+
+### List and revoke
+
+`GET /v1/machines` takes the secret and answers `200` with a list of the active machines, never the pending ones:
+
+```json
+[{"name": "alpha", "fingerprint": "0123456789ab", "created": "2026-11-19"}]
+```
+
+`fingerprint` is the first 12 lower case hex characters of the SHA-256 of the 32 public key bytes, and `created` is the
+date the machine joined, in UTC. The answer never holds a key.
+
+`DELETE /v1/machines/{name}` takes the secret, deletes the pending or active machine of that exact name, and answers
+`200` with `{}`. It ends at once every agent token and observer token that registered through the machine, with their
+open streams. An unknown name is `404`. `DELETE /v1/machines` does the same for every machine, pending or active.
+
+### Signed requests
+
+A machine signs `POST /v1/register`, `POST /v1/observers`, `GET /v1/log`, and `GET /v1/build` with this header:
+
+```
+Authorization: Landline-Machine name=<name>, time=<unix seconds>, nonce=<base64>, signature=<base64>
+```
+
+The nonce is 16 random bytes in standard base64, new for each request. The signature is the standard base64 Ed25519
+signature of these lines, joined by line feeds:
+
+```
+landline-machine-v1
+<name>
+<time>
+<nonce>
+<HTTP method>
+<path with its query>
+<lower case hex SHA-256 of the body>
+```
+
+The switchboard accepts the request when the time is within the signature window of its own clock, the time is later
+than the start period, the machine is active, the signature verifies, and it has not seen the signature before. The
+window is 5 seconds by default and from 1 to 5 seconds. The start period is every time up to 5 seconds after the second
+the switchboard started, so the switchboard refuses every signed request for one window after it starts. A request that
+registers records which machine it came from, and a revoke of that machine ends its token.
+
+### Signed refusals
+
+Every `401` that answers a signed request carries `error` and `reason`:
+
+- A time outside the window gets `"reason": "clock"` and `"clock_difference": N`, the time in the request minus the
+  switchboard's time in signed whole seconds, positive when the machine's clock runs ahead. `error` names the
+  difference.
+- Every other refusal, including one in the start period and a header that cannot be read, gets `"reason": "refused"`
+  and one message, whichever check failed:
+
+```json
+{"error": "missing or wrong switchboard secret or machine signature", "reason": "refused"}
+```
+
+```json
+{"error": "the clock of this machine differs from the switchboard's by 12 seconds. Set the clock", "reason": "clock", "clock_difference": 12}
+```
+
+A client reads `reason` and `clock_difference` and never the text of `error`. It treats an unknown or missing `reason`,
+or `clock` without an integer `clock_difference`, as `refused`. On `refused` it retries about once a second, signing
+each retry anew, until 6 seconds have passed since the first refusal, and then gives the generic advice. It never
+retries `clock`.
+
+### `machines.json`
+
+The switchboard keeps the active machines in `~/.local/share/landline/machines.json`, whatever the log path
+([0220](../decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)).
+It writes the file with mode `0600` through a temporary file renamed over the old one, after each redeem and revoke, and
+reads it at start. The file is a JSON list. Each entry has `name`, `public_key` as the standard base64 of the 32 key
+bytes, and `created` as an RFC 3339 UTC time. It never holds an invite code or a seen signature.
 
 ## Reconnecting
 

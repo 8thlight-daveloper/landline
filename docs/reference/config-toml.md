@@ -21,7 +21,7 @@ keepalive = "15s"
 delivery-timeout = "20s"
 grace = "2m"
 invite-lifetime = "5m"
-signature-window = "60s"
+signature-window = "5s"
 ```
 
 ## Lines
@@ -71,7 +71,7 @@ leading `--` (0220).
 | `delivery-timeout` | Text. A positive duration                                 | `20s`                               |
 | `grace`            | Text. A positive duration                                 | `2m`                                |
 | `invite-lifetime`  | Text. A positive duration                                 | `5m`                                |
-| `signature-window` | Text. A positive duration                                 | `60s`                               |
+| `signature-window` | Text. A duration from 1 to 5 seconds (0200)               | `5s`                                |
 
 - The reader replaces a leading `~/` in `log` with the home directory (0220).
 - A missing table, or a table that omits a key, means the default for that key (0220).
@@ -88,6 +88,7 @@ Each of these is an error. The message names the file and the line number and ne
 - A known key with the wrong type, such as `port = "8787"` or `host = 5` (0190).
 - A `port` outside 1 to 65535.
 - A `log` that is neither absolute nor starts with `~/`, or a timing that is not a positive duration (0220).
+- A `signature-window` below 1 second or above 5 seconds (0200).
 - A second `[server]` heading, or a key given twice in `[server]` (0220).
 
 An error stops the program before it changes anything. `landline-switchboard`, `landline server up`, `restart`, and

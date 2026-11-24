@@ -324,6 +324,11 @@ machine, sends only the public half, and saves `machine.key` (mode `0600`) and `
 with no `secret` line. From then on the machine signs each request, so a secret rotation does not lock it out. A client
 uses `LANDLINE_SECRET` first, then `machine.key`, then the secret in the file.
 
+A signed request carries the time, and the switchboard accepts it only when the machine's clock agrees with its own
+within the signature window, 5 seconds at most. Keep time sync on for every machine. A clock that is off by more gets a
+message that names the difference. The switchboard refuses signed requests for the first 5 seconds after it starts, and
+a client retries through them on its own.
+
 `landline server machines` lists the machines, with a fingerprint of each key. `landline server revoke <name>` removes
 one and ends its agents. `invite`, `machines`, `revoke`, and `rotate-secret` refuse unless the saved host is this
 machine and always send the shared secret. A machine with no credential prints
@@ -384,7 +389,7 @@ keepalive = "15s"
 delivery-timeout = "20s"
 grace = "2m"
 invite-lifetime = "5m"
-signature-window = "60s"
+signature-window = "5s"
 ```
 
 A comment takes a whole line, and Landline keeps it when it saves the file. A flag overrides `[server]` for one run, and
@@ -417,9 +422,9 @@ reads and writes each key are in [docs/reference/config-toml.md](docs/reference/
 
 `landline-switchboard` and `landline server up` take `--keepalive`, `--delivery-timeout`, `--grace`,
 `--invite-lifetime`, and `--signature-window`, Go durations for the 15 second keepalive, the 20 second wait for a
-delivery report, the 2 minute grace, the 5 minute invite lifetime, and the 60 second signature window. A flag lasts one
-run. To keep a value, set it in the [`[server]` table](#files-and-settings) of `config.toml`. `LANDLINE_PORT` changes
-the default port, 8787, for the switchboard and its clients.
+delivery report, the 2 minute grace, the 5 minute invite lifetime, and the 5 second signature window, which may be set
+from 1 to 5 seconds. A flag lasts one run. To keep a value, set it in the [`[server]` table](#files-and-settings) of
+`config.toml`. `LANDLINE_PORT` changes the default port, 8787, for the switchboard and its clients.
 
 ## Not built yet
 

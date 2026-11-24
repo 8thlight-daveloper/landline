@@ -3,7 +3,7 @@ category: behavior
 status: accepted
 approval: person
 approver: {kind: person, name: dnawara}
-note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, and needs the person's approval.
+note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, and needs the person's approval. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says.
 affects: [cli/command, switchboard/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0110', '0140', '0170', '0190', '0200']
 partly-supersedes: ['0190', '0200']
@@ -72,7 +72,7 @@ keepalive = "15s"
 delivery-timeout = "20s"
 grace = "2m"
 invite-lifetime = "5m"
-signature-window = "60s"
+signature-window = "5s"
 ```
 
 - The keys are the flag names without the leading `--`: `log`, `keepalive`, `delivery-timeout`, `grace`,
@@ -81,6 +81,9 @@ signature-window = "60s"
   home directory. Any other value is an error.
 - The timing keys are strings in the duration form the flags take, such as `200ms`, `15s`, or `5m`, and must be
   positive. Any other value is an error.
+- `signature-window` is from 1 to 5 seconds, and 5 seconds by default, as
+  [0200](0200-a-machine-joins-with-an-invite-code-and-a-keypair-that-outlasts-secret-rotation.md) says. A value below 1
+  second or above 5 seconds is an error, in the table and in the flag.
 - A missing table, or a table that omits a key, means today's default for that key: the log at
   `~/.local/share/landline/log.jsonl` and the switchboard's default for each timing. Nothing writes the table. A person
   edits it.
@@ -164,6 +167,11 @@ are removed. No program reads the `listening on` line for a setting.
 `up` also waits for the text `listening on` in `switchboard.out` to learn that the switchboard listens. That is the same
 kind of dependency, and it is out of scope here. It needs its own record.
 
+`landline-switchboard` exits with status `3` when it cannot listen on its address, and with status `1` for every other
+failure to start. `up` gives the advice about the saved address when the switchboard exits with status `3`, and never
+decides it from the text in `switchboard.out`, by C1. The status is a format between programs, and a change to it needs
+a new record.
+
 ### The reader and writer of `config.toml`
 
 `config.toml` stays a stored format, and this record changes it. The hand-written reader of 0190, in each of its copies
@@ -208,8 +216,8 @@ record.
   that log. A rotation or a menu bar restart from the new build then starts on the table's log, finds no
   `machines.json`, and locks the machines out until the person starts the switchboard once with that `--log` or sets
   `log` in `[server]`. The old file is never changed, so nothing is lost.
-- A setting in `[server]` lasts across restarts, where a flag lasted one run. A wide `signature-window` stays wide until
-  a person edits the file.
+- A setting in `[server]` lasts across restarts, where a flag lasted one run. A `signature-window` stays as set until a
+  person edits the file, and 0200 bounds it at 5 seconds.
 - C1 cites this record.
 
 ## Alternatives considered

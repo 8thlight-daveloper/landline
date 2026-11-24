@@ -26,3 +26,14 @@ format is a contract, and a change to it needs a record. New or changed code fol
 before it is tracked and fixed in its own change, which does not block unrelated work.
 
 Records: 0220
+
+### C2. Clean text that came from outside before a person sees it
+
+A program never shows a person text it received from another program as it came. That covers text from the switchboard,
+a message another agent wrote, and anything read over the network. Before such text reaches a terminal, a menu, a
+notification, or a log a person reads, it passes through one shared cleaning step per module. That step removes control
+characters, among them the escape character that starts terminal sequences. A new command uses the shared step and never
+writes its own. Text that a program only stores or passes on, such as a message body the switchboard delivers, is kept
+as it came, and the program that shows it cleans it.
+
+Records: 0200

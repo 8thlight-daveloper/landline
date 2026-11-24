@@ -6,7 +6,7 @@ approver: {kind: person, name: dnawara}
 affects: [machine/registry, cli/command, switchboard/server, client/http, mcp/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0090', '0170', '0190']
 partly-superseded-by: ['0220']
-note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. Amended on 2026-11-23 again, so that a refusal carries a reason that clients read instead of its text. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. The second amendment of 2026-11-23 changes the wire format of four routes.
+note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. Amended on 2026-11-23 again, so that a refusal carries a reason that clients read instead of its text. Amended on 2026-11-24, so that the window is 5 seconds at most and the switchboard refuses signed requests for one window after it starts. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. The second amendment of 2026-11-23 changes the wire format of four routes. Amended on 2026-11-24 again, so that the menu bar shows a short line for no credential.
 ---
 
 # 0200. A machine joins with an invite code and a keypair that outlasts secret rotation
@@ -106,8 +106,18 @@ feeds: `landline-machine-v1`, the name, the time, the nonce, the HTTP method, th
 case hex SHA-256 of the body.
 
 The switchboard accepts a request when the time is within the signature window of its own clock, the time is later than
-the second in which the switchboard started, the machine is active, the signature verifies, and it has not seen that
-signature while it could still pass the window check. The window is 60 seconds.
+the start period below, the machine is active, the signature verifies, and it has not seen that signature while it could
+still pass the window check.
+
+The signature window is 5 seconds by default. A person may set it from 1 to 5 seconds, with `--signature-window` or the
+`signature-window` key of the `[server]` table
+([0220](0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)). A
+value below 1 second or above 5 seconds is an error that stops the switchboard before it listens. The switchboard counts
+the window in whole seconds.
+
+Clocks must agree within the window. The switchboard's machine and every joined machine need working time sync, such as
+the network time service that macOS and most Linux systems turn on by default. A machine whose clock differs from the
+switchboard's by more than the window gets the clock refusal below, which names the difference.
 
 The window check comes first and does not look at the name. A time outside the window gets `401` and a message that
 names the difference in seconds and tells the person to set the clock, whether or not the name belongs to a machine.
@@ -124,14 +134,29 @@ could pass the window check, because a time has whole seconds. A signature is th
 it could still be accepted. Two requests that differ only in their nonce are both accepted, and an exact copy of one is
 refused.
 
-The switchboard keeps the signatures it has seen in memory, and a restart empties them. A time equal to the second of
-the start is refused, because a request signed in that second could have been accepted by the old process just before it
-stopped, and the new process would not know it. The start rule therefore refuses every copy that the old process could
-have accepted. A legitimate request in the first second after a restart is refused once, and the client registers again
-on the `401` and retries, as `landline-mcp` and the screen do after a rotation. A machine whose clock runs `d` seconds
-behind the switchboard's, with `d` inside the window, is refused for about `d` seconds after every start, including the
-restart that `rotate-secret` makes. It gets the `401` and the message above, and its requests pass once the
-switchboard's clock is more than `d` seconds past the start. A clock that runs ahead is not refused by this rule.
+The switchboard keeps the signatures it has seen in memory, and a restart empties them. A copy of a request that the old
+process accepted would then pass the new one, which does not know it.
+
+**For one window after every start, the switchboard refuses every signed request.** It refuses a request whose time is
+not later than the second it started plus 5 seconds, the largest window, whatever window this run uses. This is the
+start period. The old process accepted a time at most one window past its own clock, its window was at most 5 seconds,
+and it stopped before the new process started. So every copy that the old process could have accepted has a time no
+later than the end of the start period, and is refused. That holds for a copy from a machine whose clock runs ahead, and
+for a copy accepted under a wider window before a person narrowed it. A time later than the start period is one the old
+process never accepted, and the memory of the new process covers it from then on.
+
+The rule reads the time in the request, and not the moment it arrives. A copy can arrive up to one window after the time
+it carries, so a rule on arrival alone would let a copy signed near the end of the period pass just after it.
+
+A machine whose clock agrees with the switchboard's is refused for about the first 5 seconds after every start,
+including the restart that `rotate-secret` makes. One whose clock runs `d` seconds behind, with `d` inside the window,
+is refused for about `5 + d` seconds, and one whose clock runs ahead for less. A refusal in the start period gets `401`,
+`"reason": "refused"`, and the generic message, like every refusal inside the window, so it does not tell a caller that
+the switchboard just started.
+
+The start period replaces the rule of the amendment of 2026-11-21, which refused only a time in the second the
+switchboard started. That rule is a start period of no length, and the start period refuses everything it refused, so it
+is removed. It let a copy from a machine whose clock runs ahead pass, as the alternatives below say.
 
 Every `401` that answers a request signed with a machine key carries a JSON body with the message in `error` and a field
 `reason`:
@@ -151,20 +176,23 @@ The two values reveal nothing the message does not already say. The clock messag
 who holds no credential learns nothing about which names exist.
 
 A client (the `landline` commands through `client/http`, `landline-mcp`, the screen, and the menu bar) decides from
-`reason` and `clock_difference` whether to make its one retry and whether to give the clock advice or the generic
-advice. It never compares the message text, by C1 in [coding-principles.md](../reference/coding-principles.md). A client
-that gets a `reason` it does not know, or no `reason`, as from a switchboard built before this amendment, treats the
-answer as `refused` and shows the message as given. So does a client that gets `clock` without an integer
-`clock_difference`.
+`reason` and `clock_difference` whether to retry and whether to give the clock advice or the generic advice. It never
+compares the message text, by C1 in [coding-principles.md](../reference/coding-principles.md). A client that gets a
+`reason` it does not know, or no `reason`, as from a switchboard built before this amendment, treats the answer as
+`refused` and shows the message as given. So does a client that gets `clock` without an integer `clock_difference`.
 
 This changes the wire format of `POST /v1/register`, `POST /v1/observers`, `GET /v1/log`, and `GET /v1/build`: the `401`
 body for a signed request gains `reason`, and `clock_difference` for a time outside the window. A change to either field
 needs a new record. [0230](0230-the-person-learns-why-a-signed-request-was-refused.md) proposed the same field, and this
 record now defines it.
 
-On an answer whose `reason` is `refused`, a client names the possible causes, among them a rotated secret, a revoked
-machine, and a clock that runs behind the switchboard's, and tells the person to join again only if the refusal persists
-after its one retry.
+On an answer whose `reason` is `refused`, a client retries the request about once a second, signing each retry anew,
+until 6 seconds have passed since the first refusal. That is the largest window plus one second. A client does not know
+the switchboard's window, so it waits out the largest, and a retry signed after that by a machine whose clock agrees
+with the switchboard's falls after the start period. A retry that succeeds shows the person nothing. When the last retry
+is refused, the client names the possible causes, among them a rotated secret, a revoked machine, and a clock that runs
+behind the switchboard's, and tells the person to join again if the refusal persists. A client never retries an answer
+whose `reason` is `clock`, and gives the clock advice at once.
 
 After a request registers, the agent or observer token works as it does today, and the switchboard records which machine
 it came from.
@@ -183,6 +211,11 @@ or reads follows it: the `landline` commands, `landline-mcp`, the screen, and th
 A client with no credential prints one message, whichever command it was running:
 `there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET`. A
 machine with a key has a credential.
+
+The menu bar is the exception. When it finds no credential, its state line reads `No switchboard credential`, and a menu
+action that fails while it has none shows that same line as its notice in place of the text the command printed. The
+menu bar decides this from its own reading of the credential order above, never from the text of a command's output, by
+C1. A notification with the full message belongs to [0230](0230-the-person-learns-why-a-signed-request-was-refused.md).
 
 ### Managing machines
 
@@ -211,8 +244,8 @@ request, through the `Now` function of its config, and passes the value in. Noth
 `time.Now`. The component's contract tests set the time exactly. `machines.json` is read and written by a driver.
 
 The switchboard takes two timing flags, like `--grace`: `--invite-lifetime D`, 5 minutes by default, and
-`--signature-window D`, 60 seconds by default. `landline server up`, `restart`, and `rotate-secret` pass them on. They
-let an acceptance test run the real binary with short times.
+`--signature-window D`, 5 seconds by default and from 1 to 5 seconds. `landline server up`, `restart`, and
+`rotate-secret` pass them on. They let an acceptance test run the real binary with short times.
 
 ### What crosses the network
 
@@ -234,7 +267,17 @@ and Landline is not used off a tailnet before it.
 - The domain model gains the types of the component, and `docs/architecture/components.md` names the component. The
   contracts and acceptance scenarios of these components change. A person authorizes those edits, and an agent does not
   make them. The README and the command table name the key file and the new commands.
-- `docs/reference/delivery-protocol.md` gains the `reason` and `clock_difference` fields.
+- `docs/reference/delivery-protocol.md` gains the machine routes, the signed header, the `reason` and `clock_difference`
+  fields, the start period, and `machines.json`.
+- The amendment of 2026-11-24 changes the signature check of `machine/registry`, the setting check of
+  `switchboard/server` and `cli/command`, and the retry of every client. Their contracts and acceptance scenarios
+  change, and a person authorizes those edits.
+- Every machine's clock must agree with the switchboard's within the window, 5 seconds at most, so every machine needs
+  working time sync. A clock that is off by more gets the clock message on every signed request until it is set.
+- A switchboard refuses the signed requests of a machine whose clock agrees with its own for about 5 seconds after every
+  start. A client covers that with its retries, so a person sees a refusal only when it lasts longer.
+- A `config.toml` that sets `signature-window` above 5 seconds, such as the `60s` that the documentation showed before
+  this amendment, stops the switchboard with an error until the person changes or removes the key.
 - `machine.key`, `machines.json`, and the `machine` key of `config.toml` are stored formats. A change to any of them
   needs a new record.
 - A machine that loses its key file or its config directory joins again with a new invite. Its old name needs a revoke
@@ -262,14 +305,25 @@ and Landline is not used off a tailnet before it.
   another machine's. The person picks the name at invite time.
 - **Put the name in the redeem route.** `PATCH /v1/machines/<name>` makes the person type or copy the name, and makes
   the route answer differently for a name with no pending machine. The code is the lookup key instead.
-- **Let a time in the start second pass.** A legitimate request in the first second after a restart would work at once.
-  A request that the old process accepted in that second could then be replayed against the new one, whose memory of
-  signatures is empty. A refused request costs one retry.
+- **Refuse only a time in the start second.** The amendment of 2026-11-21 did this, with a 60 second window. It covers a
+  machine whose clock agrees with the switchboard's. A machine whose clock runs ahead signs a time later than the next
+  start, and after a restart the memory of signatures is empty, so a copy of its request passed the new process. The
+  start period covers every time the old process could have accepted.
+- **Refuse by arrival for one window after the start.** A copy signed near the end of the period could arrive after it
+  and still pass the window check. A rule on the time in the request has no such gap.
+- **Save the seen signatures on every request.** It removes the cause: a new process would know every signature the old
+  one accepted, and needs no start period. It costs a disk write on every signed request. A later record may revisit it
+  with SQLite, as [the note on switchboard state](../future/switchboard-state-in-sqlite.md) says.
+- **Save the seen signatures at a clean stop, and wait out a window after a crash.** A clean restart would refuse
+  nothing. It adds a stored file with its own format and mode, and the switchboard must tell a clean stop from a crash.
+- **Keep the 60 second window and narrow the promise.** The record would say that a copy may pass soon after a restart.
+  That weakens the guarantee that a copy is never accepted twice, and a 60 second start period would close the
+  switchboard for a minute after every rotation.
 - **Answer an unknown name before the signature check.** It is cheaper, and the text of the answer is the same. The
   answer comes back in nanoseconds for an unknown name and in microseconds for a known one, so its time tells a caller
   which names exist.
 - **A clock that an outside caller can move.** A route or variable that moves time would defeat the window and the start
-  rule. The timing flags give a test short real times without it.
+  period. The timing flags give a test short real times without it.
 - **`join --via ssh`, which fetches the shared secret over ssh.** It needs ssh from the new machine, and the machine
   still holds a secret that a rotation kills.
 - **TLS on the switchboard's listener.** It would encrypt tokens and message bodies off a tailnet as well. It needs a
