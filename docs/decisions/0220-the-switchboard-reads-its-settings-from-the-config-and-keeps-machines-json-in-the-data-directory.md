@@ -3,7 +3,7 @@ category: behavior
 status: accepted
 approval: person
 approver: {kind: person, name: dnawara}
-note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, which the person approved. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says. Amended on 2026-11-24 again after the fifth review, so that one machine runs one switchboard under a lock file, a log path cannot name the machines file, files are compared by identity, and every other start failure exits `1`. The second amendment of 2026-11-24 adds a stored file, and the person approved it on 2026-11-24. Amended on 2026-11-24 a third time, so that a command line the switchboard cannot parse exits `2`. The person approved the third amendment of 2026-11-24 on 2026-11-24.
+note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, which the person approved. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says. Amended on 2026-11-24 again after the fifth review, so that one machine runs one switchboard under a lock file, a log path cannot name the machines file, files are compared by identity, and every other start failure exits `1`. The second amendment of 2026-11-24 adds a stored file, and the person approved it on 2026-11-24. Amended on 2026-11-24 a third time, so that a command line the switchboard cannot parse exits `2`. The person approved the third amendment of 2026-11-24 on 2026-11-24. Amended on 2026-11-24 a fourth time after the sixth review, so that `up` reads only a line that begins with the switchboard's prefix, a value a person chose is printed on one line, and the log-path rule covers a machines file not yet made and the old one. The person approved it on 2026-11-24.
 affects: [cli/command, switchboard/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0110', '0140', '0170', '0190', '0200']
 partly-supersedes: ['0190', '0200']
@@ -146,7 +146,9 @@ that one accepted could pass the other.
 
 A log path that names the same file as `machines.json` or the lock file stops the start with exit `1` and a message that
 names both. The switchboard compares files with the file system's identity, so a symbolic link or a second path to the
-same file counts as the same file.
+same file counts as the same file. The rule covers a `machines.json` that does not exist yet, compared by the folder it
+would be made in and its name, and the old `machines.json` next to a custom log, which carry-over reads and never
+changes.
 
 ### Carrying over an old `machines.json`
 
@@ -181,7 +183,10 @@ path, so a rotation keeps every joined machine whatever log the old switchboard 
 are removed. No program reads the `listening on` line for a setting.
 
 `up` also waits for the text `listening on` in `switchboard.out` to learn that the switchboard listens. That is the same
-kind of dependency, and it is out of scope here. It needs its own record.
+kind of dependency, and it is out of scope here. It needs its own record. Until then, `up` accepts only a line that
+begins with `landline-switchboard: listening on `, and the switchboard prints every value a person chose, such as a
+label or a path, on one line, through its cleaning step. A value can sit inside a line and never begins one, so a label
+that holds the words `listening on` cannot make `up` report a switchboard that never listened.
 
 `landline-switchboard` exits with status `3` when it cannot listen on its address, and with status `1` for every other
 failure to start, among them a setting it cannot read from a flag, the table, or the environment. A command line it
