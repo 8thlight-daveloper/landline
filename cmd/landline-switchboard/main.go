@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -94,24 +95,22 @@ func run(args []string) int {
 	if notice != "" {
 		say(notice)
 	}
-	made, err := server.EnsureMachinesFile(machinesPath)
-	if err != nil {
-		say(err)
-		return 1
-	}
-	if err := server.CheckLogIsItsOwnFile(logPath, machinesPath, lockPath); err != nil {
-		if made {
-			os.Remove(machinesPath)
-		}
-		say(err)
-		return 1
-	}
+	_, machinesErr := os.Lstat(machinesPath)
+	machinesWereAbsent := errors.Is(machinesErr, os.ErrNotExist)
 	log, err := store.Open(logPath)
 	if err != nil {
 		say(err)
 		return 1
 	}
 	defer log.Close()
+	if err := server.CheckLogIsItsOwnFile(logPath, machinesPath, lockPath); err != nil {
+		log.Close()
+		if machinesWereAbsent {
+			os.Remove(machinesPath)
+		}
+		say(err)
+		return 1
+	}
 	secret := os.Getenv("LANDLINE_SECRET")
 	if secret == "" {
 		secret = saved.Secret

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -135,19 +136,25 @@ func saysItListens(output string) bool {
 	})
 }
 
+const switchboardLockName = "switchboard.lock"
+
 func pidFile(dataDir string) string { return filepath.Join(dataDir, "switchboard.pid") }
 
 func switchboardPID(dataDir string) (int, bool) {
-	raw, err := os.ReadFile(pidFile(dataDir))
+	lock, err := os.Open(filepath.Join(dataDir, switchboardLockName))
 	if err != nil {
 		return 0, false
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || pid <= 0 || syscall.Kill(pid, 0) != nil {
+	defer lock.Close()
+	if syscall.Flock(int(lock.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) == nil {
 		return 0, false
 	}
-	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil || !strings.Contains(string(out), SwitchboardBinaryName) {
+	raw, err := io.ReadAll(lock)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(string(raw))
+	if err != nil || pid <= 0 {
 		return 0, false
 	}
 	return pid, true
@@ -260,6 +267,7 @@ func serverUp(args []string, env Env, dataDir string) int {
 		default:
 		}
 		if time.Now().After(deadline) {
+			stopSilentChild(child.Process, exited)
 			return upFailed(env, dataDir, outPath, false)
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -273,6 +281,16 @@ func upListening(env Env, address Config, pid int, addr, outPath string) int {
 	}
 	fmt.Fprintf(env.Stdout, "the switchboard is running (pid %d) at http://%s. Its output is in %s\n", pid, addr, outPath)
 	return 0
+}
+
+func stopSilentChild(process *os.Process, exited <-chan struct{}) {
+	process.Signal(syscall.SIGTERM)
+	select {
+	case <-exited:
+	case <-time.After(3 * time.Second):
+		process.Kill()
+		<-exited
+	}
 }
 
 func upFailed(env Env, dataDir, outPath string, savedAddressTaken bool) int {

@@ -99,32 +99,22 @@ func CarryOverMachines(current, former string) (string, error) {
 	if sameFile(current, former) {
 		return "", nil
 	}
-	if _, err := os.Stat(former); errors.Is(err, os.ErrNotExist) {
+	_, currentErr := os.Stat(current)
+	_, formerErr := os.Stat(former)
+	switch {
+	case errors.Is(formerErr, os.ErrNotExist):
 		return "", nil
-	}
-	held, err := readMachines(current)
-	if err != nil {
-		return "", err
-	}
-	if len(held) > 0 {
+	case !errors.Is(currentErr, os.ErrNotExist):
 		return fmt.Sprintf("%s is no longer read, because the switchboard reads %s. You may delete %s", former, current, former), nil
 	}
 	machines, err := readMachines(former)
 	if err != nil {
 		return "", err
 	}
-	if len(machines) == 0 && fileExists(current) {
-		return "", nil
-	}
 	if err := writeMachines(current, machines); err != nil {
 		return "", fmt.Errorf("the machines of %s could not be copied to %s: %v", former, current, err)
 	}
 	return fmt.Sprintf("copied the machines of %s to %s, and now reads %s. %s is left as it was", former, current, current, former), nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func sameFile(one, other string) bool {
@@ -143,16 +133,6 @@ func sameIdentity(one, other string) bool {
 	oneInfo, oneErr := os.Stat(one)
 	otherInfo, otherErr := os.Stat(other)
 	return oneErr == nil && otherErr == nil && os.SameFile(oneInfo, otherInfo)
-}
-
-func EnsureMachinesFile(path string) (bool, error) {
-	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-		return false, err
-	}
-	if err := writeMachines(path, nil); err != nil {
-		return false, fmt.Errorf("%s could not be made: %v", path, err)
-	}
-	return true, nil
 }
 
 func CheckLogIsItsOwnFile(logPath string, kept ...string) error {
@@ -178,7 +158,19 @@ func LockDataDirectory(path string) (DataDirectoryLock, error) {
 		file.Close()
 		return DataDirectoryLock{}, fmt.Errorf("another switchboard is running on this machine, because it holds %s", path)
 	}
+	if err := writeProcessID(file); err != nil {
+		file.Close()
+		return DataDirectoryLock{}, fmt.Errorf("%s cannot hold the process id: %v", path, err)
+	}
 	return DataDirectoryLock{file}, nil
+}
+
+func writeProcessID(file *os.File) error {
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	_, err := file.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
+	return err
 }
 
 func (lock DataDirectoryLock) Release() { lock.file.Close() }

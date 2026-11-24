@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -475,9 +476,26 @@ func SwitchboardLockPath(env Env) string {
 	return filepath.Join(dataDirectory(env), "switchboard.lock")
 }
 
+func switchboardHomeSigns(env Env) []string {
+	signs := []string{SwitchboardLockPath(env), pidFile(dataDirectory(env)), DefaultLogPath(env)}
+	if agent, err := PlanServiceInstall(runtime.GOOS, env.Home, "", "", 0); err == nil {
+		signs = append(signs, agent.Path)
+	}
+	return signs
+}
+
+func switchboardHomeRefusal(env Env) error {
+	for _, sign := range switchboardHomeSigns(env) {
+		if _, err := os.Lstat(sign); err == nil {
+			return fmt.Errorf("this home runs a switchboard, because %s exists, and it uses the shared secret in %s. To move the switchboard to another host, stop it, remove the agent that landline server install made, and delete %s, then join", printableLine(sign), printableLine(configPath(env)), printableLine(strings.Join(switchboardHomeSigns(env), ", ")))
+		}
+	}
+	return nil
+}
+
 func joinWithCode(env Env, host string, port int, code string) error {
-	if _, err := os.Lstat(SwitchboardLockPath(env)); err == nil {
-		return fmt.Errorf("this home runs a switchboard, because %s exists, and it uses the shared secret in %s. To move the switchboard to another host, stop it and delete %s, then join", SwitchboardLockPath(env), configPath(env), SwitchboardLockPath(env))
+	if err := switchboardHomeRefusal(env); err != nil {
+		return err
 	}
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	restore, err := snapshotJoinFiles(env)
@@ -498,6 +516,9 @@ func joinWithCode(env Env, host string, port int, code string) error {
 	}
 	if !machineNamePattern.MatchString(name) {
 		return fmt.Errorf("the switchboard answered with a machine name %q that is not allowed. Nothing was saved", name)
+	}
+	if err := switchboardHomeRefusal(env); err != nil {
+		return fmt.Errorf("%w. Nothing was saved, and the new machine %s stays on the switchboard at %s until you run landline server revoke %s there", err, name, address, name)
 	}
 	if changed, err := saveJoin(env, private, host, port, name); err != nil {
 		if restoreErr := restore(changed); restoreErr != nil {
