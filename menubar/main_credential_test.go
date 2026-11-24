@@ -11,6 +11,8 @@ import (
 	"testing"
 )
 
+const noCredentialLine = "No switchboard credential"
+
 const noCredentialMessage = "there is no switchboard credential. Run landline server join <host:port> --code <code>, or set LANDLINE_SECRET"
 
 func writeConfigWithoutSecret(t *testing.T, home, address, extraLines string) {
@@ -65,7 +67,7 @@ func TestTheMenuNamesTheKeyFileWhenItsFirstLineIsNotAMachineKeyAndDoesNotCallThe
 	}
 }
 
-func TestTheMenuShowsTheOneNoCredentialMessageWhenThereIsNoSecretAndNoKey(t *testing.T) {
+func TestTheMenuShowsTheShortNoCredentialStateLineWhenThereIsNoSecretAndNoKey(t *testing.T) {
 	home := homeOnlyFromConfig(t)
 	var seen seenAuthorizations
 	server := newSwitchboardAnswering(t, &seen, func(*http.Request) bool { return true })
@@ -74,7 +76,13 @@ func TestTheMenuShowsTheOneNoCredentialMessageWhenThereIsNoSecretAndNoKey(t *tes
 	var out, errs bytes.Buffer
 	run([]string{"menu", "--text"}, &out, &errs)
 
-	if menu := out.String() + errs.String(); !strings.Contains(menu, noCredentialMessage) {
-		t.Errorf("the menu does not show the message for no credential, %q:\n%s", noCredentialMessage, menu)
+	menu := out.String() + errs.String()
+	if !strings.Contains(menu, "\n"+noCredentialLine+" (disabled)\n") {
+		t.Errorf("the state line is not %q:\n%s", noCredentialLine, menu)
+	}
+	for _, wrong := range []string{noCredentialMessage, "Switchboard unreachable"} {
+		if strings.Contains(menu, wrong) {
+			t.Errorf("the menu shows %q, want only the short line %q:\n%s", wrong, noCredentialLine, menu)
+		}
 	}
 }

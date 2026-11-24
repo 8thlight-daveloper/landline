@@ -118,10 +118,6 @@ None. It reads no clock, random source, file, or environment. It **returns a cha
 | `Revoke` and `RevokeAll` leave the failure count alone, because a revoke is not a redeem                                                                                                | cheap    |
 | The code takes each random byte modulo 31, which favors a few characters very slightly                                                                                                  | cheap    |
 
-## Open questions
-
-None.
-
 ## Properties
 
 - **No memory.** The same call gives the same result whatever calls came before.

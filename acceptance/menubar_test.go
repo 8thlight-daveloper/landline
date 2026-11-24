@@ -453,14 +453,17 @@ func TestMenuTextTreatsEveryFailureToGetTheAgentListAsTheUnreachableState(t *tes
 	}
 }
 
-func TestMenuTextWithNoSecretAtAllIsTheUnreachableState(t *testing.T) {
+const noCredentialLine = "No switchboard credential"
+
+func TestMenuTextWithNoSecretAndNoKeyShowsTheShortNoCredentialStateLine(t *testing.T) {
 	t.Parallel()
 	fake := newFakeSwitchboard(t, "127.0.0.1", []map[string]any{fakeAgent("alpha", true, nil)}, 200, fakeBuild(menubarVersion, "", ""))
 	rig := newMenubarRig(t, defaultFlags(t), fake.url, landlineNextToBinary)
 	rig.env = withEnv(rig.env, "LANDLINE_SECRET=")
 	result := rig.run(t, "menu", "--text")
-	if result.code != 0 || result.stderr != "" || result.stdout != unreachableMenu(t, fake.url) {
-		t.Errorf("%+v\nwant:\n%s", result, unreachableMenu(t, fake.url))
+	want := expectedMenu("jack dimmed", []string{noCredentialLine + disabledMark}, localSwitchboard(fake.url, false, "Switchboard (build unknown)"), menubarBuildLine(releaseVersion(t), ""))
+	if result.code != 0 || result.stderr != "" || result.stdout != want {
+		t.Errorf("%+v\nwant:\n%s", result, want)
 	}
 }
 
