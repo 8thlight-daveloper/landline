@@ -23,3 +23,7 @@ never belongs in this list.
   it exits `1` and leaves the switchboard it started running. Nothing is lost: `config.json` stays, and the switchboard
   reads it. This predates
   [0200](../decisions/0200-a-machine-joins-with-an-invite-code-and-a-keypair-that-outlasts-secret-rotation.md).
+- **A revoke and a re-join under the same name inside one signed request.** `switchboard/server` checks, after it
+  verifies a signature, that the active key for the name is still the key that verified. Only a unit test of the
+  component pins it, and a rebuild deletes unit tests. The window is microseconds between two lock sections, and no test
+  from outside drives it reliably.

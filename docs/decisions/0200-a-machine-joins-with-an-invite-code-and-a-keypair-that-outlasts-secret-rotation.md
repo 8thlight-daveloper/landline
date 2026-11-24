@@ -6,7 +6,7 @@ approver: {kind: person, name: dnawara}
 affects: [machine/registry, cli/command, switchboard/server, client/http, mcp/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0090', '0170', '0190']
 partly-superseded-by: ['0220']
-note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. Amended on 2026-11-23 again, so that a refusal carries a reason that clients read instead of its text. Amended on 2026-11-24, so that the window is 5 seconds at most and the switchboard refuses signed requests for one window after it starts. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. The second amendment of 2026-11-23 changes the wire format of four routes. Amended on 2026-11-24 again, so that the menu bar shows a short line for no credential. Amended on 2026-11-24 a third time after the fifth review, so that a client never follows a redirect, the start is the moment the switchboard listens, and a request's time is read under the lock. The person approved the third amendment of 2026-11-24 on 2026-11-24. Amended on 2026-11-24 a fourth time after the sixth review, so that `join --code` refuses in a home that has run a switchboard and every client uses the same redirect text. The person approved it on 2026-11-24. Amended on 2026-11-24 a fifth time after the seventh review, so that `up` refuses in a home that joined with a key. The person approved it on 2026-11-24. Amended on 2026-11-24 a sixth time after the eighth review, so that `install` and the switchboard itself refuse in a joined home, as the fifth amendment intended. The person approved it on 2026-11-24.
+note: Drafted on 2026-11-19 and amended the same day after the acceptance review. Amended on 2026-11-21 after the third review, so that a time in the start second is refused and an unknown name costs the same Ed25519 verify as a known one. Amended on 2026-11-23, so that a client names the possible causes of the generic refusal. Amended on 2026-11-23 again, so that a refusal carries a reason that clients read instead of its text. Amended on 2026-11-24, so that the window is 5 seconds at most and the switchboard refuses signed requests for one window after it starts. It adds a credential kind, a stored format on both machines, a route that takes no secret, and a core component. The second amendment of 2026-11-23 changes the wire format of four routes. Amended on 2026-11-24 again, so that the menu bar shows a short line for no credential. Amended on 2026-11-24 a third time after the fifth review, so that a client never follows a redirect, the start is the moment the switchboard listens, and a request's time is read under the lock. The person approved the third amendment of 2026-11-24 on 2026-11-24. Amended on 2026-11-24 a fourth time after the sixth review, so that `join --code` refuses in a home that has run a switchboard and every client uses the same redirect text. The person approved it on 2026-11-24. Amended on 2026-11-24 a fifth time after the seventh review, so that `up` refuses in a home that joined with a key. The person approved it on 2026-11-24. Amended on 2026-11-24 a sixth time after the eighth review, so that `install` and the switchboard itself refuse in a joined home, as the fifth amendment intended. The person approved it on 2026-11-24. Amended on 2026-11-24 a seventh time after the ninth review, so that `join --code` reads more signs of a switchboard home and checks again before it saves, and only the four signed routes carry `reason`. The person approved it on 2026-11-24.
 ---
 
 # 0200. A machine joins with an invite code and a keypair that outlasts secret rotation
@@ -61,13 +61,17 @@ them gets `401` or `403`. `GET /v1/machines` lists active machines only.
    public key, and saves the key, the address, and `machine = "<name>"` from the reply when the switchboard accepts. It
    removes the `secret` line from `config.toml`, so that the machine holds one credential. A join that fails changes no
    file, and a working key and `config.toml` stay as they were.
-1. `join --code` refuses, exits `1`, and changes nothing while `~/.local/share/landline/switchboard.lock` exists, which
-   means a switchboard has run under this home, whether or not it runs now. The switchboard reads its secret from this
-   home's `config.toml`, so a join here would remove that secret line, and the next `up` would make a new secret and cut
-   off every machine that uses the old one. The decision rests on the home and not on the address: another account or a
-   container on the same machine has its own home and may join. The message says that this home runs a switchboard and
-   uses the shared secret, and that a person who is moving the switchboard to another host stops it and deletes
-   `switchboard.lock` before joining.
+1. `join --code` refuses, exits `1`, and changes nothing while this home shows that a switchboard has run or is set to
+   run here, whether or not it runs now: any of `switchboard.lock`, `switchboard.pid`, or `log.jsonl` in
+   `~/.local/share/landline/`, or the launchd agent or systemd unit that `server install` writes. A build from before
+   this rule made no lock file, so the lock alone would miss a home it ran in. `join` checks before it sends the code,
+   and again after the switchboard accepts and before it changes any file, so a switchboard that starts while the
+   request is in flight is caught too. The switchboard reads its secret from this home's `config.toml`, so a join here
+   would remove that secret line, and the next `up` would make a new secret and cut off every machine that uses the old
+   one. The decision rests on the home and not on the address: another account or a container on the same machine has
+   its own home and may join. The message says that this home runs a switchboard and uses the shared secret, names the
+   file it found, and says that a person who is moving the switchboard to another host stops it, removes the agent, and
+   deletes those files before joining.
 1. `landline server up` refuses, exits `1`, and changes nothing while `~/.config/landline/machine.key` exists, which
    means this home joined a switchboard. The key comes first in the credential order, so a switchboard started here
    would refuse every client in this home, and `up` would overwrite the address of the switchboard the home joined. The
@@ -180,8 +184,8 @@ The start period replaces the rule of the amendment of 2026-11-21, which refused
 switchboard started. That rule is a start period of no length, and the start period refuses everything it refused, so it
 is removed. It let a copy from a machine whose clock runs ahead pass, as the alternatives below say.
 
-Every `401` that answers a request signed with a machine key carries a JSON body with the message in `error` and a field
-`reason`:
+Every `401` that answers a request signed with a machine key on one of the four routes that take a signature carries a
+JSON body with the message in `error` and a field `reason`:
 
 - A time outside the window gets `"reason": "clock"` and `"clock_difference": N`, besides the message that names the
   difference. `N` is the time in the request minus the switchboard's time, in signed whole seconds, so it is positive

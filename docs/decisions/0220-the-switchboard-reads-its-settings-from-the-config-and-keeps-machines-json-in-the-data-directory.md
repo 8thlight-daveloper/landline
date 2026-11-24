@@ -3,7 +3,7 @@ category: behavior
 status: accepted
 approval: person
 approver: {kind: person, name: dnawara}
-note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, which the person approved. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says. Amended on 2026-11-24 again after the fifth review, so that one machine runs one switchboard under a lock file, a log path cannot name the machines file, files are compared by identity, and every other start failure exits `1`. The second amendment of 2026-11-24 adds a stored file, and the person approved it on 2026-11-24. Amended on 2026-11-24 a third time, so that a command line the switchboard cannot parse exits `2`. The person approved the third amendment of 2026-11-24 on 2026-11-24. Amended on 2026-11-24 a fourth time after the sixth review, so that `up` reads only a line that begins with the switchboard's prefix, a value a person chose is printed on one line, and the log-path rule covers a machines file not yet made and the old one. The person approved it on 2026-11-24. Amended on 2026-11-24 a fifth time after the eighth review, so that an empty `machines.json` at the new path does not hide machines in the old one, and no line advises deleting an old file that holds machines. The person approved it on 2026-11-24.
+note: Drafted on 2026-11-23 from the person's choice of settings in config.toml over a file of the last run's flags. It adds a table to config.toml and moves machines.json, two stored formats, which the person approved. Amended on 2026-11-24, so that `signature-window` is 5 seconds by default and from 1 to 5 seconds, as 0200 says. Amended on 2026-11-24 again after the fifth review, so that one machine runs one switchboard under a lock file, a log path cannot name the machines file, files are compared by identity, and every other start failure exits `1`. The second amendment of 2026-11-24 adds a stored file, and the person approved it on 2026-11-24. Amended on 2026-11-24 a third time, so that a command line the switchboard cannot parse exits `2`. The person approved the third amendment of 2026-11-24 on 2026-11-24. Amended on 2026-11-24 a fourth time after the sixth review, so that `up` reads only a line that begins with the switchboard's prefix, a value a person chose is printed on one line, and the log-path rule covers a machines file not yet made and the old one. The person approved it on 2026-11-24. Amended on 2026-11-24 a fifth time after the eighth review, so that an empty `machines.json` at the new path does not hide machines in the old one, and no line advises deleting an old file that holds machines. The person approved it on 2026-11-24. Amended on 2026-11-24 a sixth time after the ninth review, which reverts the fifth, so that an empty list again means no machine is joined, because the switchboard no longer makes `machines.json` before it opens the log, and `switchboard.lock` holds the switchboard's process id. The person approved it on 2026-11-24.
 affects: [cli/command, switchboard/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0110', '0140', '0170', '0190', '0200']
 partly-supersedes: ['0190', '0200']
@@ -138,26 +138,28 @@ this path.
 ### One switchboard for each data directory
 
 **One machine runs one switchboard.** Before it reads `machines.json`, the switchboard takes an exclusive lock on
-`~/.local/share/landline/switchboard.lock`, a file it creates with mode `0600` and never deletes. It holds the lock
-until it exits, and the system releases it then, also after a crash. When another process holds the lock, the
-switchboard exits `1` with a message that names the lock file and says another switchboard is running on this machine.
-Two switchboards that shared `machines.json` would each erase the other's joins at their next save, and a signed request
-that one accepted could pass the other.
+`~/.local/share/landline/switchboard.lock`, a file it creates with mode `0600` and never deletes. While it holds the
+lock, the file holds its process id in decimal and nothing else. `rotate-secret` and every other command that stops the
+switchboard find it by that id, and trust the id only while the lock is held. They never decide from a process list or
+its text, by C1. It holds the lock until it exits, and the system releases it then, also after a crash. When another
+process holds the lock, the switchboard exits `1` with a message that names the lock file and says another switchboard
+is running on this machine. Two switchboards that shared `machines.json` would each erase the other's joins at their
+next save, and a signed request that one accepted could pass the other.
 
 A log path that names the same file as `machines.json` or the lock file stops the start with exit `1` and a message that
 names both. The switchboard compares files with the file system's identity, so a symbolic link or a second path to the
-same file counts as the same file. The rule covers a `machines.json` that does not exist yet, compared by the folder it
-would be made in and its name, and the old `machines.json` next to a custom log, which carry-over reads and never
-changes.
+same file counts as the same file. The rule covers the old `machines.json` next to a custom log, which carry-over reads
+and never changes. It also covers a `machines.json` that does not exist yet: the switchboard opens the log, and when
+`machines.json` did not exist before and now is the same file as the log, it removes that empty file and stops with the
+same message.
 
 ### Carrying over an old `machines.json`
 
 A switchboard that ran with a custom log before this change has its machines in a `machines.json` next to that log. When
 the switchboard starts, it applies this rule before it listens:
 
-1. When `~/.local/share/landline/machines.json` exists and holds at least one machine, the switchboard reads it, and no
-   other. A file there that holds an empty list counts as absent for this rule, because the switchboard makes one at
-   start before it opens the log.
+1. When `~/.local/share/landline/machines.json` exists, the switchboard reads it, and no other. An empty list there
+   means that no machine is joined, as after `revoke --all`.
 1. When it does not exist and a `machines.json` exists in the folder of the log path in use for this run, from the flag,
    the table, or the default, the switchboard reads that file and writes its entries to
    `~/.local/share/landline/machines.json`. It prints one line that names both files and says that it now reads the new
@@ -168,8 +170,6 @@ the switchboard starts, it applies this rule before it listens:
 
 The old file and the new one are the same file when the file system says so, as when the log's folder is a symbolic link
 to the data directory. Then there is nothing to carry over, and the switchboard prints no line about an old file.
-
-The switchboard never advises deleting an old file that holds machines while the new one holds none.
 
 When both files exist and are not the same file, the new one wins, and the switchboard prints at each start one line
 that names the old file, says that it is no longer read, and says that a person may delete it. A person who used two
