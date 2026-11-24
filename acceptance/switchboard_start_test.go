@@ -2,9 +2,12 @@ package acceptance
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func (c *configuredHome) dataDir() string { return filepath.Dir(c.dataFile("machines.json")) }
@@ -324,10 +327,13 @@ func TestALogThatIsADanglingLinkOrACaseVariantOfTheFutureMachinesFileStopsTheSta
 			if result.code != 1 || !strings.Contains(result.stderr, logPath) || !strings.Contains(result.stderr, "machines.json") {
 				t.Errorf("--log %s: %d %q, want 1 and a message that names the log and machines.json", logPath, result.code, result.stderr)
 			}
-			if exists(c.dataFile("machines.json")) && readFileOrFail(t, c.dataFile("machines.json")) == "" {
-				t.Errorf("the refused start left an empty machines.json")
+			if exists(c.dataFile("machines.json")) {
+				t.Errorf("the refused start left machines.json: %q", readFileOrFail(t, c.dataFile("machines.json")))
 			}
 			c.startSwitchboard()
+			if exists(c.dataFile("machines.json")) {
+				t.Errorf("a start with no joined machine made machines.json: %q", readFileOrFail(t, c.dataFile("machines.json")))
+			}
 		})
 	}
 }
@@ -369,11 +375,64 @@ func TestAStartWithTheDefaultLogThenACustomLogCarriesOverTheOldMachinesAndNeverA
 	checkCarriedOverWithNoDeleteAdvice(t, c, p.stderr.String(), old)
 }
 
-func TestANewMachinesFileHoldingAnEmptyListCountsAsAbsentForCarryOver(t *testing.T) {
+func TestANewMachinesFileHoldingAnEmptyListMeansNoMachineIsJoinedAndTheOldFileIsNotRead(t *testing.T) {
 	t.Parallel()
 	c := newConfiguredHome(t, "")
 	c.writeDataFile("machines.json", "[]\n")
 	old, logPath := c.oldMachinesBesideACustomLog()
-	p := c.startSwitchboard("--log", logPath)
-	checkCarriedOverWithNoDeleteAdvice(t, c, p.stderr.String(), old)
+	c.startSwitchboard("--log", logPath)
+	if names := machineNames(t, c.dataFile("machines.json")); len(names) != 0 {
+		t.Errorf("the new machines.json held an empty list and now holds %v from the old file", names)
+	}
+	if readFileOrFail(t, old) != oneOldMachine {
+		t.Errorf("the old machines.json changed")
+	}
+}
+
+func TestARestartAfterRevokeAllWithTheSameCustomLogDoesNotRestoreTheOldMachines(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	_, logPath := c.oldMachinesBesideACustomLog()
+	first := c.startSwitchboard("--log", logPath)
+	if names := machineNames(t, c.dataFile("machines.json")); len(names) != 1 {
+		t.Fatalf("the first start did not carry over the old machine: %v", names)
+	}
+	c.mustLandline("server", "revoke", "--all")
+	if names := machineNames(t, c.dataFile("machines.json")); len(names) != 0 {
+		t.Fatalf("revoke --all left %v", names)
+	}
+	first.stop()
+	c.startSwitchboard("--log", logPath)
+	if names := machineNames(t, c.dataFile("machines.json")); len(names) != 0 {
+		t.Errorf("a restart with the same custom log brought back %v after revoke --all", names)
+	}
+}
+
+func TestTheLockFileHoldsTheRunningSwitchboardsProcessIDAndNothingElse(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	c.mustLandline("server", "up")
+	pid := strings.TrimSpace(readFileOrFail(t, c.dataFile("switchboard.pid")))
+	if got := readFileOrFail(t, c.dataFile("switchboard.lock")); got != pid {
+		t.Errorf("switchboard.lock holds %q, want the process id %s in decimal and nothing else", got, pid)
+	}
+}
+
+func TestRotateSecretNeverSignalsAProcessNamedByAStalePidFileWhoseCommandLineMentionsTheSwitchboard(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	stranger := exec.Command("sh", "-c", "sleep 30; : landline-switchboard")
+	if err := stranger.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	go func() { stranger.Wait(); close(ended) }()
+	t.Cleanup(func() { stranger.Process.Kill(); <-ended })
+	c.writeDataFile("switchboard.pid", strconv.Itoa(stranger.Process.Pid))
+	c.landline("server", "rotate-secret")
+	select {
+	case <-ended:
+		t.Errorf("rotate-secret stopped process %d, which only a stale switchboard.pid named and no lock held", stranger.Process.Pid)
+	case <-time.After(500 * time.Millisecond):
+	}
 }

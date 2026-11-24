@@ -99,18 +99,28 @@ func TestProcessEnvironmentSurvivesALaterWrapOfTheConfig(t *testing.T) {
 	}
 }
 
-const stubSwitchboard = `#!/bin/sh
-echo $$ > "$STUB_RECORD/pid"
-printf '%s\n' "$@" > "$STUB_RECORD/args"
-cat "$STUB_CONFIG" > "$STUB_RECORD/config-at-start"
-if [ "$STUB_MODE" = fail ]; then echo "stub refuses to start"; exit 1; fi
-if [ "$STUB_MODE" != hang ]; then
-echo "landline-switchboard: listening on stub"
-fi
-if [ "$STUB_MODE" = stubborn ]; then trap '' TERM; sleep 5; exit 0; fi
-trap 'kill $!; exit 0' TERM
-sleep 30 &
-wait
+const stubSwitchboard = `#!/usr/bin/env perl
+use strict;
+use warnings;
+use Fcntl qw(:flock O_RDWR O_CREAT);
+use File::Path qw(make_path);
+$| = 1;
+sub record { my ($name, $text) = @_; open(my $out, ">", "$ENV{STUB_RECORD}/$name") or die; print $out $text; close $out; }
+record("pid", "$$\n");
+record("args", join("", map { "$_\n" } @ARGV));
+open(my $config, "<", $ENV{STUB_CONFIG}) or die; local $/; record("config-at-start", <$config> // ""); close $config;
+my $mode = $ENV{STUB_MODE} // "";
+if ($mode eq "fail") { print "stub refuses to start\n"; exit 1; }
+make_path($ENV{STUB_DATA}, { mode => 0700 });
+my $lockPath = "$ENV{STUB_DATA}/switchboard.lock";
+sysopen(my $lock, $lockPath, O_RDWR | O_CREAT, 0600) or die "landline-switchboard: $lockPath: $!\n";
+if (!flock($lock, LOCK_EX | LOCK_NB)) { print "landline-switchboard: another switchboard is running on this machine and holds $lockPath\n"; exit 1; }
+truncate($lock, 0); syswrite($lock, "$$");
+if ($mode ne "hang") { print "landline-switchboard: listening on stub\n"; }
+if ($mode eq "stubborn") { $SIG{TERM} = "IGNORE"; sleep 5; exit 0; }
+$SIG{TERM} = sub { exit 0 };
+sleep 30;
+exit 0;
 `
 
 type rotation struct {
@@ -130,6 +140,8 @@ func newRotation(t *testing.T, savedURL string) *rotation {
 	t.Setenv("STUB_RECORD", record)
 	t.Setenv("STUB_CONFIG", filepath.Join(dir, "config.toml"))
 	t.Setenv("STUB_MODE", "")
+	t.Setenv("STUB_DATA", dataDirectory(Env{Home: home}))
+	t.Setenv("HOME", home)
 	if err := SaveConfig(Env{ConfigDir: dir}, configFor(savedURL)); err != nil {
 		t.Fatal(err)
 	}

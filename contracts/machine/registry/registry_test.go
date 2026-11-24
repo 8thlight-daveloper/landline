@@ -1666,3 +1666,19 @@ func TestInviteForTheNameOfEitherOfTwoActiveMachinesIsHeld(t *testing.T) {
 		}
 	}
 }
+
+func TestRevokeAllSharesNoStorageWithItsInput(t *testing.T) {
+	t.Parallel()
+	state, _ := richState(t)
+	result := newImpl().RevokeAll(state)
+	if len(result.Seen) != 2 {
+		t.Fatalf("RevokeAll kept %d remembered signatures, want 2", len(result.Seen))
+	}
+	for i := range result.Seen {
+		result.Seen[i].Signature[0] ^= 0xff
+		result.Seen[i].Until = time.Time{}
+	}
+	if !bytes.Equal(state.Seen[0].Signature, []byte{1, 1}) || !bytes.Equal(state.Seen[1].Signature, []byte{2, 2}) || state.Seen[0].Until.IsZero() {
+		t.Errorf("editing RevokeAll's result changed its input: %+v", state.Seen)
+	}
+}

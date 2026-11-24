@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -354,4 +355,74 @@ func TestTheMenuBarShowsTheRedirectTextWhenOnlyTheBuildRouteRedirects(t *testing
 	if got := reachedTarget.Load(); got != 0 {
 		t.Errorf("the place the redirect names got %d requests, want none", got)
 	}
+}
+
+func installedAgentPath(c *configuredHome) string {
+	if runtime.GOOS == "darwin" {
+		return c.path("Library/LaunchAgents/dev.landline.switchboard.plist")
+	}
+	return c.path(".config/systemd/user/landline-switchboard.service")
+}
+
+func checkJoinRefusedAndChangedNothing(t *testing.T, c *configuredHome, result binResult, original, named string) {
+	t.Helper()
+	said := result.stdout + result.stderr
+	if result.code != 1 || !strings.Contains(said, named) {
+		t.Errorf("join --code: %d %q, want 1 and a message that names %s", result.code, said, named)
+	}
+	if got := c.configText(); got != original {
+		t.Errorf("join --code changed config.toml:\n%s", scrub(got))
+	}
+	if exists(filepath.Join(configDirOf(c.home), "machine.key")) {
+		t.Errorf("join --code saved a machine key")
+	}
+}
+
+func TestJoinWithACodeRefusesInAHomeWhereASwitchboardRanBeforeTheLockFileExisted(t *testing.T) {
+	t.Parallel()
+	cases := map[string]func(c *configuredHome) string{
+		"switchboard.pid": func(c *configuredHome) string { return c.writeDataFile("switchboard.pid", "4242") },
+		"log.jsonl":       func(c *configuredHome) string { return c.writeDataFile("log.jsonl", "") },
+		"the installed agent": func(c *configuredHome) string {
+			path := installedAgentPath(c)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("installed by an earlier landline server install\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		},
+	}
+	for name, leave := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := newConfiguredHome(t, "")
+			found := leave(c)
+			address, reached := startAcceptingRedeem(t)
+			original := c.configText()
+			result := c.landline("server", "join", address, "--code", "ABCD-EFGH")
+			checkJoinRefusedAndChangedNothing(t, c, result, original, filepath.Base(found))
+			if exists(c.dataFile("switchboard.lock")) {
+				t.Errorf("join made switchboard.lock")
+			}
+			if got := reached.Load(); got != 0 {
+				t.Errorf("the switchboard named in the join got %d requests, want none", got)
+			}
+		})
+	}
+}
+
+func TestJoinWithACodeRefusesAndChangesNoFileWhenASwitchboardStartsHereWhileTheRequestIsInFlight(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	original := c.configText()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.writeDataFile("switchboard.lock", "4242")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"alpha"}`))
+	}))
+	t.Cleanup(server.Close)
+	result := c.landline("server", "join", server.Listener.Addr().String(), "--code", "ABCD-EFGH")
+	checkJoinRefusedAndChangedNothing(t, c, result, original, "switchboard.lock")
 }
