@@ -42,6 +42,13 @@ func start(t *testing.T) *harness { return startWith(t, func(*Config) {}) }
 
 func startWith(t *testing.T, adjust func(*Config)) *harness {
 	t.Helper()
+	h := startNotListening(t, adjust)
+	h.hub.Listening()
+	return h
+}
+
+func startNotListening(t *testing.T, adjust func(*Config)) *harness {
+	t.Helper()
 	log, err := store.Open(filepath.Join(t.TempDir(), "log.jsonl"))
 	if err != nil {
 		t.Fatal(err)

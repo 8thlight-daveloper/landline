@@ -10,6 +10,7 @@ import (
 )
 
 type source struct {
+	address   string
 	agents    []hubclient.Agent
 	agentsErr error
 	build     hubclient.Build
@@ -19,6 +20,7 @@ type source struct {
 
 func (s source) Agents() ([]hubclient.Agent, error)    { return s.agents, s.agentsErr }
 func (s source) Build() (hubclient.Build, bool, error) { return s.build, s.known, s.buildErr }
+func (s source) Address() string                       { return s.address }
 
 func TestAnyFailureToListAgentsIsTheUnreachableState(t *testing.T) {
 	got := Observe(source{agentsErr: errors.New("boom"), known: true, build: hubclient.Build{Version: "1"}}, true)

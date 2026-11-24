@@ -1569,3 +1569,39 @@ func TestInviteReplacesOnlyTheExpiredInviteForItsOwnNameAndRevokeStillRemovesAno
 		}
 	}
 }
+
+func TestEditingAMachineKeyInAResultLeavesThePriorStateAlone(t *testing.T) {
+	t.Parallel()
+	r := newImpl()
+	calls := map[string]func(model.Machines, []string) model.Machines{
+		"Invite": func(state model.Machines, _ []string) model.Machines {
+			next, _, _ := r.Invite(state, "four-box", random(72), t0, lifetime)
+			return next
+		},
+		"Redeem": func(state model.Machines, codes []string) model.Machines {
+			next, _, _ := r.Redeem(state, codes[0], publicOf(3), t0)
+			return next
+		},
+		"Revoke": func(state model.Machines, _ []string) model.Machines {
+			next, _ := r.Revoke(state, "one-box")
+			return next
+		},
+		"Verify": func(state model.Machines, _ []string) model.Machines {
+			next, _, _ := r.Verify(state, signedBy("alpha-box", keyOf(1), t0.Unix()).request(), t0, t0.Add(-time.Hour), window)
+			return next
+		},
+	}
+	for name, call := range calls {
+		state, codes := richState(t)
+		result := call(state, codes)
+		if len(result.Active) < 2 {
+			t.Fatalf("%s: %d active machines, want at least 2", name, len(result.Active))
+		}
+		for i := range result.Active {
+			result.Active[i].PublicKey[0] ^= 0xff
+		}
+		if !bytes.Equal(state.Active[0].PublicKey, publicOf(1)) || !bytes.Equal(state.Active[1].PublicKey, publicOf(2)) {
+			t.Errorf("%s: editing the result changed the prior state's public key", name)
+		}
+	}
+}

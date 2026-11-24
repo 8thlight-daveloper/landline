@@ -1285,7 +1285,7 @@ func TestTheHubListensOnTheLoopbackAddressOfLandlinePortAndNotOnOtherAddresses(t
 	}
 }
 
-func TestAnInvalidLandlinePortMakesTheHubExitWithStatusTwoAndAMessage(t *testing.T) {
+func TestAnInvalidLandlinePortMakesTheHubExitWithStatusOneAndAMessage(t *testing.T) {
 	t.Parallel()
 	bin, config := build(t), t.TempDir()
 	for _, bad := range []string{"99999", "abc", "0", "-1"} {
@@ -1295,7 +1295,7 @@ func TestAnInvalidLandlinePortMakesTheHubExitWithStatusTwoAndAMessage(t *testing
 		cmd.Stdout, cmd.Stderr = &out, &out
 		err := cmd.Run()
 		exit, isExit := err.(*exec.ExitError)
-		if !isExit || exit.ExitCode() != 2 || !strings.Contains(out.String(), "LANDLINE_PORT") {
+		if !isExit || exit.ExitCode() != 1 || !strings.Contains(out.String(), "LANDLINE_PORT") {
 			t.Errorf("LANDLINE_PORT=%s: %v %q", bad, err, out.String())
 		}
 	}

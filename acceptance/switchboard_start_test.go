@@ -1,0 +1,220 @@
+package acceptance
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func (c *configuredHome) dataDir() string { return filepath.Dir(c.dataFile("machines.json")) }
+
+func (c *configuredHome) writeDataFile(name, content string) string {
+	c.t.Helper()
+	if err := os.MkdirAll(c.dataDir(), 0o700); err != nil {
+		c.t.Fatal(err)
+	}
+	path := c.dataFile(name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		c.t.Fatal(err)
+	}
+	return path
+}
+
+func (c *configuredHome) symlink(target, link string) string {
+	c.t.Helper()
+	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+		c.t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		c.t.Fatal(err)
+	}
+	return link
+}
+
+func TestASecondSwitchboardWithTheSameHomeExitsOneNamingTheLockFileWhileTheFirstRuns(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	first := c.startSwitchboard()
+	other := freeAddr(t)
+	second := c.switchboardExit("--addr", other, "--log", c.path("other-logs/log.jsonl"))
+	if second.code != 1 || !strings.Contains(second.stderr, "switchboard.lock") {
+		t.Errorf("a second switchboard: %d %q, want 1 and a message that names switchboard.lock", second.code, second.stderr)
+	}
+	if answers(other) {
+		t.Errorf("the second switchboard listens at %s", other)
+	}
+	info, err := os.Stat(c.dataFile("switchboard.lock"))
+	if err != nil {
+		t.Fatalf("the running switchboard made no lock file: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("the lock file has mode %o, want 600", info.Mode().Perm())
+	}
+	first.stop()
+	if !exists(c.dataFile("switchboard.lock")) {
+		t.Errorf("the lock file was deleted when the switchboard was killed")
+	}
+	c.startSwitchboard()
+}
+
+func TestTheLockFileStaysAfterTheSwitchboardStopsAndALeftLockFileLetsTheNextOneStart(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	c.mustLandline("server", "up")
+	c.mustLandline("server", "down")
+	if !exists(c.dataFile("switchboard.lock")) {
+		t.Fatalf("no lock file is left after server down")
+	}
+	c.mustLandline("server", "up")
+	if !answers(c.addr) {
+		t.Errorf("the switchboard did not start over the lock file a stopped one left")
+	}
+}
+
+func TestALogPathThatIsTheMachinesFileOrTheLockFileStopsTheStartWithExitOneNamingBoth(t *testing.T) {
+	t.Parallel()
+	for name, logOf := range map[string]func(c *configuredHome) (string, string){
+		"machines.json itself": func(c *configuredHome) (string, string) {
+			return c.dataFile("machines.json"), "machines.json"
+		},
+		"the lock file itself": func(c *configuredHome) (string, string) {
+			return c.dataFile("switchboard.lock"), "switchboard.lock"
+		},
+		"a link to machines.json": func(c *configuredHome) (string, string) {
+			return c.symlink(c.dataFile("machines.json"), c.path("links/log.jsonl")), "machines.json"
+		},
+		"a link to the lock file": func(c *configuredHome) (string, string) {
+			return c.symlink(c.dataFile("switchboard.lock"), c.path("links/log.jsonl")), "switchboard.lock"
+		},
+		"a second path through a linked folder": func(c *configuredHome) (string, string) {
+			return filepath.Join(c.symlink(c.dataDir(), c.path("aliased")), "machines.json"), "machines.json"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := newConfiguredHome(t, "")
+			c.writeDataFile("machines.json", "[]\n")
+			c.writeDataFile("switchboard.lock", "")
+			logPath, named := logOf(c)
+			result := c.switchboardExit("--log", logPath)
+			if result.code != 1 || !strings.Contains(result.stderr, logPath) || !strings.Contains(result.stderr, named) {
+				t.Errorf("--log %s: %d %q, want 1 and a message that names the log and %s", logPath, result.code, result.stderr, named)
+			}
+			if got := readFileOrFail(t, c.dataFile("machines.json")); got != "[]\n" {
+				t.Errorf("machines.json changed: %q", got)
+			}
+		})
+	}
+}
+
+func TestALogFolderLinkedToTheDataDirectoryGetsNoLineAboutAnOldMachinesFile(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	c.writeDataFile("machines.json", "[]\n")
+	logs := c.symlink(c.dataDir(), c.path("logs"))
+	p := c.startSwitchboard("--log", filepath.Join(logs, "log.jsonl"))
+	said := p.stderr.String()
+	for _, word := range []string{"no longer read", "delete", "copied", filepath.Join(logs, "machines.json")} {
+		if strings.Contains(said, word) {
+			t.Errorf("the old and new machines.json are the same file, and the switchboard says %q: %q", word, said)
+		}
+	}
+	if got := readFileOrFail(t, c.dataFile("machines.json")); got != "[]\n" {
+		t.Errorf("machines.json changed: %q", got)
+	}
+}
+
+func TestAnOldMachinesFileThatHoldsNoListStopsTheStartAndWritesNothing(t *testing.T) {
+	t.Parallel()
+	for _, content := range []string{"null\n", "{}\n", "7\n", "\"alpha\"\n"} {
+		t.Run(strings.TrimSpace(content), func(t *testing.T) {
+			t.Parallel()
+			c := newConfiguredHome(t, "")
+			customDir := c.path("custom-logs")
+			if err := os.MkdirAll(customDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			old := filepath.Join(customDir, "machines.json")
+			if err := os.WriteFile(old, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			result := c.switchboardExit("--log", filepath.Join(customDir, "log.jsonl"))
+			if result.code != 1 || !strings.Contains(result.stderr, old) {
+				t.Errorf("an old machines.json of %q: %d %q, want 1 and the error that names it", content, result.code, result.stderr)
+			}
+			if exists(c.dataFile("machines.json")) {
+				t.Errorf("an old machines.json of %q: the new file was written: %q", content, readFileOrFail(t, c.dataFile("machines.json")))
+			}
+			if readFileOrFail(t, old) != content {
+				t.Errorf("the old file was changed")
+			}
+		})
+	}
+}
+
+func TestEverySettingTheSwitchboardCannotReadStopsItWithExitOne(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		env  []string
+		args []string
+	}{
+		"LANDLINE_PORT that is not a number": {[]string{"LANDLINE_PORT=alpha"}, nil},
+		"LANDLINE_PORT out of range":         {[]string{"LANDLINE_PORT=70000"}, nil},
+		"--signature-window not a duration":  {nil, []string{"--signature-window", "alpha"}},
+		"--keepalive not a duration":         {nil, []string{"--keepalive", "alpha"}},
+		"--delivery-timeout not a duration":  {nil, []string{"--delivery-timeout", "alpha"}},
+		"--grace not a duration":             {nil, []string{"--grace", "alpha"}},
+		"--invite-lifetime not a duration":   {nil, []string{"--invite-lifetime", "alpha"}},
+	}
+	for name, setting := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := newConfiguredHome(t, "")
+			if setting.env != nil {
+				c.writeConfig("secret = \"" + secret + "\"\n")
+				c.env = withEnv(c.env, setting.env...)
+			}
+			if result := c.switchboardExit(setting.args...); result.code != 1 {
+				t.Errorf("%d %q, want 1", result.code, result.stderr)
+			}
+		})
+	}
+}
+
+func TestALogFlagWithALiteralTildeUsesTheExpandedPathAndComparesWithTheTableAsThatPath(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "log = \"~/logs/alpha.jsonl\"\n")
+	work := c.path("work")
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	same := c.landlineIn(work, "server", "up", "--log", "~/logs/alpha.jsonl")
+	if same.code != 0 {
+		t.Fatalf("up: %+v", same)
+	}
+	if len(flagLine(same.stdout, "--log")) != 0 {
+		t.Errorf("the flag names the table's log, and up printed a differing line: %q", same.stdout)
+	}
+	if !exists(c.path("logs/alpha.jsonl")) {
+		t.Errorf("the switchboard did not open %s", c.path("logs/alpha.jsonl"))
+	}
+	if exists(filepath.Join(work, "~")) || exists(filepath.Join(c.home, "~")) {
+		t.Errorf("the switchboard made a folder named ~ instead of using the home directory")
+	}
+	c.mustLandline("server", "down")
+	other := c.landlineIn(work, "server", "up", "--log", "~/logs/bravo.jsonl")
+	if other.code != 0 || len(flagLine(other.stdout, "--log")) != 1 {
+		t.Errorf("a flag that names another log under ~: %+v, want one differing line", other)
+	}
+	if !exists(c.path("logs/bravo.jsonl")) || exists(filepath.Join(work, "~")) {
+		t.Errorf("the switchboard did not open %s", c.path("logs/bravo.jsonl"))
+	}
+}
+
+func (c *configuredHome) landlineIn(dir string, args ...string) binResult {
+	c.t.Helper()
+	moved := *c
+	moved.home = dir
+	return moved.landline(args...)
+}
