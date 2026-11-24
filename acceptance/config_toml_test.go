@@ -1,8 +1,10 @@
 package acceptance
 
 import (
+	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -906,5 +908,66 @@ func TestServerJoinSavesConfigTomlRemovesAnOldConfigJSONAndKeepsTheCommentsOfAnE
 	want := []string{"# mine", `secret = "` + joinedSecret + `"`, `host = "` + unresolvableHost + `"`, "port = 8787", "", "# last", `extra = "kept"`}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("config.toml:\n%s\nwant:\n%s", scrub(strings.Join(got, "\n")), scrub(strings.Join(want, "\n")))
+	}
+}
+
+func switchboardAccepts(t *testing.T, addr, secretText string) bool {
+	t.Helper()
+	request, _ := http.NewRequest("POST", "http://"+addr+"/v1/observers", strings.NewReader(`{"kind":"tui"}`))
+	request.Header.Set("Authorization", "Bearer "+secretText)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	return response.StatusCode == http.StatusOK
+}
+
+func TestAnOldConfigJSONSecretThatConfigTomlCannotHoldStaysInConfigJSONAndUpNamesTheProblem(t *testing.T) {
+	t.Parallel()
+	for _, old := range []string{`alpha\bravo-0123456789abcdef`, `alpha"bravo-0123456789abcdef`} {
+		bin, home, env := serverEnv(t)
+		addr := freeAddr(t)
+		raw, _ := json.Marshal(map[string]string{"url": "http://" + addr, "secret": old})
+		writeConfigFile(t, home, "config.json", string(raw))
+		out, _ := runIn(t, bin, env, home, "server", "up")
+		if !strings.Contains(out, "config.toml") || !strings.Contains(out, "secret") {
+			t.Errorf("up with the secret %q: %q, want a line that says the secret cannot be saved in config.toml", old, out)
+		}
+		if got := readFileOrFail(t, filepath.Join(configDirOf(home), "config.json")); got != string(raw) {
+			t.Errorf("config.json changed or was removed: %q", got)
+		}
+		if exists(configTomlOf(home)) {
+			for _, line := range strings.Split(readFileOrFail(t, configTomlOf(home)), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "secret") {
+					t.Errorf("config.toml got a secret line for a value it cannot hold: %q", scrub(line))
+				}
+			}
+		}
+		if !switchboardAccepts(t, addr, old) {
+			t.Errorf("the switchboard does not accept the exact secret %q of config.json", old)
+		}
+		runIn(t, bin, env, home, "server", "down")
+	}
+}
+
+func TestAnOldConfigJSONHexSecretCarriesOverAndConfigJSONGoesOnlyOnceConfigTomlReadsItBack(t *testing.T) {
+	t.Parallel()
+	bin, home, env := serverEnv(t)
+	addr := freeAddr(t)
+	old := "0123456789abcdef0123456789abcdef"
+	writeConfigFile(t, home, "config.json", `{"url":"http://`+addr+`","secret":"`+old+`"}`)
+	if out, err := runIn(t, bin, env, home, "server", "up"); err != nil {
+		t.Fatalf("up: %v %s", err, out)
+	}
+	if values, _ := readTomlValues(t, configTomlOf(home)); values["secret"] != old {
+		t.Errorf("config.toml does not hold the secret of config.json: %v", redacted(values))
+	}
+	if exists(filepath.Join(configDirOf(home), "config.json")) {
+		t.Errorf("config.json stays though config.toml holds its secret")
+	}
+	if !switchboardAccepts(t, addr, old) {
+		t.Errorf("the switchboard does not accept the carried-over secret")
 	}
 }

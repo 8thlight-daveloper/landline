@@ -331,3 +331,49 @@ func TestALogThatIsADanglingLinkOrACaseVariantOfTheFutureMachinesFileStopsTheSta
 		})
 	}
 }
+
+const oneOldMachine = `[{"name":"linux-box","public_key":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=","created":"2026-11-20T00:00:00Z"}]` + "\n"
+
+func (c *configuredHome) oldMachinesBesideACustomLog() (string, string) {
+	c.t.Helper()
+	customDir := c.path("custom-logs")
+	if err := os.MkdirAll(customDir, 0o700); err != nil {
+		c.t.Fatal(err)
+	}
+	old := filepath.Join(customDir, "machines.json")
+	if err := os.WriteFile(old, []byte(oneOldMachine), 0o600); err != nil {
+		c.t.Fatal(err)
+	}
+	return old, filepath.Join(customDir, "log.jsonl")
+}
+
+func checkCarriedOverWithNoDeleteAdvice(t *testing.T, c *configuredHome, said, old string) {
+	t.Helper()
+	if names := machineNames(t, c.dataFile("machines.json")); len(names) != 1 || !strings.HasPrefix(names[0], "linux-box ") {
+		t.Errorf("the new machines.json holds %v, want the old file's linux-box carried over", names)
+	}
+	if strings.Contains(strings.ToLower(said), "delete") {
+		t.Errorf("the switchboard advises deleting %s, which holds the only machine: %q", old, said)
+	}
+	if readFileOrFail(t, old) != oneOldMachine {
+		t.Errorf("the old machines.json changed")
+	}
+}
+
+func TestAStartWithTheDefaultLogThenACustomLogCarriesOverTheOldMachinesAndNeverAdvisesDeletingThem(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	c.startSwitchboard().stop()
+	old, logPath := c.oldMachinesBesideACustomLog()
+	p := c.startSwitchboard("--log", logPath)
+	checkCarriedOverWithNoDeleteAdvice(t, c, p.stderr.String(), old)
+}
+
+func TestANewMachinesFileHoldingAnEmptyListCountsAsAbsentForCarryOver(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	c.writeDataFile("machines.json", "[]\n")
+	old, logPath := c.oldMachinesBesideACustomLog()
+	p := c.startSwitchboard("--log", logPath)
+	checkCarriedOverWithNoDeleteAdvice(t, c, p.stderr.String(), old)
+}

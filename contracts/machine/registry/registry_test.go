@@ -1654,3 +1654,15 @@ func TestInviteAcceptsEveryDigitAfterTheFirstLetter(t *testing.T) {
 		}
 	}
 }
+
+func TestInviteForTheNameOfEitherOfTwoActiveMachinesIsHeld(t *testing.T) {
+	t.Parallel()
+	state := joined(t, model.Machines{}, "alpha", 8, 1, t0.Add(-time.Hour))
+	state = joined(t, state, "bravo", 16, 2, t0.Add(-time.Hour))
+	for _, name := range []string{"alpha", "bravo"} {
+		got, code, err := newImpl().Invite(state, name, random(72), t0, lifetime)
+		if !errors.Is(err, model.ErrMachineHeld) || code != "" || len(got.Invites) != 0 {
+			t.Errorf("Invite(%q) with alpha and bravo active: %q %v, want ErrMachineHeld and no invite", name, code, err)
+		}
+	}
+}

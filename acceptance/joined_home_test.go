@@ -137,3 +137,45 @@ func TestSetupRemoveKeepsAReferencesFileOrLinkThatIsThePersonsAndSaysSo(t *testi
 		}
 	}
 }
+
+func TestServerInstallRefusesAndWritesNothingInAHomeThatJoinedASwitchboard(t *testing.T) {
+	t.Parallel()
+	c, config := joinedHome(t)
+	result := c.landline("server", "install")
+	if result.code != 1 {
+		t.Errorf("server install: %+v, want exit 1", result)
+	}
+	if got := c.configText(); got != config {
+		t.Errorf("server install changed config.toml:\n%s", scrub(got))
+	}
+	for _, path := range []string{
+		c.path("Library/LaunchAgents/dev.landline.switchboard.plist"),
+		c.path(".config/systemd/user/landline-switchboard.service"),
+	} {
+		if exists(path) {
+			t.Errorf("server install wrote %s", path)
+		}
+	}
+	for _, folder := range []string{c.path("Library/LaunchAgents"), c.path(".config/systemd/user")} {
+		if entries, _ := os.ReadDir(folder); len(entries) != 0 {
+			t.Errorf("server install wrote into %s: %v", folder, entries)
+		}
+	}
+}
+
+func TestTheSwitchboardRunDirectlyInAHomeThatJoinedASwitchboardExitsOneAndMakesNothing(t *testing.T) {
+	t.Parallel()
+	c, config := joinedHome(t)
+	result := c.switchboardExit()
+	if result.code != 1 || !strings.Contains(result.stderr, "machine.key") {
+		t.Errorf("%d %q, want 1 and a message that names machine.key", result.code, result.stderr)
+	}
+	for _, name := range []string{"switchboard.lock", "machines.json", "log.jsonl"} {
+		if exists(c.dataFile(name)) {
+			t.Errorf("the refused start made %s", c.dataFile(name))
+		}
+	}
+	if got := c.configText(); got != config {
+		t.Errorf("the switchboard changed config.toml:\n%s", scrub(got))
+	}
+}

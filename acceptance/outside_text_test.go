@@ -202,3 +202,27 @@ func TestTheScreenCleansTheMessageOfASwitchboardThatRefusesThisMachinesKey(t *te
 		t.Errorf("the refusal message is not shown, cleaned: %q", result.stderr)
 	}
 }
+
+func TestLandlineMCPNamesTheAddressItTriedAfterTheSavedAddressChanged(t *testing.T) {
+	t.Parallel()
+	bin := build(t)
+	home := t.TempDir()
+	first, second := freeAddr(t), freeAddr(t)
+	firstHost, firstPort := hostAndPort(t, first)
+	secondHost, secondPort := hostAndPort(t, second)
+	writeConfigFile(t, home, "config.toml", tomlFor(firstHost, firstPort, secret))
+	cmd := exec.Command(mcpOf(bin))
+	cmd.Dir, cmd.Env = home, isolatedEnv(home)
+	p := newMCP(t, cmd)
+	p.handshake("claude-code", "2.1.296")
+	writeConfigFile(t, home, "config.toml", tomlFor(secondHost, secondPort, secret))
+	reply := p.request("tools/call", `{"name":"landline_agents","arguments":{}}`)
+	result, _ := reply["result"].(map[string]any)
+	if result == nil || result["isError"] != true {
+		t.Fatalf("landline_agents with no switchboard: %v", reply)
+	}
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	if !strings.Contains(text, second) || strings.Contains(text, first) {
+		t.Errorf("the session tried %s after config.toml changed, and its error says %q", second, text)
+	}
+}
