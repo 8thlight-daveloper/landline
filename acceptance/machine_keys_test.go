@@ -1555,7 +1555,7 @@ func TestATimeBeyondTheSignatureWindowBehindIsRefusedWithTheClockMessageAndInsid
 	}
 }
 
-func TestRestartAndRotateSecretPassTheSignatureWindowOn(t *testing.T) {
+func TestRestartPassesTheSignatureWindowOn(t *testing.T) {
 	t.Parallel()
 	h := startHost(t)
 	m := h.machine("linux-box")
@@ -1565,18 +1565,6 @@ func TestRestartAndRotateSecretPassTheSignatureWindowOn(t *testing.T) {
 	}
 	if status := h.signedStatus(m, time.Now().Unix()+10, "GET", "/v1/build", nil); !refused(status) {
 		t.Errorf("after restart --signature-window 3s, a time 10 seconds ahead answered %d", status)
-	}
-	h2 := startHost(t)
-	m2 := h2.machine("linux-box")
-	if out, err := h2.run("server", "rotate-secret", "--signature-window", "3s"); err != nil {
-		t.Fatalf("rotate-secret: %v %s", err, safe(string(out)))
-	}
-	waitPastTheStartPeriod()
-	if status := h2.signedStatus(m2, time.Now().Unix(), "GET", "/v1/build", nil); status != http.StatusOK {
-		t.Errorf("after rotate-secret --signature-window 3s, a request timed now answered %d", status)
-	}
-	if status := h2.signedStatus(m2, time.Now().Unix()+10, "GET", "/v1/build", nil); !refused(status) {
-		t.Errorf("after rotate-secret --signature-window 3s, a time 10 seconds ahead answered %d", status)
 	}
 }
 
@@ -1989,7 +1977,7 @@ func TestAnInviteExpiresAfterTheInviteLifetimeAndAnExpiredCodeLooksLikeAWrongOne
 	h.invite("slow-box")
 }
 
-func TestRestartAndRotateSecretPassTheTimingFlagsOn(t *testing.T) {
+func TestRestartPassesTheTimingFlagsOn(t *testing.T) {
 	t.Parallel()
 	h := startHost(t)
 	h.restartAndSettle("--invite-lifetime", "2s")
@@ -1997,14 +1985,6 @@ func TestRestartAndRotateSecretPassTheTimingFlagsOn(t *testing.T) {
 	time.Sleep(3 * time.Second)
 	if out, err := h.newMachineHome().joinWith(expired); err == nil || !strings.Contains(out, invalidCode) {
 		t.Errorf("after restart --invite-lifetime 2s, a 3 second old code: %v %q", err, h.clean(out))
-	}
-	if out, err := h.run("server", "rotate-secret", "--invite-lifetime", "2s"); err != nil {
-		t.Fatalf("rotate-secret: %v %s", err, h.clean(out))
-	}
-	second := h.invite("second-box")
-	time.Sleep(3 * time.Second)
-	if out, err := h.newMachineHome().joinWith(second); err == nil || !strings.Contains(out, invalidCode) {
-		t.Errorf("after rotate-secret --invite-lifetime 2s, a 3 second old code: %v %q", err, h.clean(out))
 	}
 }
 

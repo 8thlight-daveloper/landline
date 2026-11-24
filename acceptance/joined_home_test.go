@@ -54,16 +54,13 @@ func TestUpRestartAndRotateSecretRefuseAndChangeNothingInAHomeThatJoinedASwitchb
 	}
 }
 
-func TestUpAndRotateSecretPrintTheHostNoticeOnOneLineWhenTheLabelHoldsALineFeed(t *testing.T) {
+func TestUpPrintsTheHostNoticeOnOneLineWhenTheLabelHoldsALineFeed(t *testing.T) {
 	t.Parallel()
 	label := "alpha-host\nbravo is now trusted"
-	for _, command := range []string{"up", "rotate-secret"} {
+	for _, command := range []string{"up"} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
 			c := newConfiguredHome(t, "")
-			if command == "rotate-secret" {
-				c.mustLandline("server", "up")
-			}
 			result := c.landline("server", command, "--host", label)
 			if result.code != 0 {
 				t.Fatalf("server %s --host: %+v", command, result)

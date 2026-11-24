@@ -7,11 +7,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -78,11 +75,17 @@ func TestRotateSecretIgnoresTheSavedSecretWhenCheckingTheEnvironment(t *testing.
 	}
 }
 
-func TestRotateSecretWithABadFlagExitsTwoAndChangesNothing(t *testing.T) {
+func TestRotateSecretTakesNoFlagAndAnyFlagExitsTwoAndChangesNothing(t *testing.T) {
 	t.Setenv("PATH", "")
-	r, file := rotate(t, "http://127.0.0.1:8787", nil, "--no-such-flag", "x")
-	if r.code != 2 || !strings.Contains(file, savedSecret) {
-		t.Fatalf("code %d, stderr %q, file %s", r.code, r.err.String(), file)
+	for _, args := range [][]string{
+		{"--no-such-flag", "x"}, {"--addr", "127.0.0.1:8787"}, {"--grace", "2m"}, {"--keepalive", "15s"},
+		{"--delivery-timeout", "20s"}, {"--invite-lifetime", "5m"}, {"--signature-window", "5s"},
+		{"--log", "/tmp/landline-log.jsonl"}, {"--host", "alpha-host"},
+	} {
+		r, file := rotate(t, "http://127.0.0.1:8787", nil, args...)
+		if r.code != 2 || !strings.Contains(file, savedSecret) || r.out.Len() != 0 {
+			t.Errorf("rotate-secret %v: code %d, stdout %q, stderr %q, secret kept %v", args, r.code, r.out.String(), r.err.String(), strings.Contains(file, savedSecret))
+		}
 	}
 }
 
@@ -208,78 +211,6 @@ func listening(t *testing.T) string {
 	return listener.Addr().String()
 }
 
-func TestRotateSecretStopsSavesAndStartsAndPrintsOneLineWithNoSecret(t *testing.T) {
-	address := listening(t)
-	r := newRotation(t, "http://"+address)
-	if code := r.run("up", "--addr", address); code != 0 {
-		t.Fatalf("up: %d %s", code, r.err.String())
-	}
-	before := r.pid(t)
-	if code := r.run("rotate-secret", "--grace", "2m"); code != 0 {
-		t.Fatalf("rotate: %d %s", code, r.err.String())
-	}
-	if r.out.String() != rotatedMessage+"\n" || r.err.Len() != 0 {
-		t.Fatalf("stdout %q, stderr %q", r.out.String(), r.err.String())
-	}
-	config := r.config()
-	if config.Secret == savedSecret || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(config.Secret) || r.address() != address {
-		t.Fatalf("config after rotation: %+v", config)
-	}
-	if strings.Contains(r.out.String()+r.err.String(), config.Secret) || strings.Contains(r.out.String()+r.err.String(), savedSecret) {
-		t.Fatal("the output names a secret")
-	}
-	if info, err := os.Stat(configPath(r.env)); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("config mode: %v %v", info, err)
-	}
-	if after := r.pid(t); after == before {
-		t.Fatalf("the switchboard pid stayed %d", after)
-	}
-	if !strings.Contains(r.recorded(t, "config-at-start"), config.Secret) {
-		t.Fatal("the new switchboard started before the new secret was saved")
-	}
-	if args := strings.Fields(r.recorded(t, "args")); !reflect.DeepEqual(args, []string{"--addr", address, "--grace", "2m"}) {
-		t.Fatalf("switchboard arguments: %v", args)
-	}
-}
-
-func TestRotateSecretWithNoSwitchboardRunningStartsOne(t *testing.T) {
-	r := newRotation(t, "http://127.0.0.1:48612")
-	if code := r.run("rotate-secret"); code != 0 || r.out.String() != rotatedMessage+"\n" || !r.running() {
-		t.Fatalf("code %d, stdout %q, stderr %q, running %v", code, r.out.String(), r.err.String(), r.running())
-	}
-}
-
-func TestRotateSecretKeepsTheSavedAddressWhenNoAddrFlagIsGiven(t *testing.T) {
-	r := newRotation(t, "http://127.0.0.1:48613")
-	r.env.Getenv = func(key string) string {
-		if key == "LANDLINE_PORT" {
-			return "48614"
-		}
-		return ""
-	}
-	if code := r.run("rotate-secret"); code != 0 {
-		t.Fatalf("rotate: %d %s", code, r.err.String())
-	}
-	if r.address() != "127.0.0.1:48613" || !reflect.DeepEqual(strings.Fields(r.recorded(t, "args")), []string{"--addr", "127.0.0.1:48613"}) {
-		t.Fatalf("config %+v, arguments %q", r.config(), r.recorded(t, "args"))
-	}
-}
-
-func TestRotateSecretRefusesWhenSomethingElseAnswersAtTheSavedAddressAndChangesNothing(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { listener.Close() })
-	r := newRotation(t, "http://"+listener.Addr().String())
-	if code := r.run("rotate-secret"); code != 1 || !strings.Contains(r.err.String(), "something answers at "+listener.Addr().String()) || r.out.Len() != 0 {
-		t.Fatalf("code %d, stdout %q, stderr %q", code, r.out.String(), r.err.String())
-	}
-	if r.config().Secret != savedSecret {
-		t.Fatal("the saved secret changed")
-	}
-}
-
 func TestRotateSecretChecksTheSavedHostBeforeTheEnvironmentAndLeavesARunningSwitchboardAlone(t *testing.T) {
 	r := newRotation(t, "http://127.0.0.1:48615")
 	if code := r.run("up", "--addr", "127.0.0.1:48615"); code != 0 {
@@ -292,117 +223,6 @@ func TestRotateSecretChecksTheSavedHostBeforeTheEnvironmentAndLeavesARunningSwit
 	}
 	r.env.Getenv = environment
 	if code := r.run("rotate-secret"); code != 1 || !strings.Contains(r.err.String(), "not an address of this machine") || strings.Contains(r.err.String(), "LANDLINE_SECRET") {
-		t.Fatalf("code %d, stderr %q", code, r.err.String())
-	}
-	if r.pid(t) != before || r.config().Secret != savedSecret {
-		t.Fatal("a refusal changed the switchboard or the secret")
-	}
-}
-
-func TestRotateSecretWhoseStartFailsLeavesTheNewSecretSavedAndSaysToRunServerUp(t *testing.T) {
-	r := newRotation(t, "http://127.0.0.1:48616")
-	if code := r.run("up", "--addr", "127.0.0.1:48616"); code != 0 {
-		t.Fatalf("up: %d %s", code, r.err.String())
-	}
-	t.Setenv("STUB_MODE", "fail")
-	code := r.run("rotate-secret")
-	if code != 1 || !strings.Contains(r.err.String(), "the new secret is saved and the switchboard is stopped. Run landline server up to start it") || r.out.Len() != 0 {
-		t.Fatalf("code %d, stdout %q, stderr %q", code, r.out.String(), r.err.String())
-	}
-	if r.config().Secret == savedSecret || r.running() {
-		t.Fatalf("secret changed %v, running %v", r.config().Secret != savedSecret, r.running())
-	}
-	if strings.Contains(r.err.String(), r.config().Secret) {
-		t.Fatal("the message names the new secret")
-	}
-}
-
-func TestRotateSecretWhoseSaveFailsLeavesTheSwitchboardStoppedAndTheOldSecretInTheFile(t *testing.T) {
-	r := newRotation(t, "http://127.0.0.1:48617")
-	if code := r.run("up", "--addr", "127.0.0.1:48617"); code != 0 {
-		t.Fatalf("up: %d %s", code, r.err.String())
-	}
-	if err := os.Chmod(r.env.ConfigDir, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(r.env.ConfigDir, 0o700) })
-	if code := r.run("rotate-secret"); code != 1 || !strings.Contains(r.err.String(), "keeps the old secret") || !strings.Contains(r.err.String(), "stopped") || r.out.Len() != 0 {
-		t.Fatalf("code %d, stdout %q, stderr %q", code, r.out.String(), r.err.String())
-	}
-	if r.config().Secret != savedSecret || r.running() {
-		t.Fatalf("the secret changed or the switchboard runs: %v", r.running())
-	}
-}
-
-func TestRotateSecretRefusesWhenSomethingElseAnswersAtTheSavedAddressEvenWithAnotherAddrFlag(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { listener.Close() })
-	spare, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	spareAddress := spare.Addr().String()
-	spare.Close()
-	r := newRotation(t, "http://"+listener.Addr().String())
-	if code := r.run("rotate-secret", "--addr", spareAddress); code != 1 || !strings.Contains(r.err.String(), "something answers at "+listener.Addr().String()) || r.out.Len() != 0 {
-		t.Fatalf("code %d, stdout %q, stderr %q", code, r.out.String(), r.err.String())
-	}
-	if r.config().Secret != savedSecret || r.running() {
-		t.Fatal("the secret changed or a switchboard started")
-	}
-}
-
-func TestRotateSecretStopsANewSwitchboardThatIsAliveButNeverSaysItListens(t *testing.T) {
-	r := newRotation(t, "http://127.0.0.1:48618")
-	t.Setenv("STUB_MODE", "hang")
-	code := r.run("rotate-secret")
-	if code != 1 || !strings.Contains(r.err.String(), "the new secret is saved and the switchboard is stopped") || r.out.Len() != 0 {
-		t.Fatalf("code %d, stdout %q, stderr %q", code, r.out.String(), r.err.String())
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(r.recorded(t, "pid")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if syscall.Kill(pid, 0) == nil {
-		t.Fatalf("the new switchboard, pid %d, is still alive", pid)
-	}
-}
-
-func TestRotateSecretRefusesWhenSomethingElseAnswersAtTheAddrFlagAndTheSavedAddressIsFree(t *testing.T) {
-	occupied := listening(t)
-	r := newRotation(t, "http://127.0.0.1:48619")
-	if code := r.run("rotate-secret", "--addr", occupied); code != 1 || !strings.Contains(r.err.String(), "something answers at "+occupied) || r.out.Len() != 0 {
-		t.Fatalf("code %d, stdout %q, stderr %q", code, r.out.String(), r.err.String())
-	}
-	if r.config().Secret != savedSecret || r.running() {
-		t.Fatal("the secret changed or a switchboard started")
-	}
-}
-
-func TestRotateSecretWhoseOldSwitchboardWillNotStopFailsAndKeepsTheOldSecret(t *testing.T) {
-	r := newRotation(t, "http://127.0.0.1:48620")
-	t.Setenv("STUB_MODE", "stubborn")
-	if code := r.run("up", "--addr", "127.0.0.1:48620"); code != 0 {
-		t.Fatalf("up: %d %s", code, r.err.String())
-	}
-	if code := r.run("rotate-secret"); code != 1 || !strings.Contains(r.err.String(), "did not stop") || r.out.Len() != 0 {
-		t.Fatalf("code %d, stdout %q, stderr %q", code, r.out.String(), r.err.String())
-	}
-	if r.config().Secret != savedSecret {
-		t.Fatal("the secret changed while the old switchboard still ran")
-	}
-}
-
-func TestRotateSecretRefusesAnAddrFlagWithNoPortBeforeStoppingAnything(t *testing.T) {
-	r := newRotation(t, "http://127.0.0.1:48621")
-	if code := r.run("up", "--addr", "127.0.0.1:48621"); code != 0 {
-		t.Fatalf("up: %d %s", code, r.err.String())
-	}
-	before := r.pid(t)
-	if code := r.run("rotate-secret", "--addr", "localhost"); code == 0 || !strings.Contains(r.err.String(), "needs a port") {
 		t.Fatalf("code %d, stderr %q", code, r.err.String())
 	}
 	if r.pid(t) != before || r.config().Secret != savedSecret {

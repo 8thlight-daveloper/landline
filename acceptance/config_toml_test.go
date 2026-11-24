@@ -245,7 +245,7 @@ func TestServerUpOnAHostThisMachineDoesNotOwnFailsToBindNamesTheAddressAndSavesN
 	if exitCodeOf(err) != 1 || !strings.Contains(out, "cannot listen on "+unownedAddress+":"+port+":") {
 		t.Fatalf("up: %v %s", err, out)
 	}
-	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "no switchboard started by landline server up is running") {
+	if status, _ := runIn(t, bin, env, home, "server", "status"); !saysNoSwitchboardRuns(status) {
 		t.Errorf("status: %s", status)
 	}
 	if _, statErr := os.Stat(configTomlOf(home)); statErr == nil {
@@ -268,7 +268,7 @@ func TestServerUpOnAPortThatIsTakenFailsToBindNamesTheAddressAndSavesNoHostOrPor
 	if exitCodeOf(runErr) != 1 || !strings.Contains(out, "cannot listen on "+addr+":") {
 		t.Fatalf("up: %v %s", runErr, out)
 	}
-	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "no switchboard started by landline server up is running") {
+	if status, _ := runIn(t, bin, env, home, "server", "status"); !saysNoSwitchboardRuns(status) {
 		t.Errorf("status: %s", status)
 	}
 	if _, statErr := os.Stat(configTomlOf(home)); statErr == nil {
@@ -477,12 +477,12 @@ func TestRotateSecretRefusesWhenTheSavedHostIsNotThisMachinesAndChangesNothing(t
 	if after, _ := os.ReadFile(configTomlOf(home)); string(after) != string(before) {
 		t.Errorf("config.toml changed:\n%s\nwas:\n%s", scrub(string(after)), scrub(string(before)))
 	}
-	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "no switchboard started by landline server up is running") {
+	if status, _ := runIn(t, bin, env, home, "server", "status"); !saysNoSwitchboardRuns(status) {
 		t.Errorf("a switchboard is running: %s", status)
 	}
 }
 
-func TestRotateSecretOnAnAddressThisMachineOwnsThatIsNotLoopbackRotatesAndRestarts(t *testing.T) {
+func TestRotateSecretOnAnAddressThisMachineOwnsThatIsNotLoopbackRotatesAndStartsOne(t *testing.T) {
 	t.Parallel()
 	own := bindableOwnAddress(t)
 	bin, home, env := serverEnv(t)

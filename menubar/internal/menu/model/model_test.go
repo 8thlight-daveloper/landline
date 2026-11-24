@@ -214,7 +214,7 @@ func TestRotateSecretAsksFirstAndRunsTheCommandWithNoFlags(t *testing.T) {
 	if rotate.Disabled || strings.Join(rotate.Action.Args, " ") != "server rotate-secret" || rotate.Action.Kind != Run {
 		t.Fatalf("%+v", rotate)
 	}
-	if rotate.Action.Confirm != "Rotate the switchboard secret? The switchboard restarts and every agent must register again." || rotate.Action.ConfirmAccept != "Rotate" {
+	if rotate.Action.Confirm != "Rotate the switchboard secret? Every agent must register again." || rotate.Action.ConfirmAccept != "Rotate" {
 		t.Fatalf("%+v", rotate.Action)
 	}
 }

@@ -436,3 +436,7 @@ func TestRotateSecretNeverSignalsAProcessNamedByAStalePidFileWhoseCommandLineMen
 	case <-time.After(500 * time.Millisecond):
 	}
 }
+
+func saysNoSwitchboardRuns(status string) bool {
+	return strings.Contains(status, "no switchboard") && !strings.Contains(status, "started by landline server up")
+}

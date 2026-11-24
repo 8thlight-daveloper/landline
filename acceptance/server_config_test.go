@@ -298,7 +298,6 @@ func TestEveryStartPathWithNoFlagsWritesTheAbsoluteLogTheServerTableNames(t *tes
 	}{
 		{"server up", func() { c.mustLandline("server", "up") }},
 		{"server restart", func() { c.mustLandline("server", "restart") }},
-		{"server rotate-secret", func() { c.mustLandline("server", "rotate-secret") }},
 		{"the binary with no arguments, as the service runs it", func() {
 			c.mustLandline("server", "down")
 			c.startSwitchboard()
@@ -493,7 +492,7 @@ func TestAFlagOverridesTheServerTableForOneRunAndIsNeverWrittenToConfigToml(t *t
 	}
 }
 
-func TestUpRestartAndRotateSecretPrintOneLineOnStandardOutputBeforeTheResultForEachFlagThatDiffersInMeaning(t *testing.T) {
+func TestUpAndRestartPrintOneLineOnStandardOutputBeforeTheResultForEachFlagThatDiffersInMeaning(t *testing.T) {
 	t.Parallel()
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -508,8 +507,8 @@ func TestUpRestartAndRotateSecretPrintOneLineOnStandardOutputBeforeTheResultForE
 		}
 	}
 	for _, line := range flagLine(result.stdout, "--keepalive") {
-		if !strings.Contains(line, "restart") || !strings.Contains(line, "rotate-secret") {
-			t.Errorf("the line does not say that restart and rotate-secret use the value in config.toml: %q", line)
+		if !strings.Contains(line, "restart") {
+			t.Errorf("the line does not say that restart uses the value in config.toml: %q", line)
 		}
 	}
 	if warning, running := lineIndex(result.stdout, "--keepalive"), lineIndex(result.stdout, "the switchboard is running"); warning < 0 || running < warning {
@@ -521,10 +520,6 @@ func TestUpRestartAndRotateSecretPrintOneLineOnStandardOutputBeforeTheResultForE
 	result = c.mustLandline("server", "restart", "--host", "label-elsewhere")
 	if len(flagLine(result.stdout, "--host")) != 1 || len(flagLine(result.stdout, "--keepalive")) != 0 {
 		t.Errorf("restart --host label-elsewhere: want one line for --host and none for flags it was not given:\n%s", result.stdout)
-	}
-	result = c.mustLandline("server", "rotate-secret", "--keepalive", "200ms")
-	if warning, rotated := lineIndex(result.stdout, "--keepalive"), lineIndex(result.stdout, "rotated the switchboard secret"); len(flagLine(result.stdout, "--keepalive")) != 1 || rotated < warning {
-		t.Errorf("rotate-secret --keepalive 200ms: want one line for --keepalive before the result:\n%s", result.stdout)
 	}
 }
 
@@ -718,7 +713,7 @@ func TestAnOldMachinesJSONThatCannotBeReadStopsTheStartAndIsNotCopied(t *testing
 	}
 }
 
-func TestRotateSecretStopStartAndTheServiceKeepTheMachinesAndTheLogOfASwitchboardWhoseLogIsInTheServerTable(t *testing.T) {
+func TestRotateSecretStopStartAndTheServiceKeepTheMachinesOfASwitchboardWhoseLogIsInTheServerTable(t *testing.T) {
 	t.Parallel()
 	c := newConfiguredHome(t, "# by hand\nlog = \"~/table-logs/log.jsonl\"\n")
 	c.mustLandline("server", "up")
@@ -727,13 +722,8 @@ func TestRotateSecretStopStartAndTheServiceKeepTheMachinesAndTheLogOfASwitchboar
 	m := h.machine("linux-box")
 	m.registerAgent("alpha")
 	table := serverPart(c.configText())
-	os.RemoveAll(c.path("table-logs"))
 	if out, err := h.run("server", "rotate-secret"); err != nil || !strings.Contains(out, "rotated the switchboard secret") {
 		t.Fatalf("rotate-secret with no flags, as the menu runs it: %v %s", err, h.clean(out))
-	}
-	waitPastTheStartPeriod()
-	if !exists(c.path("table-logs/log.jsonl")) || exists(c.dataFile("log.jsonl")) {
-		t.Errorf("the rotation did not start the switchboard on the log of [server]")
 	}
 	if serverPart(c.configText()) != table {
 		t.Errorf("the rotation changed the [server] table:\n%s", scrub(c.configText()))
@@ -755,44 +745,19 @@ func TestRotateSecretStopStartAndTheServiceKeepTheMachinesAndTheLogOfASwitchboar
 	}
 }
 
-func TestRotateSecretAfterAOneRunLogFlagStartsOnTheTableLogAndKeepsTheMachines(t *testing.T) {
+func TestRotateSecretAfterAOneRunLogFlagKeepsTheRunningSwitchboardOnItsLogAndKeepsTheMachines(t *testing.T) {
 	t.Parallel()
 	c := newConfiguredHome(t, "log = \"~/table-logs/log.jsonl\"\n")
 	c.mustLandline("server", "up", "--log", c.path("flag-logs/log.jsonl"))
 	waitPastTheStartPeriod()
 	h := c.asHost()
 	m := h.machine("linux-box")
+	pid := readFileOrFail(t, c.dataFile("switchboard.lock"))
 	if out, err := h.run("server", "rotate-secret"); err != nil {
 		t.Fatalf("rotate-secret: %v %s", err, h.clean(out))
 	}
-	waitPastTheStartPeriod()
-	if !exists(c.path("table-logs/log.jsonl")) {
-		t.Errorf("rotate-secret with no flags kept the last run's --log instead of the log of [server]")
-	}
-	if !m.registers("alpha") {
-		t.Errorf("after the rotation, the joined machine is locked out")
-	}
-}
-
-func TestRotateSecretIgnoresAListeningLineInSwitchboardOutThatNamesAnotherLog(t *testing.T) {
-	t.Parallel()
-	c := newConfiguredHome(t, "")
-	c.mustLandline("server", "up")
-	waitPastTheStartPeriod()
-	h := c.asHost()
-	m := h.machine("linux-box")
-	elsewhere := c.path("elsewhere/log.jsonl")
-	line := switchboardName + " listening on " + c.addr + ", host \"mac\", log " + elsewhere + "\n"
-	if err := os.WriteFile(c.dataFile("switchboard.out"), []byte(line), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	os.Remove(c.dataFile("log.jsonl"))
-	if out, err := h.run("server", "rotate-secret"); err != nil {
-		t.Fatalf("rotate-secret: %v %s", err, h.clean(out))
-	}
-	waitPastTheStartPeriod()
-	if exists(elsewhere) || !exists(c.dataFile("log.jsonl")) {
-		t.Errorf("rotate-secret took the log from the listening line in switchboard.out")
+	if exists(c.path("table-logs/log.jsonl")) || readFileOrFail(t, c.dataFile("switchboard.lock")) != pid {
+		t.Errorf("rotate-secret replaced the running switchboard instead of reloading its secret")
 	}
 	if !m.registers("alpha") {
 		t.Errorf("after the rotation, the joined machine is locked out")

@@ -2163,7 +2163,7 @@ func TestServerUpRunsTheHubInTheBackgroundAndEveryCommandFindsItFromTheSavedConf
 	if down, err := runIn(t, bin, env, home, "server", "down"); err != nil || !strings.Contains(down, "the switchboard stopped") {
 		t.Fatalf("down: %v %s", err, down)
 	}
-	if status, _ := runIn(t, bin, env, home, "server", "status"); !strings.Contains(status, "no switchboard started by landline server up is running") {
+	if status, _ := runIn(t, bin, env, home, "server", "status"); !saysNoSwitchboardRuns(status) {
 		t.Fatalf("status after down: %s", status)
 	}
 	if refused := p.tool("landline_agents", `{}`); !strings.Contains(refused, "landline server up") {

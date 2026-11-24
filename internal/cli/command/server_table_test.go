@@ -50,11 +50,11 @@ func flagLines(stdout, flag string) []string {
 	return found
 }
 
-func TestUpRestartAndRotateSecretPassOnOnlyTheFlagsGivenAndNeverAValueFromTheServerTable(t *testing.T) {
+func TestUpAndRestartPassOnOnlyTheFlagsGivenAndNeverAValueFromTheServerTable(t *testing.T) {
 	address := listening(t)
 	r := newRotation(t, "http://"+address)
 	r.appendToConfig(t, serverTable)
-	for _, command := range [][]string{{"up"}, {"restart"}, {"rotate-secret"}} {
+	for _, command := range [][]string{{"up"}, {"restart"}} {
 		if code := r.run(command...); code != 0 {
 			t.Fatalf("%v with a [server] table: %d %s", command, code, r.err.String())
 		}
@@ -129,21 +129,21 @@ func TestTheFlagLineIsPrintedOnStandardOutputBeforeTheResultOnlyForAFlagThatDiff
 	if code := r.run("up"); code != 0 || strings.Contains(r.out.String(), "config.toml") {
 		t.Fatalf("up with no flags: %d %q %s", code, r.out.String(), r.err.String())
 	}
-	if code := r.run("rotate-secret", "--grace", "3m", "--keepalive", "15000ms", "--invite-lifetime", "300s", "--log", r.env.Home+"/landline-logs/log.jsonl"); code != 0 {
-		t.Fatalf("rotate-secret: %d %s", code, r.err.String())
+	if code := r.run("restart", "--grace", "3m", "--keepalive", "15000ms", "--invite-lifetime", "300s", "--log", r.env.Home+"/landline-logs/log.jsonl"); code != 0 {
+		t.Fatalf("restart: %d %s", code, r.err.String())
 	}
-	if r.out.String() != rotatedMessage+"\n" {
+	if lines := linesAfterTheStop(r.out.String()); len(lines) != 1 || !strings.Contains(lines[0], "the switchboard is running") {
 		t.Errorf("flags equal in meaning to the table printed more than the result: %q", r.out.String())
 	}
-	if code := r.run("rotate-secret", "--grace", "4m", "--delivery-timeout", "20s"); code != 0 {
-		t.Fatalf("rotate-secret --grace 4m: %d %s", code, r.err.String())
+	if code := r.run("restart", "--grace", "4m", "--delivery-timeout", "20s"); code != 0 {
+		t.Fatalf("restart --grace 4m: %d %s", code, r.err.String())
 	}
-	lines := strings.Split(strings.TrimSuffix(r.out.String(), "\n"), "\n")
-	if len(lines) != 2 || lines[1] != rotatedMessage || len(flagLines(lines[0], "--grace")) != 1 || len(flagLines(r.out.String(), "--delivery-timeout")) != 0 {
+	lines := linesAfterTheStop(r.out.String())
+	if len(lines) != 2 || !strings.Contains(lines[1], "the switchboard is running") || len(flagLines(lines[0], "--grace")) != 1 || len(flagLines(r.out.String(), "--delivery-timeout")) != 0 {
 		t.Errorf("want one line that names --grace and config.toml, then the result: %q", r.out.String())
 	}
-	if !strings.Contains(lines[0], "restart") || !strings.Contains(lines[0], "rotate-secret") {
-		t.Errorf("the line does not say that restart and rotate-secret use the value in config.toml: %q", lines[0])
+	if !strings.Contains(lines[0], "restart") {
+		t.Errorf("the line does not say that restart uses the value in config.toml: %q", lines[0])
 	}
 	if code := r.run("restart", "--signature-window", "5000ms", "--delivery-timeout", "21s"); code != 0 {
 		t.Fatalf("restart: %d %s", code, r.err.String())
@@ -233,4 +233,14 @@ func TestTheSignatureWindowIsFiveSecondsByDefaultAndTakesOneToFiveSecondsFromThe
 		}
 		os.Remove(configPath(env))
 	}
+}
+
+func linesAfterTheStop(stdout string) []string {
+	var kept []string
+	for _, line := range strings.Split(strings.TrimSuffix(stdout, "\n"), "\n") {
+		if line != "the switchboard stopped" {
+			kept = append(kept, line)
+		}
+	}
+	return kept
 }
