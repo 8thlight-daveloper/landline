@@ -38,6 +38,10 @@ func run(args []string) int {
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
 		ConfigDir: filepath.Join(home, ".config", "landline"), Home: home, Host: host,
 	}
+	if _, err := os.Lstat(command.MachineKeyPath(env)); err == nil {
+		say(command.MachineKeyPath(env) + " exists, so this home joined a switchboard and does not run one. Remove it and the machine line in config.toml before running a switchboard here")
+		return 1
+	}
 	values, err := command.FlagValues(args, command.SwitchboardFlags...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\nusage: %s [--addr A] [--log PATH] [--host H] [--keepalive D] [--delivery-timeout D] [--grace D] [--invite-lifetime D] [--signature-window D]\n       %s version\n", name, command.Printable(err.Error()), name, name)

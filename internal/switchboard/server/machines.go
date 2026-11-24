@@ -99,22 +99,32 @@ func CarryOverMachines(current, former string) (string, error) {
 	if sameFile(current, former) {
 		return "", nil
 	}
-	_, currentErr := os.Stat(current)
-	_, formerErr := os.Stat(former)
-	switch {
-	case errors.Is(formerErr, os.ErrNotExist):
+	if _, err := os.Stat(former); errors.Is(err, os.ErrNotExist) {
 		return "", nil
-	case !errors.Is(currentErr, os.ErrNotExist):
+	}
+	held, err := readMachines(current)
+	if err != nil {
+		return "", err
+	}
+	if len(held) > 0 {
 		return fmt.Sprintf("%s is no longer read, because the switchboard reads %s. You may delete %s", former, current, former), nil
 	}
 	machines, err := readMachines(former)
 	if err != nil {
 		return "", err
 	}
+	if len(machines) == 0 && fileExists(current) {
+		return "", nil
+	}
 	if err := writeMachines(current, machines); err != nil {
 		return "", fmt.Errorf("the machines of %s could not be copied to %s: %v", former, current, err)
 	}
 	return fmt.Sprintf("copied the machines of %s to %s, and now reads %s. %s is left as it was", former, current, current, former), nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func sameFile(one, other string) bool {

@@ -85,7 +85,7 @@ func runServer(args []string, env Env) int {
 }
 
 func startsASwitchboard(command string) bool {
-	return command == "up" || command == "restart" || command == "rotate-secret"
+	return command == "up" || command == "restart" || command == "rotate-secret" || command == "install"
 }
 
 func joinedHomeRefusal(env Env) string {

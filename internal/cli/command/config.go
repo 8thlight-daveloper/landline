@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -223,20 +224,23 @@ func SaveConfig(env Env, change Config) error {
 	default:
 		migrating = fileExists(legacyConfigPath(env))
 		if legacy, legacyErr := readLegacyConfig(env); legacyErr == nil {
+			if !savableText(legacy.Secret) || !savableText(legacy.Host) {
+				return fmt.Errorf("the secret or the address in %s cannot be saved in %s, which holds no quote, backslash, or control character inside a text value. Nothing was changed", legacyConfigPath(env), configPath(env))
+			}
 			lines = renderConfig(legacy)
 		}
 	}
-	if change.Secret != "" {
-		lines = setKey(lines, "secret", `"`+change.Secret+`"`)
-	}
-	if change.Host != "" {
-		lines = setKey(lines, "host", `"`+change.Host+`"`)
+	for _, text := range []struct{ key, value string }{{"secret", change.Secret}, {"host", change.Host}, {"machine", change.Machine}} {
+		if text.value == "" {
+			continue
+		}
+		if !savableText(text.value) {
+			return fmt.Errorf("the %s cannot be saved in %s, which holds no quote, backslash, or control character inside a text value. Nothing was changed", text.key, configPath(env))
+		}
+		lines = setKey(lines, text.key, `"`+text.value+`"`)
 	}
 	if change.Port != 0 {
 		lines = setKey(lines, "port", strconv.Itoa(change.Port))
-	}
-	if change.Machine != "" {
-		lines = setKey(lines, "machine", `"`+change.Machine+`"`)
 	}
 	path := configPath(env)
 	temp := path + ".tmp"
@@ -251,9 +255,28 @@ func SaveConfig(env Env, change Config) error {
 		return err
 	}
 	if migrating {
-		os.Remove(legacyConfigPath(env))
+		removeLegacyConfigOnceReadBack(env, change)
 	}
 	return nil
+}
+
+func savableText(value string) bool {
+	return !strings.ContainsAny(value, `"\`) && !strings.ContainsFunc(value, unicode.IsControl)
+}
+
+func removeLegacyConfigOnceReadBack(env Env, change Config) {
+	want, legacyErr := readLegacyConfig(env)
+	saved, savedErr := ReadConfig(env)
+	if legacyErr != nil || savedErr != nil {
+		return
+	}
+	want.Secret, want.Host, want.Machine = Or(change.Secret, want.Secret), Or(change.Host, want.Host), Or(change.Machine, want.Machine)
+	if change.Port != 0 {
+		want.Port = change.Port
+	}
+	if saved == want {
+		os.Remove(legacyConfigPath(env))
+	}
 }
 
 func fileExists(path string) bool {

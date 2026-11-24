@@ -146,9 +146,9 @@ func unreachable(err error) bool {
 	return errors.As(err, &transport) || errors.As(err, &lookup)
 }
 
-func (s *Session) hubDown(err error) error {
+func hubDown(err error, triedURL string) error {
 	if unreachable(err) {
-		return fmt.Errorf("the Landline switchboard is not running at %s. Run: landline server up", HubURL(s.env))
+		return fmt.Errorf("the Landline switchboard is not running at %s. Run: landline server up", triedURL)
 	}
 	return err
 }
@@ -175,7 +175,7 @@ func (s *Session) register() error {
 		Model: identity.Model, Effort: identity.Effort, Project: identity.Project,
 	})
 	if err != nil {
-		return s.hubDown(err)
+		return hubDown(err, url)
 	}
 	replaced := s.id
 	s.identity, s.id, s.client = identity, out.ID, client.New(url, out.Token)
@@ -230,9 +230,10 @@ func (s *Session) callAsAnswered(do func(*client.Client) error) error {
 		if registerErr != nil {
 			return registerErr
 		}
-		err = do(fresh)
+		current = fresh
+		err = do(current)
 	}
-	return s.hubDown(err)
+	return hubDown(err, current.URL)
 }
 
 func (s *Session) Send(body model.SendBody) (out model.SendResponse, err error) {

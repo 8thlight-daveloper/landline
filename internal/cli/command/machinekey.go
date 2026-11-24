@@ -21,6 +21,8 @@ const NoCredentialMessage = "there is no switchboard credential. Run landline se
 
 func machineKeyPath(env Env) string { return filepath.Join(env.ConfigDir, "machine.key") }
 
+func MachineKeyPath(env Env) string { return machineKeyPath(env) }
+
 func readMachineKey(env Env) (ed25519.PrivateKey, bool, error) {
 	raw, err := os.ReadFile(machineKeyPath(env))
 	if os.IsNotExist(err) {
