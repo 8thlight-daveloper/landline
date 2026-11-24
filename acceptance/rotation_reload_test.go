@@ -332,10 +332,12 @@ func TestRotateSecretWhoseSignalCannotBeSentSaysSoAtOnce(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
+	old := c.savedSecret()
 	began := time.Now()
 	result := c.landline("server", "rotate-secret")
 	took := time.Since(began)
 	said := result.stdout + result.stderr
+	c.checkTheNewSecretStaysSaved(old, said)
 	if result.code != 1 || strings.Contains(said, "rotated the switchboard secret") || !strings.Contains(said, strconv.Itoa(pid)) {
 		t.Errorf("rotate-secret with a locked pid that cannot be signalled: %d %q, want 1 and a message that names process %d", result.code, said, pid)
 	}
@@ -348,14 +350,29 @@ func TestRotateSecretWhoseStartFailsExitsAtOnceWithTheStartsFailure(t *testing.T
 	t.Parallel()
 	c := newConfiguredHome(t, "")
 	c.writeTable("log = \"" + filepath.Join(c.blocker(), "log.jsonl") + "\"\n")
+	old := c.savedSecret()
 	began := time.Now()
 	result := c.landline("server", "rotate-secret")
 	took := time.Since(began)
 	said := result.stdout + result.stderr
+	c.checkTheNewSecretStaysSaved(old, said)
+	if !strings.Contains(said, "saved") {
+		t.Errorf("rotate-secret printed only what up printed, with no line that the new secret is saved: %q", said)
+	}
 	if result.code != 1 || !strings.Contains(said, "did not start") {
 		t.Errorf("rotate-secret whose start fails: %d %q, want 1 and the start's failure", result.code, said)
 	}
 	if took > 3*time.Second || strings.Contains(said, "still uses the old one") {
 		t.Errorf("rotate-secret waited %v and said %q instead of the start's failure alone", took, said)
+	}
+}
+
+func (c *configuredHome) checkTheNewSecretStaysSaved(old, said string) {
+	c.t.Helper()
+	if fresh := c.savedSecret(); fresh == "" || fresh == old {
+		c.t.Errorf("after the failed rotation config.toml does not hold a new secret: empty %v, same as the old %v", fresh == "", fresh == old)
+	}
+	if !strings.Contains(said, "config.toml") {
+		c.t.Errorf("the message does not say that the new secret is saved in config.toml: %q", said)
 	}
 }

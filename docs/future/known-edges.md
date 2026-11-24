@@ -29,4 +29,6 @@ never belongs in this list.
   from outside drives it reliably.
 - **A stale process id in `switchboard.lock` for an instant.** Between taking the lock and writing its own process id,
   the switchboard holds a lock whose file still names the previous switchboard. A command that reads it in that instant
-  could signal a process that reused that id.
+  could signal a process that reused that id. A command that reads the file while it is still empty treats the
+  switchboard as not running, so `rotate-secret` tries to start one, reports the failed start, and keeps the new secret
+  saved.
