@@ -1,7 +1,7 @@
 ---
 category: behavior
 status: proposed
-note: Drafted on 2026-11-24 after the tenth review of 0200, from the person's choice of a reload over a restart. It changes how a rotation reaches the running switchboard, adds a signal the switchboard answers, and has security consequences. The person approved it on 2026-11-24.
+note: Drafted on 2026-11-24 after the tenth review of 0200, from the person's choice of a reload over a restart. It changes how a rotation reaches the running switchboard, adds a signal the switchboard answers, and has security consequences. The person approved it on 2026-11-24. Amended on 2026-11-24 after the twelfth review of 0200, so that a signal that cannot be sent and a start that fails exit at once. The person approved it on 2026-11-24.
 affects: [cli/command, switchboard/server]
 builds-on: ['0170', '0200', '0220']
 partly-supersedes: ['0170', '0220']
@@ -40,6 +40,10 @@ never stops or starts the switchboard.**
 1. It waits up to 5 seconds until the switchboard accepts the new secret and refuses the old one, by asking
    `GET /v1/machines` with each. Then it prints `rotated the switchboard secret. Every agent must register again.` and
    exits `0`.
+1. When the signal cannot be sent, it exits `1` at once. The message says that the new secret is saved in `config.toml`,
+   names the process id it could not signal, and says to restart the switchboard where it runs. When no switchboard was
+   running and the start fails, it exits `1` at once after the failure that `up` prints, and says that the new secret is
+   saved in `config.toml`. Neither case waits for step 5.
 1. When the switchboard still accepts the old secret, or never accepts the new one, it exits `1`. The message says that
    the new secret is saved in `config.toml`, that the switchboard at `<host:port>` still uses the old one, and to
    restart the switchboard where it runs. It never prints either secret.
@@ -50,7 +54,7 @@ token and every observer token, and closes their open streams, as a restart did.
 remembers, the start time, and every setting stay as they are, so a rotation starts no start period. When the file
 cannot be read or holds no secret, the switchboard keeps the secret in use and prints one line that says so. A
 switchboard whose secret came from `LANDLINE_SECRET` in its own environment keeps it, and `rotate-secret` reports that
-through step 6.
+through step 7.
 
 **`rotate-secret` takes no flags.** It no longer starts a switchboard with new settings, and `landline server restart`
 does that. A flag given to it is an error, as for any unknown flag.
@@ -70,7 +74,7 @@ The menu bar's `Rotate secret…` runs `landline server rotate-secret` as before
 - `switchboard/server` gains a signal handler and a lock around the secret in use. `cli/command` loses the stop and the
   start in `rotate-secret`, and gains the check of step 5.
 - The rotation tests that drove a stub switchboard through a stop and a start are replaced by tests of the reload and of
-  step 6.
+  steps 6 and 7.
 
 ## Alternatives considered
 
