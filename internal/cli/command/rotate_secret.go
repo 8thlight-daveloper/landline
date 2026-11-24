@@ -61,11 +61,17 @@ func serverRotateSecret(args []string, env Env, dataDir string) int {
 		return 1
 	}
 	if pid, running := switchboardPID(dataDir); running {
-		syscall.Kill(pid, syscall.SIGHUP)
+		if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
+			fmt.Fprintf(env.Stderr, "%s the new secret is saved in %s, and the switchboard's process %d could not be told to read it: %s. Restart the switchboard where it runs\n", rotateSecretPrefix, configPath(env), pid, printableLine(err.Error()))
+			return 1
+		}
 	} else {
 		quiet := env
 		quiet.Stdout = io.Discard
-		serverUp(nil, quiet, dataDir)
+		if code := serverUp(nil, quiet, dataDir); code != 0 {
+			fmt.Fprintf(env.Stderr, "%s the new secret is saved in %s, and the switchboard did not start. Run landline server up after fixing what it printed\n", rotateSecretPrefix, configPath(env))
+			return 1
+		}
 	}
 	if !switchboardUsesOnly(address, secret, config.Secret) {
 		fmt.Fprintf(env.Stderr, "%s the new secret is saved in %s, and the switchboard at %s still uses the old one. Restart the switchboard where it runs\n", rotateSecretPrefix, configPath(env), printableLine(address))
