@@ -6,9 +6,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/8thlight-daveloper/landline/internal/cli/command"
@@ -29,6 +31,8 @@ func main() {
 }
 
 func run(args []string) int {
+	hangUps := make(chan os.Signal, 1)
+	signal.Notify(hangUps, syscall.SIGHUP)
 	if len(args) == 1 && args[0] == "version" {
 		fmt.Println(command.VersionLine(name, version, commit, date))
 		return 0
@@ -112,6 +116,7 @@ func run(args []string) int {
 		return 1
 	}
 	secret := os.Getenv("LANDLINE_SECRET")
+	secretFromEnvironment := secret != ""
 	if secret == "" {
 		secret = saved.Secret
 	}
@@ -137,6 +142,7 @@ func run(args []string) int {
 		return command.ExitCannotListen
 	}
 	switchboard.Listening()
+	go reloadOnEveryHangUp(hangUps, switchboard, env, secretFromEnvironment)
 	fmt.Fprint(os.Stderr, command.BannerFor(os.Stderr))
 	fmt.Fprintln(os.Stderr, command.ListeningLinePrefix+command.Printable(fmt.Sprintf("%s, host %q, log %s%s", listener.Addr(), host, logPath, asGiven(addr, listener.Addr().String(), resolved))))
 	srv := &http.Server{Handler: switchboard.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
@@ -145,6 +151,33 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func reloadOnEveryHangUp(hangUps <-chan os.Signal, switchboard *server.Server, env command.Env, secretFromEnvironment bool) {
+	for range hangUps {
+		say(reloadSecret(switchboard, env, secretFromEnvironment))
+	}
+}
+
+func reloadSecret(switchboard *server.Server, env command.Env, secretFromEnvironment bool) string {
+	if secretFromEnvironment {
+		return "kept the secret in use, because it comes from LANDLINE_SECRET and not from config.toml"
+	}
+	saved, err := command.ReadConfig(env)
+	if err != nil {
+		return "kept the secret in use, because " + err.Error()
+	}
+	if saved.Secret == "" {
+		return "kept the secret in use, because config.toml holds no secret"
+	}
+	changed, err := switchboard.ReplaceSecret(saved.Secret)
+	switch {
+	case err != nil:
+		return "kept the secret in use, because the secret in config.toml cannot be used: " + err.Error()
+	case changed:
+		return "read the new secret from config.toml and ended every agent and observer token"
+	}
+	return "read config.toml again, and its secret is the one in use"
 }
 
 func say(text any) {

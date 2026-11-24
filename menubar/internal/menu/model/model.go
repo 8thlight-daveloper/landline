@@ -152,7 +152,7 @@ func switchboardItems(in Input) []Item {
 	}
 }
 
-const rotateQuestion = "Rotate the switchboard secret? The switchboard restarts and every agent must register again."
+const rotateQuestion = "Rotate the switchboard secret? Every agent must register again."
 
 func serverActions() (start, stop, restart, rotate Action) {
 	return Action{Kind: Run, Args: []string{"server", "up"}},

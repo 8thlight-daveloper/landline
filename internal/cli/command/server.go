@@ -28,11 +28,11 @@ const serverUsage = `landline server <command>
                     The switchboard takes the log and the timings from the [server] table of config.toml, with the keys
                     log, keepalive, delivery-timeout, grace, invite-lifetime, and signature-window. A flag overrides the
                     table for one run and is never saved
-  down              stop the switchboard that "up" started
+  down              stop the switchboard that runs in this home
   restart [flags]   stop that switchboard and start it again with the [server] table and the flags given. It keeps no
                     agents, so each one registers again
-  rotate-secret [flags]   replace the secret and restart the switchboard with the [server] table and the flags given. The old
-                    secret stops working at once and every agent must register again
+  rotate-secret     replace the secret in config.toml and tell the running switchboard to read it again, or start one
+                    when none runs. It takes no flags. The old secret stops working and every agent must register again
   invite --name N   make a code that lets another machine join as N, and print the join command for it
   machines          list the machines that joined, with a fingerprint of each key
   revoke N|--all    remove a machine, or every machine, and end its tokens and streams
@@ -315,7 +315,7 @@ func serverDown(env Env, dataDir string) int {
 	pid, running := switchboardPID(dataDir)
 	if !running {
 		os.Remove(pidFile(dataDir))
-		fmt.Fprintln(env.Stdout, "no switchboard started by landline server up is running")
+		fmt.Fprintln(env.Stdout, "no switchboard is running")
 		return 0
 	}
 	syscall.Kill(pid, syscall.SIGTERM)
@@ -356,7 +356,7 @@ func serverStatus(env Env, dataDir string) int {
 		fmt.Fprintf(env.Stdout, "the switchboard is running (pid %d) at %s\n", pid, HubURL(env))
 		return 0
 	}
-	fmt.Fprintf(env.Stdout, "no switchboard started by landline server up is running. The saved address is %s\n", HubURL(env))
+	fmt.Fprintf(env.Stdout, "no switchboard is running. The saved address is %s\n", HubURL(env))
 	return 0
 }
 

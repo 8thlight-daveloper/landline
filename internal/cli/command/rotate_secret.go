@@ -1,111 +1,101 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	nethttp "net/http"
 	"strconv"
+	"syscall"
 	"time"
+
+	client "github.com/8thlight-daveloper/landline/internal/client/http"
 )
 
-const rotatedMessage = "rotated the switchboard secret. Every agent must register again."
+const (
+	rotatedMessage     = "rotated the switchboard secret. Every agent must register again."
+	reloadCheckPeriod  = 5 * time.Second
+	reloadCheckPause   = 100 * time.Millisecond
+	rotateSecretPrefix = "landline server rotate-secret:"
+)
 
 func serverRotateSecret(args []string, env Env, dataDir string) int {
-	const name = "landline server rotate-secret:"
-	if err := checkSwitchboardFlags(args); err != nil {
-		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
+	if len(args) > 0 {
+		fmt.Fprintln(env.Stderr, rotateSecretPrefix, "takes no flags. To start the switchboard with other settings, run landline server restart with them")
 		return 2
 	}
 	config, err := ReadConfig(env)
 	if err != nil {
-		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
+		fmt.Fprintln(env.Stderr, rotateSecretPrefix, printableLine(err.Error()))
 		return 1
 	}
-	values, _ := FlagValues(args, SwitchboardFlags...)
-	_, flagLines, err := SwitchboardSettings(env, values)
-	if err != nil {
-		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
+	if _, err := readServerTable(env); err != nil {
+		fmt.Fprintln(env.Stderr, rotateSecretPrefix, printableLine(err.Error()))
 		return 1
 	}
 	if config.Host != "" && !IsThisMachines(config.Host) {
-		fmt.Fprintf(env.Stderr, "%s the saved switchboard host %s is not an address of this machine. Rotate the secret on the machine where that switchboard runs, then run landline server join here again\n", name, printableLine(config.Host))
+		fmt.Fprintf(env.Stderr, "%s the saved switchboard host %s is not an address of this machine. Rotate the secret on the machine where that switchboard runs, then run landline server join here again\n", rotateSecretPrefix, printableLine(config.Host))
 		return 1
 	}
 	if env.processEnvironment("LANDLINE_SECRET") != "" {
-		fmt.Fprintln(env.Stderr, name, "LANDLINE_SECRET is set in the environment, and it overrides the saved secret for every landline command. Unset it and run this again")
+		fmt.Fprintln(env.Stderr, rotateSecretPrefix, "LANDLINE_SECRET is set in the environment, and it overrides the saved secret for every landline command. Unset it and run this again")
 		return 1
 	}
 	if _, err := findBinary(SwitchboardBinaryName); err != nil {
-		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
+		fmt.Fprintln(env.Stderr, rotateSecretPrefix, printableLine(err.Error()))
 		return 1
 	}
-	address, err := rotationAddress(args, config, env)
+	host, port, err := config.Listen(env.processEnvironment)
 	if err != nil {
-		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
-		return 2
+		fmt.Fprintln(env.Stderr, rotateSecretPrefix, printableLine(err.Error()))
+		return 1
 	}
-	if _, owned := switchboardPID(dataDir); !owned {
-		for _, each := range []string{address, savedAddress(config)} {
-			if each != "" && addressAnswers(each) {
-				fmt.Fprintf(env.Stderr, "%s something answers at %s and landline server up did not start it, so this command cannot stop it. Stop it where it runs, then run this again\n", name, printableLine(each))
-				return 1
-			}
-		}
-	}
-	if values["--addr"] == "" {
-		args = append([]string{"--addr", address}, args...)
-	}
-	printLines(env, flagLines)
-	quiet := env
-	quiet.Stdout = io.Discard
-	if code := serverDown(quiet, dataDir); code != 0 {
-		return code
-	}
+	address := net.JoinHostPort(host, strconv.Itoa(port))
 	secret, err := newSecret()
 	if err == nil {
 		err = SaveConfig(env, Config{Secret: secret})
 	}
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "%s the new secret was not saved: %v. The switchboard is stopped and %s keeps the old secret. Run landline server up to start it again\n", name, err, configPath(env))
+		fmt.Fprintf(env.Stderr, "%s the new secret was not saved: %s. %s keeps the old secret\n", rotateSecretPrefix, printableLine(err.Error()), configPath(env))
 		return 1
 	}
-	if code := serverUp(args, quiet, dataDir); code != 0 {
-		if serverDown(quiet, dataDir) != 0 {
-			fmt.Fprintf(env.Stderr, "%s the new secret is saved and the new switchboard did not start and could not be stopped. Run landline server down, then landline server up\n", name)
-			return 1
-		}
-		fmt.Fprintf(env.Stderr, "%s the new secret is saved and the switchboard is stopped. Run landline server up to start it\n", name)
+	if pid, running := switchboardPID(dataDir); running {
+		syscall.Kill(pid, syscall.SIGHUP)
+	} else {
+		quiet := env
+		quiet.Stdout = io.Discard
+		serverUp(nil, quiet, dataDir)
+	}
+	if !switchboardUsesOnly(address, secret, config.Secret) {
+		fmt.Fprintf(env.Stderr, "%s the new secret is saved in %s, and the switchboard at %s still uses the old one. Restart the switchboard where it runs\n", rotateSecretPrefix, configPath(env), printableLine(address))
 		return 1
 	}
 	fmt.Fprintln(env.Stdout, rotatedMessage)
 	return 0
 }
 
-func rotationAddress(args []string, config Config, env Env) (string, error) {
-	values, _ := FlagValues(args, SwitchboardFlags...)
-	host, port, err := listenTarget(values["--addr"], config, env.Getenv)
-	if err != nil {
-		return "", err
+func switchboardUsesOnly(address, fresh, old string) bool {
+	url := "http://" + address
+	deadline := time.Now().Add(reloadCheckPeriod)
+	for {
+		if acceptsSecret(url, fresh) && (old == "" || refusesSecret(url, old)) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(reloadCheckPause)
 	}
-	return net.JoinHostPort(host, strconv.Itoa(port)), nil
 }
 
-func savedAddress(config Config) string {
-	if config.Host == "" && config.Port == 0 {
-		return ""
-	}
-	port := config.Port
-	if port == 0 {
-		port = DefaultPort
-	}
-	return net.JoinHostPort(Or(config.Host, loopback), strconv.Itoa(port))
+func acceptsSecret(url, secret string) bool {
+	_, err := client.New(url, secret).Machines()
+	return err == nil
 }
 
-func addressAnswers(address string) bool {
-	connection, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	connection.Close()
-	return true
+func refusesSecret(url, secret string) bool {
+	_, err := client.New(url, secret).Machines()
+	var refused *client.StatusError
+	return errors.As(err, &refused) && refused.Status == nethttp.StatusUnauthorized
 }

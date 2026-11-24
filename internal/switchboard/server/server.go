@@ -264,7 +264,51 @@ func bearer(r *http.Request) string {
 }
 
 func (s *Server) isSecret(r *http.Request) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isSecretLocked(r)
+}
+
+func (s *Server) isSecretLocked(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(bearer(r)), []byte(s.cfg.Secret)) == 1
+}
+
+func (s *Server) credentialStillValidLocked(machine verifiedMachine, w http.ResponseWriter, r *http.Request) bool {
+	switch {
+	case machine.signed() && !s.stillActiveLocked(machine):
+		refuseMachine(w)
+		return false
+	case !machine.signed() && !s.isSecretLocked(r):
+		fail(w, http.StatusUnauthorized, "missing or wrong switchboard secret")
+		return false
+	}
+	return true
+}
+
+func (s *Server) ReplaceSecret(secret string) (bool, error) {
+	if len(secret) < minSecretLength {
+		return false, errors.New("the switchboard secret must be at least 16 characters")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if secret == s.cfg.Secret {
+		return false, nil
+	}
+	s.cfg.Secret = secret
+	s.endEveryTokenLocked()
+	return true, nil
+}
+
+func (s *Server) endEveryTokenLocked() {
+	for token, id := range s.tokens {
+		s.removeAgentLocked(id)
+		delete(s.tokens, token)
+	}
+	clear(s.observers)
+	clear(s.machineTokens)
+	for id, open := range s.streams {
+		s.endStreamLocked(id, open)
+	}
 }
 
 type caller int
@@ -356,8 +400,7 @@ func (s *Server) registerObserver(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if machine.signed() && !s.stillActiveLocked(machine) {
-		refuseMachine(w)
+	if !s.credentialStillValidLocked(machine, w, r) {
 		return
 	}
 	now := requestTime(r)
@@ -421,8 +464,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if machine.signed() && !s.stillActiveLocked(machine) {
-		refuseMachine(w)
+	if !s.credentialStillValidLocked(machine, w, r) {
 		return
 	}
 	now := requestTime(r)

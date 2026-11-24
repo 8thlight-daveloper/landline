@@ -154,7 +154,7 @@ func LockDataDirectory(path string) (DataDirectoryLock, error) {
 	if err != nil {
 		return DataDirectoryLock{}, fmt.Errorf("%s cannot be opened: %v", path, err)
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockPastBriefProbes(file); err != nil {
 		file.Close()
 		return DataDirectoryLock{}, fmt.Errorf("another switchboard is running on this machine, because it holds %s", path)
 	}
@@ -163,6 +163,19 @@ func LockDataDirectory(path string) (DataDirectoryLock, error) {
 		return DataDirectoryLock{}, fmt.Errorf("%s cannot hold the process id: %v", path, err)
 	}
 	return DataDirectoryLock{file}, nil
+}
+
+const probeWait = time.Second
+
+func lockPastBriefProbes(file *os.File) error {
+	deadline := time.Now().Add(probeWait)
+	for {
+		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func writeProcessID(file *os.File) error {

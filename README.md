@@ -168,17 +168,17 @@ switchboard takes its settings from `[server]` in `config.toml`, and a flag last
 agents on disk, so after a restart each agent registers again on its next call and gets a new id. A session started
 before the upgrade keeps its old process and needs its own restart.
 
-`landline server rotate-secret` replaces the switchboard secret and restarts the switchboard, for a secret that was
-exposed. It takes the flags of `restart` and prints one line, never a secret. The old secret stops working at once and
-every agent registers again, as after a restart. It refuses, and changes nothing, when the saved host is not this
-machine's (`localhost`, a loopback IP, or a name or IP that resolves to an address of one of its interfaces), when
-`LANDLINE_SECRET` is set in the environment, when `landline-switchboard` cannot be found, or when something that
-`landline server up` did not start answers at the saved address, such as a switchboard that launchd runs, because the
-command cannot stop it. Without `--addr` the new switchboard keeps the saved address. It reads its settings from
-`[server]` and its machines from `~/.local/share/landline/machines.json`, so it keeps every joined machine whatever log
-it uses
-([0220](docs/decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)).
-A session whose own environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
+`landline server rotate-secret` replaces the switchboard secret, for a secret that was exposed. It saves a new secret in
+`config.toml` and sends the running switchboard `SIGHUP`, which reads the secret again without a restart, so joined
+machines keep working and no start period begins. When no switchboard runs, it starts one as `up` does. It takes no
+flags and prints one line, never a secret. The old secret stops working and every agent registers again. It waits up to
+5 seconds until the switchboard accepts the new secret and refuses the old one. When it does not, as for a switchboard
+whose own environment sets `LANDLINE_SECRET`, it exits `1`, says that the new secret is saved, and says to restart the
+switchboard where it runs. It refuses, and changes nothing, when the saved host is not this machine's (`localhost`, a
+loopback IP, or a name or IP that resolves to an address of one of its interfaces), when `LANDLINE_SECRET` is set in the
+environment, or when `landline-switchboard` cannot be found
+([0260](docs/decisions/0260-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). A session whose
+own environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
 ([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md)).
 
 #### Channel delivery in Claude Code
@@ -272,8 +272,8 @@ observer of kind `menubar`. It polls every 5 seconds (`--interval D`, at least 5
   `landline server up`, `down`, and `restart`. It finds `landline` next to its own binary, then on the path of your
   login shell. `Rotate secret…` asks first, then runs `landline server rotate-secret`. When the address is not this
   machine's the four items are disabled and the submenu says `Remote switchboard at <address>`. The submenu also shows
-  the switchboard's build and says when its commit differs from the app's. `Restart` and `Rotate secret…` give every
-  agent a new id.
+  the switchboard's build and says when its commit differs from the app's. `Restart` and `Rotate secret…` make every
+  agent register again.
 - `Harnesses` runs `landline setup claude|codex`, and the same with `--remove`. The menu does not check whether Landline
   is registered, so both items are always there.
 - `About Landline` opens the standard About panel with the version and a link to the project.
@@ -407,7 +407,7 @@ reads and writes each key are in [docs/reference/config-toml.md](docs/reference/
 | `landline agents [--json]`                        | Lists agents, whether each is connected, and the attributes they claimed                                                                                                                                                                                                  |
 | `landline server up\|down\|status`                | Starts the switchboard in the background, stops it, or shows whether it runs                                                                                                                                                                                              |
 | `landline server restart [flags]`                 | Stops the switchboard that `up` started and starts it again with the flags given                                                                                                                                                                                          |
-| `landline server rotate-secret [flags]`           | Replaces the switchboard secret and restarts the switchboard with the flags given. The old secret stops working at once                                                                                                                                                   |
+| `landline server rotate-secret`                   | Replaces the switchboard secret and tells the running switchboard to read it again. The old secret stops working at once                                                                                                                                                  |
 | `landline server install [--load]`                | Starts the switchboard at login: a launchd agent on macOS, a systemd user unit on Linux                                                                                                                                                                                   |
 | `landline server invite --name N`                 | Makes a 5 minute, single use invite code for a machine named N. Run on the switchboard's machine                                                                                                                                                                          |
 | `landline server machines`                        | Lists joined machines with a key fingerprint and the date joined                                                                                                                                                                                                          |

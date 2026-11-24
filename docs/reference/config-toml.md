@@ -92,7 +92,7 @@ Each of these is an error. The message names the file and the line number and ne
 - A second `[server]` heading, or a key given twice in `[server]` (0220).
 
 An error stops the program before it changes anything. `landline-switchboard`, `landline server up`, `restart`, and
-`rotate-secret` exit `1`, and `rotate-secret` reads the file before it stops the switchboard (0220).
+`rotate-secret` exit `1`, and `rotate-secret` reads the file before it saves a new secret (0220, 0260).
 
 Rejected lines:
 
@@ -107,13 +107,13 @@ Rejected lines:
 
 ## Who reads which keys
 
-| Program                                 | Reads                                                                                                                                      |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `landline-switchboard`                  | `secret`, `host`, `port`, and `[server]` (0190, 0220)                                                                                      |
-| `landline` commands                     | `secret`, `host`, `port`, `machine`. `up`, `restart`, and `rotate-secret` also read `[server]` to compare it with their flags (0200, 0220) |
-| `landline-mcp`                          | `secret`, `host`, `port`, `machine` (0190, 0200)                                                                                           |
-| The screen (`landline` with no command) | `secret`, `host`, `port`, `machine`. It skips `[server]` (0190, 0200, 0220)                                                                |
-| The menu bar (`landline-menubar`)       | `secret`, `host`, `port`, `machine`. It skips `[server]` (0190, 0200, 0220)                                                                |
+| Program                                 | Reads                                                                                                                                               |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `landline-switchboard`                  | `secret`, `host`, `port`, and `[server]` (0190, 0220), and `secret` again on `SIGHUP` (0260)                                                        |
+| `landline` commands                     | `secret`, `host`, `port`, `machine`. `up` and `restart` also read `[server]` to compare it with their flags, and `rotate-secret` to check it (0220) |
+| `landline-mcp`                          | `secret`, `host`, `port`, `machine` (0190, 0200)                                                                                                    |
+| The screen (`landline` with no command) | `secret`, `host`, `port`, `machine`. It skips `[server]` (0190, 0200, 0220)                                                                         |
+| The menu bar (`landline-menubar`)       | `secret`, `host`, `port`, `machine`. It skips `[server]` (0190, 0200, 0220)                                                                         |
 
 The screen and the menu bar keep their own copies of the reader, and every copy follows this format (0190, 0220).
 
@@ -123,7 +123,7 @@ The screen and the menu bar keep their own copies of the reader, and every copy 
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `landline server up`                        | `secret` when there is none. `host` and `port`, as the person gave them, after the switchboard listens (0190) |
 | `landline server restart`                   | `host` and `port` from `--addr`, after the switchboard listens (0190)                                         |
-| `landline server rotate-secret`             | `secret` (0170, 0220)                                                                                         |
+| `landline server rotate-secret`             | `secret` (0170, 0220, 0260)                                                                                   |
 | `landline server join <host:port>`          | `host`, `port`, and `secret` from `LANDLINE_SECRET` or standard input (0190)                                  |
 | `landline server join <host:port> --code C` | `host`, `port`, and `machine`, and removes `secret` (0200)                                                    |
 
@@ -137,9 +137,8 @@ The screen and the menu bar keep their own copies of the reader, and every copy 
 
 ## Overrides
 
-- A flag given to `landline-switchboard`, `up`, `restart`, or `rotate-secret` overrides `[server]` for that run only.
-  When it differs from the table's value, or from the default, the command prints one line that says so and names
-  `config.toml` (0220).
+- A flag given to `landline-switchboard`, `up`, or `restart` overrides `[server]` for that run only. When it differs
+  from the table's value, or from the default, the command prints one line that says so and names `config.toml` (0220).
 - `--addr host:port` overrides `host` and `port` for `up` and `restart`, and is the one flag whose value a command saves
   (0190, 0220).
 - `LANDLINE_URL` overrides `host` and `port`, and `LANDLINE_SECRET` overrides `secret`, for every client (0190).
