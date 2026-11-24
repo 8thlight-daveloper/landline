@@ -15,9 +15,9 @@ never belongs in this list.
   place, and the request still fails.
 - **A `machine.key` that is a symbolic link.** A `join --code` that fails after its request restores the old key's bytes
   and mode as a regular file, so the link to the person's key file is lost. The key still works.
-- **A log name that differs from `machines.json` only in case, on a case-insensitive disk.** Covered once the
-  switchboard makes `machines.json` before it opens the log and compares files by identity. Listed so that a rebuild
-  keeps that order.
+- **A log name that differs from `machines.json` only in case, on a case-insensitive disk.** Covered because the
+  switchboard opens the log, then compares it with `machines.json` by identity and removes a `machines.json` that the
+  log just made. Listed so that a rebuild keeps that check after the log opens.
 - **`server up` that cannot save the address.** When `up` starts the switchboard and then cannot write `config.toml`,
   for example because a legacy `config.json` holds a secret with a quote or a backslash that `config.toml` cannot hold,
   it exits `1` and leaves the switchboard it started running. Nothing is lost: `config.json` stays, and the switchboard
@@ -27,3 +27,6 @@ never belongs in this list.
   verifies a signature, that the active key for the name is still the key that verified. Only a unit test of the
   component pins it, and a rebuild deletes unit tests. The window is microseconds between two lock sections, and no test
   from outside drives it reliably.
+- **A stale process id in `switchboard.lock` for an instant.** Between taking the lock and writing its own process id,
+  the switchboard holds a lock whose file still names the previous switchboard. A command that reads it in that instant
+  could signal a process that reused that id.

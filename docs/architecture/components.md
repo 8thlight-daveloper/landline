@@ -54,13 +54,15 @@ write no file.
 `$HOME/.config/landline/config.toml` holds the switchboard's settings in a `[server]` table
 ([0220](../decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)).
 `cmd/landline-switchboard` reads the file when it starts, with the reader of `cli/command`: the top-level keys for the
-address and the secret, and `[server]` for the log path and the timings. It writes no part of the file. `cli/command`
-reads `[server]` for `landline server up`, `restart`, and `rotate-secret`, so that an error in the table stops them
-before they change anything and so that they print a line for each flag that differs from the table. They pass on the
-flags a person gave and the saved address, and never a value from the table. Its writer keeps the `[server]` table and
-adds a missing top-level key before the first table line. `cli/command` reads `switchboard.out` to wait for
-`listening on` after `up` starts the switchboard, and to show the output when the start fails, but not to find the log
-path. That wait depends on text written for people, which C1 in
+address and the secret, and `[server]` for the log path and the timings. On `SIGHUP` it reads the top-level `secret`
+again, and nothing else
+([0260](../decisions/0260-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). It writes no part
+of the file. `cli/command` reads `[server]` for `landline server up`, `restart`, and `rotate-secret`, so that an error
+in the table stops them before they change anything and so that they print a line for each flag that differs from the
+table. They pass on the flags a person gave and the saved address, and never a value from the table. Its writer keeps
+the `[server]` table and adds a missing top-level key before the first table line. `cli/command` reads `switchboard.out`
+to wait for `listening on` after `up` starts the switchboard, and to show the output when the start fails, but not to
+find the log path. That wait depends on text written for people, which C1 in
 [coding-principles.md](../reference/coding-principles.md) rules out, and it is older code to fix in its own change.
 
 The entry points are not components and are outside the dependency graph, so they may import any component.

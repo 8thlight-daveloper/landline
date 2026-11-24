@@ -7,6 +7,7 @@ note: Drafted on 2026-11-23 from the person's choice of settings in config.toml 
 affects: [cli/command, switchboard/server, agent/viewer, menubar/viewer]
 builds-on: ['0040', '0110', '0140', '0170', '0190', '0200']
 partly-supersedes: ['0190', '0200']
+partly-superseded-by: ['0260']
 ---
 
 # 0220. The switchboard reads its settings from `config.toml` and keeps `machines.json` in the data directory

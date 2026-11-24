@@ -37,3 +37,13 @@ writes its own. Text that a program only stores or passes on, such as a message 
 as it came, and the program that shows it cleans it.
 
 Records: 0200
+
+### C3. Remove a moving part before you guard one
+
+When a fix needs a new special case, a value that stands for two states, or a check of one mechanism against another,
+first look for a part to remove: a second owner of one resource, a second path that does the same job, or a state that
+one value has to mean twice. Add a guard only when no part can go, and say in the change which part you kept and why. A
+review finding at the edge of a fix from the round before is a sign that the fix added a part, and the next fix starts
+by asking which part to take out.
+
+Records: 0220, 0260

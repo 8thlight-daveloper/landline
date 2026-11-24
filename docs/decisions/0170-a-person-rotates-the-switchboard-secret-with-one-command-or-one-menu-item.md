@@ -4,6 +4,7 @@ status: accepted
 approval: person
 affects: [cli/command, menubar/viewer]
 builds-on: ['0040', '0090', '0140']
+partly-superseded-by: ['0260']
 note: Drafted on 2026-11-16 and approved by its owner on 2026-11-17. It adds a command and a menu item that replace the switchboard secret and restart the switchboard. It has security and destructive consequences.
 ---
 
