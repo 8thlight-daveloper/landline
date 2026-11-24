@@ -262,3 +262,100 @@ func TestAStatusProbeHoldingASharedLockWhenTheSwitchboardStartsDoesNotMakeTheSta
 	defer func() { <-released }()
 	c.startSwitchboard()
 }
+
+func TestAReloadEndsObserverAndMachineAgentTokensAndKeepsTheSignaturesItRemembers(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	c.mustLandline("server", "up")
+	waitPastTheStartPeriod()
+	h := c.asHost()
+	m := h.machine("linux-box")
+	status, raw := bearerStatus(t, c.addr, "POST", "/v1/observers", c.savedSecret(), `{"kind":"tui"}`)
+	var observer struct{ Token string }
+	if status != http.StatusOK || json.Unmarshal([]byte(raw), &observer) != nil || observer.Token == "" {
+		t.Fatalf("observer registration: %d %s", status, raw)
+	}
+	m.registerAgent("alpha")
+	machineAgent := m.agentToken("alpha")
+	signedBuild := map[string]string{"Authorization": machineAuth(m.key(), m.name, time.Now().Unix(), "GET", "/v1/build", nil)}
+	if status := h.statusOnly("GET", "/v1/build", nil, signedBuild); status != http.StatusOK {
+		t.Fatalf("the signed request before the rotation: %d", status)
+	}
+	if result := c.landline("server", "rotate-secret"); result.code != 0 {
+		t.Fatalf("rotate-secret: %+v", result)
+	}
+	for name, token := range map[string]string{"an observer token": observer.Token, "the token of an agent registered with a machine key": machineAgent} {
+		if status, _ := bearerStatus(t, c.addr, "GET", "/v1/agents", token, ""); status != http.StatusUnauthorized {
+			t.Errorf("%s from before the rotation answered %d, want 401", name, status)
+		}
+	}
+	if status := h.statusOnly("GET", "/v1/build", nil, signedBuild); !refused(status) {
+		t.Errorf("a copy of a signed request accepted before the rotation, sent again inside the window after it, answered %d, so the reload forgot the signatures it remembers", status)
+	}
+}
+
+func TestAReloadReadsOnlyTheSecretAndKeepsTheSignatureWindowItStartedWith(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	c.mustLandline("server", "up")
+	waitPastTheStartPeriod()
+	h := c.asHost()
+	m := h.machine("linux-box")
+	c.writeTable("signature-window = \"1s\"\n")
+	if result := c.landline("server", "rotate-secret"); result.code != 0 {
+		t.Fatalf("rotate-secret: %+v", result)
+	}
+	if status := h.signedStatus(m, time.Now().Unix()+3, "GET", "/v1/build", nil); status != http.StatusOK {
+		t.Errorf("after a reload, a request timed 3 seconds ahead answered %d, so the switchboard took the 1s signature-window from config.toml instead of keeping its 5s", status)
+	}
+}
+
+func deadPid(t *testing.T) int {
+	t.Helper()
+	gone := exec.Command("true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return gone.Process.Pid
+}
+
+func TestRotateSecretWhoseSignalCannotBeSentSaysSoAtOnce(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	pid := deadPid(t)
+	lockPath := c.writeDataFile("switchboard.lock", strconv.Itoa(pid))
+	lock, err := os.OpenFile(lockPath, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now()
+	result := c.landline("server", "rotate-secret")
+	took := time.Since(began)
+	said := result.stdout + result.stderr
+	if result.code != 1 || strings.Contains(said, "rotated the switchboard secret") || !strings.Contains(said, strconv.Itoa(pid)) {
+		t.Errorf("rotate-secret with a locked pid that cannot be signalled: %d %q, want 1 and a message that names process %d", result.code, said, pid)
+	}
+	if took > 3*time.Second || strings.Contains(said, "still uses the old one") {
+		t.Errorf("rotate-secret waited %v and said %q instead of saying at once that the signal failed", took, said)
+	}
+}
+
+func TestRotateSecretWhoseStartFailsExitsAtOnceWithTheStartsFailure(t *testing.T) {
+	t.Parallel()
+	c := newConfiguredHome(t, "")
+	c.writeTable("log = \"" + filepath.Join(c.blocker(), "log.jsonl") + "\"\n")
+	began := time.Now()
+	result := c.landline("server", "rotate-secret")
+	took := time.Since(began)
+	said := result.stdout + result.stderr
+	if result.code != 1 || !strings.Contains(said, "did not start") {
+		t.Errorf("rotate-secret whose start fails: %d %q, want 1 and the start's failure", result.code, said)
+	}
+	if took > 3*time.Second || strings.Contains(said, "still uses the old one") {
+		t.Errorf("rotate-secret waited %v and said %q instead of the start's failure alone", took, said)
+	}
+}
