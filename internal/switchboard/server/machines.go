@@ -123,6 +123,13 @@ func sameFile(one, other string) bool {
 	if oneErr == nil && otherErr == nil && oneAbsolute == otherAbsolute {
 		return true
 	}
+	if sameIdentity(one, other) {
+		return true
+	}
+	return filepath.Base(one) == filepath.Base(other) && sameIdentity(filepath.Dir(one), filepath.Dir(other))
+}
+
+func sameIdentity(one, other string) bool {
 	oneInfo, oneErr := os.Stat(one)
 	otherInfo, otherErr := os.Stat(other)
 	return oneErr == nil && otherErr == nil && os.SameFile(oneInfo, otherInfo)
@@ -225,7 +232,7 @@ func (s *Server) verifyMachine(w http.ResponseWriter, r *http.Request, header st
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	request := model.SignedRequest{Name: fields["name"], Time: unix, Nonce: fields["nonce"], Signature: signature, Method: r.Method, Path: r.URL.RequestURI(), Body: body}
 	s.mu.Lock()
-	next, name, err := s.machines.Verify(s.state, request, s.cfg.Now(), s.started, s.cfg.SignatureWindow)
+	next, name, err := s.machines.Verify(s.state, request, s.requestTimeLocked(r), s.started, s.cfg.SignatureWindow)
 	var verified verifiedMachine
 	if err == nil {
 		s.state = next
@@ -307,7 +314,7 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 	code, key := readRedeem(w, r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	next, name, err := s.machines.Redeem(s.state, code, key, requestTime(r))
+	next, name, err := s.machines.Redeem(s.state, code, key, s.requestTimeLocked(r))
 	switch {
 	case errors.Is(err, model.ErrInvalidCode):
 		s.state = next

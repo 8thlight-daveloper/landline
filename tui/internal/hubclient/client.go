@@ -36,7 +36,7 @@ type Client struct {
 
 	machine          string
 	key              ed25519.PrivateKey
-	rereadCredential func() (string, Credential)
+	rereadCredential func() (string, Credential, error)
 }
 
 func New(address, secret string) *Client {
@@ -59,18 +59,22 @@ func NewWith(address string, credential Credential) *Client {
 	return client
 }
 
-func (c *Client) RereadCredentialWith(reread func() (string, Credential)) {
+func (c *Client) RereadCredentialWith(reread func() (string, Credential, error)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.rereadCredential = reread
 }
 
-func (c *Client) currentCredential() Credential {
+func (c *Client) currentCredential() (Credential, error) {
 	c.mu.Lock()
 	reread := c.rereadCredential
 	c.mu.Unlock()
 	if reread != nil {
-		if address, fresh := reread(); address != "" {
+		address, fresh, err := reread()
+		if err != nil {
+			return Credential{}, err
+		}
+		if address != "" {
 			c.mu.Lock()
 			if address != c.address {
 				c.address, c.token = address, ""
@@ -83,7 +87,7 @@ func (c *Client) currentCredential() Credential {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return Credential{Secret: c.secret, Machine: c.machine, Key: c.key}
+	return Credential{Secret: c.secret, Machine: c.machine, Key: c.key}, nil
 }
 
 func (c *Client) RereadSecretWith(reread func() string) {
@@ -160,7 +164,10 @@ func (c *Client) register() (string, error) {
 }
 
 func (c *Client) registerOnce() (string, bool, error) {
-	credential := c.currentCredential()
+	credential, problem := c.currentCredential()
+	if problem != nil {
+		return "", false, problem
+	}
 	if credential.empty() {
 		return "", false, ErrNoSecret
 	}
@@ -271,7 +278,7 @@ func (c *Client) do(req *http.Request) ([]byte, int, error) {
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 300 && res.StatusCode < 400 {
-		return nil, 0, errors.New("the switchboard answered with a redirect")
+		return nil, 0, RedirectError{Address: clean.Text(req.URL.Host)}
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {
@@ -281,4 +288,10 @@ func (c *Client) do(req *http.Request) ([]byte, int, error) {
 		return nil, 0, errors.New("the switchboard answered with more than 8 MiB")
 	}
 	return raw, res.StatusCode, nil
+}
+
+type RedirectError struct{ Address string }
+
+func (e RedirectError) Error() string {
+	return "the switchboard at " + e.Address + " answered with a redirect, which Landline does not follow"
 }

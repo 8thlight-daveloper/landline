@@ -17,14 +17,14 @@ type Source interface {
 }
 
 type Observed struct {
-	Address           string
-	Reachable         bool
-	KeyRefusal        string
-	CredentialProblem string
-	NoCredential      bool
-	Agents            []agentsview.Row
-	Switchboard       model.Switchboard
-	LandlineFound     bool
+	Address       string
+	Reachable     bool
+	KeyRefusal    string
+	Failure       string
+	NoCredential  bool
+	Agents        []agentsview.Row
+	Switchboard   model.Switchboard
+	LandlineFound bool
 }
 
 func Observe(source Source, landlineFound bool) Observed {
@@ -34,10 +34,7 @@ func Observe(source Source, landlineFound bool) Observed {
 	if errors.As(err, &refusal) {
 		observed.KeyRefusal = refusal.Text
 	}
-	var problem hubclient.CredentialProblem
-	if errors.As(err, &problem) {
-		observed.CredentialProblem = problem.Text
-	}
+	observed.Failure = failureShownInTheStateLine(err)
 	observed.NoCredential = errors.Is(err, hubclient.ErrNoSecret)
 	if err != nil {
 		return observed
@@ -96,6 +93,18 @@ func (s *Session) Notify(text string) {
 	s.notice, s.skip = text, true
 }
 
+func failureShownInTheStateLine(err error) string {
+	var problem hubclient.CredentialProblem
+	var redirect hubclient.RedirectError
+	switch {
+	case errors.As(err, &problem):
+		return problem.Text
+	case errors.As(err, &redirect):
+		return redirect.Error()
+	}
+	return ""
+}
+
 func (s *Session) NotifyFailure(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,6 +136,6 @@ func (s *Session) Menu() model.Menu {
 	return model.Build(model.Input{
 		Address: s.address, Local: s.local, Reachable: s.observed.Reachable, Agents: s.observed.Agents,
 		Switchboard: s.observed.Switchboard, App: s.app, LandlineFound: s.observed.LandlineFound,
-		Busy: s.busy, Notice: s.notice, CredentialProblem: s.observed.CredentialProblem, NoCredential: s.observed.NoCredential,
+		Busy: s.busy, Notice: s.notice, Failure: s.observed.Failure, NoCredential: s.observed.NoCredential,
 	})
 }

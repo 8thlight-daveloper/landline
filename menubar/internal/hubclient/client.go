@@ -75,11 +75,10 @@ func (c *Client) currentCredential() (Credential, error) {
 	c.mu.Unlock()
 	if reread != nil {
 		address, fresh, err := reread()
-		var problem CredentialProblem
-		if errors.As(err, &problem) {
-			return Credential{}, problem
+		if err != nil {
+			return Credential{}, err
 		}
-		if err == nil && address != "" {
+		if address != "" {
 			c.mu.Lock()
 			if address != c.address {
 				c.address, c.token = address, ""
@@ -240,6 +239,12 @@ func (c *Client) registerOnce() (string, bool, error) {
 	return answer.Token, false, nil
 }
 
+type RedirectError struct{ Address string }
+
+func (e RedirectError) Error() string {
+	return "the switchboard at " + e.Address + " answered with a redirect, which Landline does not follow"
+}
+
 type KeyRefusal struct{ Text string }
 
 func (r KeyRefusal) Error() string { return r.Text }
@@ -301,7 +306,7 @@ func (c *Client) do(req *http.Request) ([]byte, int, error) {
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 300 && res.StatusCode < 400 {
-		return nil, 0, errors.New("the switchboard answered with a redirect")
+		return nil, 0, RedirectError{Address: clean.Text(req.URL.Host)}
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {

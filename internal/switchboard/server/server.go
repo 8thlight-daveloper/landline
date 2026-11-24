@@ -182,18 +182,44 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) expiring(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		now := s.cfg.Now()
-		s.mu.Lock()
-		s.expireLocked(now)
-		s.mu.Unlock()
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestTimeKey{}, now)))
+		clock := &requestClock{now: s.cfg.Now}
+		if !readsTheClockUnderTheLock(r) {
+			s.mu.Lock()
+			s.expireLocked(clock.read())
+			s.mu.Unlock()
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestClockKey{}, clock)))
 	})
 }
 
-type requestTimeKey struct{}
+func readsTheClockUnderTheLock(r *http.Request) bool {
+	redeem := r.Method == http.MethodPatch && r.URL.Path == "/v1/machines"
+	return redeem || machineSigned(r.Header.Get("Authorization"))
+}
+
+type requestClockKey struct{}
+
+type requestClock struct {
+	now  func() time.Time
+	at   time.Time
+	done bool
+}
+
+func (c *requestClock) read() time.Time {
+	if !c.done {
+		c.at, c.done = c.now(), true
+	}
+	return c.at
+}
 
 func requestTime(r *http.Request) time.Time {
-	return r.Context().Value(requestTimeKey{}).(time.Time)
+	return r.Context().Value(requestClockKey{}).(*requestClock).read()
+}
+
+func (s *Server) requestTimeLocked(r *http.Request) time.Time {
+	now := requestTime(r)
+	s.expireLocked(now)
+	return now
 }
 
 func (s *Server) expireLocked(now time.Time) {

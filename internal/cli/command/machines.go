@@ -20,11 +20,11 @@ func adminClient(command string, env Env) (*client.Client, Config, int) {
 		return nil, config, 1
 	}
 	if config.Host != "" && !IsThisMachines(config.Host) {
-		fmt.Fprintf(env.Stderr, "%s %s: the saved switchboard host %s is not an address of this machine. Run it on the machine where that switchboard runs\n", adminName, command, config.Host)
+		fmt.Fprintf(env.Stderr, "%s %s: the saved switchboard host %s is not an address of this machine. Run it on the machine where that switchboard runs\n", adminName, command, printableLine(config.Host))
 		return nil, config, 1
 	}
 	if address, parseErr := url.Parse(HubURL(env)); parseErr == nil && address.Hostname() != "" && !IsThisMachines(address.Hostname()) {
-		fmt.Fprintf(env.Stderr, "%s %s: the switchboard address %s is not an address of this machine. Run it on the machine where that switchboard runs\n", adminName, command, address.Host)
+		fmt.Fprintf(env.Stderr, "%s %s: the switchboard address %s is not an address of this machine. Run it on the machine where that switchboard runs\n", adminName, command, printableLine(address.Host))
 		return nil, config, 1
 	}
 	secret := env.processEnvironment("LANDLINE_SECRET")

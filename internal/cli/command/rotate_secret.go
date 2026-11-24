@@ -13,22 +13,22 @@ const rotatedMessage = "rotated the switchboard secret. Every agent must registe
 func serverRotateSecret(args []string, env Env, dataDir string) int {
 	const name = "landline server rotate-secret:"
 	if err := checkSwitchboardFlags(args); err != nil {
-		fmt.Fprintln(env.Stderr, name, err)
+		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
 		return 2
 	}
 	config, err := ReadConfig(env)
 	if err != nil {
-		fmt.Fprintln(env.Stderr, name, err)
+		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
 		return 1
 	}
 	values, _ := FlagValues(args, SwitchboardFlags...)
 	_, flagLines, err := SwitchboardSettings(env, values)
 	if err != nil {
-		fmt.Fprintln(env.Stderr, name, err)
+		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
 		return 1
 	}
 	if config.Host != "" && !IsThisMachines(config.Host) {
-		fmt.Fprintf(env.Stderr, "%s the saved switchboard host %s is not an address of this machine. Rotate the secret on the machine where that switchboard runs, then run landline server join here again\n", name, config.Host)
+		fmt.Fprintf(env.Stderr, "%s the saved switchboard host %s is not an address of this machine. Rotate the secret on the machine where that switchboard runs, then run landline server join here again\n", name, printableLine(config.Host))
 		return 1
 	}
 	if env.processEnvironment("LANDLINE_SECRET") != "" {
@@ -36,18 +36,18 @@ func serverRotateSecret(args []string, env Env, dataDir string) int {
 		return 1
 	}
 	if _, err := findBinary(SwitchboardBinaryName); err != nil {
-		fmt.Fprintln(env.Stderr, name, err)
+		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
 		return 1
 	}
 	address, err := rotationAddress(args, config, env)
 	if err != nil {
-		fmt.Fprintln(env.Stderr, name, err)
+		fmt.Fprintln(env.Stderr, name, printableLine(err.Error()))
 		return 2
 	}
 	if _, owned := switchboardPID(dataDir); !owned {
 		for _, each := range []string{address, savedAddress(config)} {
 			if each != "" && addressAnswers(each) {
-				fmt.Fprintf(env.Stderr, "%s something answers at %s and landline server up did not start it, so this command cannot stop it. Stop it where it runs, then run this again\n", name, each)
+				fmt.Fprintf(env.Stderr, "%s something answers at %s and landline server up did not start it, so this command cannot stop it. Stop it where it runs, then run this again\n", name, printableLine(each))
 				return 1
 			}
 		}

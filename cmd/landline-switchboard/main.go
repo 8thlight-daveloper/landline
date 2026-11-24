@@ -40,58 +40,59 @@ func run(args []string) int {
 	}
 	values, err := command.FlagValues(args, command.SwitchboardFlags...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\nusage: %s [--addr A] [--log PATH] [--host H] [--keepalive D] [--delivery-timeout D] [--grace D] [--invite-lifetime D] [--signature-window D]\n       %s version\n", name, err, name, name)
+		fmt.Fprintf(os.Stderr, "%s: %s\nusage: %s [--addr A] [--log PATH] [--host H] [--keepalive D] [--delivery-timeout D] [--grace D] [--invite-lifetime D] [--signature-window D]\n       %s version\n", name, command.Printable(err.Error()), name, name)
 		return 2
 	}
 	saved, err := command.ReadConfig(env)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	savedHost, savedPort, err := saved.Listen(os.Getenv)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	addr := command.Or(values["--addr"], net.JoinHostPort(savedHost, strconv.Itoa(savedPort)))
 	if _, err := command.TimingFrom(values); err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	settings, flagLines, err := command.SwitchboardSettings(env, values)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	for _, line := range flagLines {
-		fmt.Fprintln(os.Stderr, name+":", line)
+		say(line)
 	}
 	logPath, host, timing := settings.Log, settings.Host, settings.Timing
 	warnIfExposed(addr)
 	dataDirectory := filepath.Dir(command.DefaultLogPath(env))
 	machinesPath := filepath.Join(dataDirectory, "machines.json")
-	lockPath := filepath.Join(dataDirectory, "switchboard.lock")
+	lockPath := command.SwitchboardLockPath(env)
+	oldMachinesPath := filepath.Join(filepath.Dir(logPath), "machines.json")
 	lock, err := server.LockDataDirectory(lockPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	defer lock.Release()
-	if err := server.CheckLogIsItsOwnFile(logPath, machinesPath, lockPath); err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+	if err := server.CheckLogIsItsOwnFile(logPath, machinesPath, lockPath, oldMachinesPath); err != nil {
+		say(err)
 		return 1
 	}
-	notice, err := server.CarryOverMachines(machinesPath, filepath.Join(filepath.Dir(logPath), "machines.json"))
+	notice, err := server.CarryOverMachines(machinesPath, oldMachinesPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	if notice != "" {
-		fmt.Fprintln(os.Stderr, name+":", notice)
+		say(notice)
 	}
 	log, err := store.Open(logPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	defer log.Close()
@@ -100,7 +101,7 @@ func run(args []string) int {
 		secret = saved.Secret
 	}
 	if secret == "" {
-		fmt.Fprintln(os.Stderr, name+": there is no secret. Run landline server up, or set LANDLINE_SECRET")
+		say("there is no secret. Run landline server up, or set LANDLINE_SECRET")
 		return 1
 	}
 	switchboard, err := server.New(server.Config{
@@ -112,23 +113,27 @@ func run(args []string) int {
 		Build:        server.BuildResponse{Version: version, Commit: commit, Date: date},
 	}, log)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	listener, resolved, err := listenOn(addr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: cannot listen on %s: %v\n", name, addr, err)
+		say(fmt.Sprintf("cannot listen on %s: %v", addr, err))
 		return command.ExitCannotListen
 	}
 	switchboard.Listening()
 	fmt.Fprint(os.Stderr, command.BannerFor(os.Stderr))
-	fmt.Fprintf(os.Stderr, "%s listening on %s, host %q, log %s%s\n", name, listener.Addr(), host, logPath, asGiven(addr, listener.Addr().String(), resolved))
+	fmt.Fprintln(os.Stderr, command.ListeningLinePrefix+command.Printable(fmt.Sprintf("%s, host %q, log %s%s", listener.Addr(), host, logPath, asGiven(addr, listener.Addr().String(), resolved))))
 	srv := &http.Server{Handler: switchboard.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
 	if err := srv.Serve(listener); err != nil {
-		fmt.Fprintln(os.Stderr, name+":", err)
+		say(err)
 		return 1
 	}
 	return 0
+}
+
+func say(text any) {
+	fmt.Fprintln(os.Stderr, name+": "+command.Printable(fmt.Sprint(text)))
 }
 
 func listenOn(addr string) (net.Listener, []net.IP, error) {
@@ -169,6 +174,6 @@ func warnIfExposed(addr string) {
 		return
 	}
 	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		fmt.Fprintf(os.Stderr, "%s: warning: %s is not a loopback address. The switchboard speaks plain HTTP, so tokens and messages cross the network in the clear. Prefer localhost and a tunnel.\n", name, addr)
+		say(fmt.Sprintf("warning: %s is not a loopback address. The switchboard speaks plain HTTP, so tokens and messages cross the network in the clear. Prefer localhost and a tunnel.", addr))
 	}
 }

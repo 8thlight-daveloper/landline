@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -98,6 +99,14 @@ func ensureSecret(env Env, config Config) (Config, error) {
 }
 
 const ExitCannotListen = 3
+
+const ListeningLinePrefix = SwitchboardBinaryName + ": listening on "
+
+func saysItListens(output string) bool {
+	return slices.ContainsFunc(strings.Split(output, "\n"), func(line string) bool {
+		return strings.HasPrefix(line, ListeningLinePrefix)
+	})
+}
 
 func pidFile(dataDir string) string { return filepath.Join(dataDir, "switchboard.pid") }
 
@@ -215,7 +224,7 @@ func serverUp(args []string, env Env, dataDir string) int {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		raw, _ := os.ReadFile(outPath)
-		if strings.Contains(string(raw), "listening on") {
+		if saysItListens(string(raw)) {
 			return upListening(env, Config{Host: host, Port: port}, pid, addr, outPath)
 		}
 		select {

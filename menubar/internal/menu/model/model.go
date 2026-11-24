@@ -64,17 +64,17 @@ type Switchboard struct {
 }
 
 type Input struct {
-	Address           string
-	Local             bool
-	Reachable         bool
-	Agents            []agentsview.Row
-	Switchboard       Switchboard
-	App               buildinfo.Build
-	LandlineFound     bool
-	Busy              bool
-	Notice            string
-	CredentialProblem string
-	NoCredential      bool
+	Address       string
+	Local         bool
+	Reachable     bool
+	Agents        []agentsview.Row
+	Switchboard   Switchboard
+	App           buildinfo.Build
+	LandlineFound bool
+	Busy          bool
+	Notice        string
+	Failure       string
+	NoCredential  bool
 }
 
 func Build(in Input) Menu {
@@ -106,8 +106,8 @@ func stateLineWhenUnreachable(in Input) string {
 	switch {
 	case in.NoCredential:
 		return NoCredentialLine
-	case in.CredentialProblem != "":
-		return in.CredentialProblem
+	case in.Failure != "":
+		return in.Failure
 	}
 	return unreachableLine
 }

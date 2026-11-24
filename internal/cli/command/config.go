@@ -448,7 +448,14 @@ func saveJoin(env Env, private ed25519.PrivateKey, host string, port int, name s
 	return changed, forgetSecretLine(env)
 }
 
+func SwitchboardLockPath(env Env) string {
+	return filepath.Join(dataDirectory(env), "switchboard.lock")
+}
+
 func joinWithCode(env Env, host string, port int, code string) error {
+	if _, err := os.Lstat(SwitchboardLockPath(env)); err == nil {
+		return fmt.Errorf("this home runs a switchboard, because %s exists, and it uses the shared secret in %s. To move the switchboard to another host, stop it and delete %s, then join", SwitchboardLockPath(env), configPath(env), SwitchboardLockPath(env))
+	}
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	restore, err := snapshotJoinFiles(env)
 	if err != nil {
