@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/8thlight-daveloper/landline/testsupport/clock/sleeper"
 	"io"
 	"net"
 	"net/http"
@@ -1614,7 +1615,7 @@ func TestEverySignedRequestIsRefusedWithReasonRefusedInTheFirstFiveSecondsAfterA
 	if took := time.Since(before); took > 2*time.Second {
 		t.Skipf("restart took %s, too long to sign two seconds after its start second and inside its start period", took)
 	}
-	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(2 * time.Second)))
+	sleeper.Until(time.Now().Truncate(time.Second).Add(2 * time.Second))
 	status, body := h.signed(m, time.Now().Unix(), "POST", "/v1/observers", []byte(`{"kind":"tui"}`))
 	var answer struct{ Reason string }
 	json.Unmarshal([]byte(body), &answer)
@@ -1674,7 +1675,7 @@ func (h *hostRig) restartAndSettle(flags ...string) {
 }
 
 func waitPastTheStartPeriod() {
-	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(6 * time.Second)))
+	sleeper.Until(time.Now().Truncate(time.Second).Add(6 * time.Second))
 }
 
 var hyphenatedCode = regexp.MustCompile(`[2-9A-HJKMNP-Za-hjkmnp-z]{4}-[2-9A-HJKMNP-Za-hjkmnp-z]{4}`)

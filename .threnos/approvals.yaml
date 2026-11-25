@@ -36,19 +36,20 @@ approvals:
     branch did not change the unit.
 - gate: acceptance
   unit: acceptance
-  hash: sha256:5bb758fdddd369497b793252ddd7ade21975c4b8baf3f595bbec9d4a13bc1949
+  hash: sha256:e2309dc173ec50fd26a7ffd8f75e38c68f4398d55db3182321da0abf3ff74f96
   approver:
     kind: agent
     harness: claude-code
-    session: eb1ac87a-b2ad-4ce3-ac1e-2605910eec0c
+    session: 4f6b82f4-55c2-4ae7-8f94-7d65f6a63d22
   author:
     kind: agent
     harness: claude-code
     session: 781bb773-f279-46f1-af55-190bdc277114
   date: 2026-11-25
-  note: 'Reviewed on test-teardown by a fresh session after two rejected rounds: the
-    reaper, leak check and sweep in testsupport/process/reaper, goroutine Fatal fixes,
-    run-folder names without digits.'
+  note: Wall-clock sleeps use testsupport/clock/sleeper, which waits on the wall clock,
+    after a flaky start-period failure traced to time.Sleep waking 0.9 ms before its
+    wall-clock target. Reviewed by a fresh session after a first round was rejected
+    for three unconverted sibling tests.
 - gate: architecture
   unit: architecture.yaml
   hash: sha256:09bd7b8f1a6159d9c8d65fcc80ee6bd31469a192cb6f151f19cd6f0689fd6a00

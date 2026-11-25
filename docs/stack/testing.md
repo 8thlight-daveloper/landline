@@ -37,3 +37,7 @@ gets its own folder in the temporary directory, named with the package's prefix 
 Every process a test starts must name a path in the run folder on its command line, or exit by itself within a second. A
 shell script that has to block uses a shell builtin, such as `read _ < fifo` on a FIFO under `t.TempDir()`, rather than
 a `sleep` that runs as a child with no path.
+
+A test that must wait for a wall-clock instant uses `sleeper.Until` from `testsupport/clock/sleeper` and never
+`time.Sleep(time.Until(...))`, because `Sleep` runs on the monotonic clock and can wake before the wall clock reaches
+the instant.

@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"github.com/8thlight-daveloper/landline/testsupport/clock/sleeper"
 	nethttp "net/http"
 	"net/http/httptest"
 	"regexp"
@@ -206,7 +207,7 @@ func TestARefusedSignedRequestIsSignedAnewAboutOnceASecondUntilSixSecondsAfterTh
 
 func TestASignedRequestRefusedInTheStartPeriodOfASwitchboardThatJustStartedSucceedsWithoutAnError(t *testing.T) {
 	t.Parallel()
-	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+	sleeper.Until(time.Now().Truncate(time.Second).Add(time.Second))
 	startSecond := time.Now().Unix()
 	var mu sync.Mutex
 	var refusals, accepted int

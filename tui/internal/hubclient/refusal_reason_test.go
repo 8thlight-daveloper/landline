@@ -3,6 +3,7 @@ package hubclient
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"github.com/8thlight-daveloper/landline/testsupport/clock/sleeper"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -194,7 +195,7 @@ func TestARefusedSignedRegistrationIsSignedAnewAboutOnceASecondUntilSixSecondsAf
 
 func TestARegistrationRefusedInTheStartPeriodOfASwitchboardThatJustStartedEndsInTheAgentList(t *testing.T) {
 	t.Parallel()
-	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+	sleeper.Until(time.Now().Truncate(time.Second).Add(time.Second))
 	startSecond := time.Now().Unix()
 	var refusals atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
