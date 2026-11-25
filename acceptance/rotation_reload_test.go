@@ -203,7 +203,7 @@ func TestASwitchboardThatGetsSIGHUPWithAnUnreadableConfigOrNoSecretKeepsTheOldSe
 	cases := map[string]func(c *configuredHome){
 		"an unreadable config.toml": func(c *configuredHome) {
 			if err := os.Chmod(configTomlOf(c.home), 0o000); err != nil {
-				t.Fatal(err)
+				c.t.Fatal(err)
 			}
 			c.t.Cleanup(func() { os.Chmod(configTomlOf(c.home), 0o600) })
 		},

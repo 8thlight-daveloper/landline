@@ -36,20 +36,19 @@ approvals:
     branch did not change the unit.
 - gate: acceptance
   unit: acceptance
-  hash: sha256:6775adee01c56ba34c24f49e7a56c33e5649aa6146c0a3f88f8b03dd9372b970
+  hash: sha256:d6be9aaa43e5848360f8a715c9e11cb539ab9551a2e5a79a564ec90a4ce3d31f
   approver:
     kind: agent
     harness: claude-code
-    session: cd739941-3b78-4d04-a8d7-5c61633fe34d
+    session: 8ba449f7-2970-48f7-afd9-30a3de05d3f7
   author:
     kind: agent
     harness: claude-code
     session: 781bb773-f279-46f1-af55-190bdc277114
-  date: 2026-11-24
-  note: 'Approved by the fourteenth review of ADR 0200 on rotate-secret-command, the
-    last of a chain: full reviews through the ninth (Codex and Claude), then targeted
-    reviews ten to fourteen (Claude). Each round''s findings were fixed by a separate
-    test author and builder.'
+  date: 2026-11-25
+  note: Skip and Fatal in case closures use the subtest t, after the Linux CI panic
+    at switchboard_start_test.go:312. Reviewed by two fresh Claude sessions. The skip
+    path was checked on a case-sensitive disk image.
 - gate: architecture
   unit: architecture.yaml
   hash: sha256:7c307e45d36d59888e1e52c63717fd82ed5f1b30cb651b28dd021b8926a00f8d

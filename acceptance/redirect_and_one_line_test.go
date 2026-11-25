@@ -281,7 +281,7 @@ func TestJoinWithACodeRefusesAndChangesNoFileWhileThisHomeHoldsASwitchboardLock(
 		"held by a running switchboard": func(c *configuredHome) {
 			c.startSwitchboard()
 			if !exists(c.dataFile("switchboard.lock")) {
-				t.Fatalf("the running switchboard made no %s", c.dataFile("switchboard.lock"))
+				c.t.Fatalf("the running switchboard made no %s", c.dataFile("switchboard.lock"))
 			}
 		},
 		"left by a switchboard that stopped": func(c *configuredHome) {
@@ -386,10 +386,10 @@ func TestJoinWithACodeRefusesInAHomeWhereASwitchboardRanBeforeTheLockFileExisted
 		"the installed agent": func(c *configuredHome) string {
 			path := installedAgentPath(c)
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				t.Fatal(err)
+				c.t.Fatal(err)
 			}
 			if err := os.WriteFile(path, []byte("installed by an earlier landline server install\n"), 0o644); err != nil {
-				t.Fatal(err)
+				c.t.Fatal(err)
 			}
 			return path
 		},

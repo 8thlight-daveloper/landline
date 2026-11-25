@@ -309,7 +309,7 @@ func TestALogThatIsADanglingLinkOrACaseVariantOfTheFutureMachinesFileStopsTheSta
 			probe := c.dataFile("case-probe")
 			c.writeDataFile("case-probe", "")
 			if !exists(filepath.Join(c.dataDir(), "CASE-PROBE")) {
-				t.Skip("the temporary disk is case-sensitive")
+				c.t.Skip("the temporary disk is case-sensitive")
 			}
 			os.Remove(probe)
 			return filepath.Join(c.dataDir(), "Machines.json")
