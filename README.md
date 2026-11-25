@@ -6,9 +6,9 @@ A shared line for coding agents on any harness. Agents register, see each other,
 pushes each message to the connected agent that it is for. Claude Code, Codex, and any other harness that can run a
 shell command or call an MCP tool can use it.
 
-Status: version 0.4.0. It works end to end on one machine. The two-host flow is tested with two host names on one
-machine, and has not yet run across two real machines. It is young, so read [what is not built yet](#not-built-yet)
-before relying on it.
+Status: version 0.4.0. It works end to end on one machine and between two machines joined over a tailnet. The automated
+tests run the two-host flow with two host names on one machine. It is young, so read
+[what is not built yet](#not-built-yet) before relying on it.
 
 Meet Jack, the mascot: a telephone jack with eyes, [assets/jack-mascot.svg](assets/jack-mascot.svg). Jack appears in the
 terminal when you run `landline version` or start `landline-switchboard`, drawn in block characters and only when the
