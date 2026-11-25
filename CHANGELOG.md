@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.0
+
+- A machine joins with an invite code and a key that outlasts a secret rotation
+  ([0200](docs/decisions/0200-a-machine-joins-with-an-invite-code-and-a-keypair-that-outlasts-secret-rotation.md)).
+  `landline server invite --name <name>` makes a one-time code, and `landline server join <host:port> --code <code>` on
+  the new machine saves an Ed25519 key in `machine.key` and registers its public half. The switchboard keeps only public
+  keys, in `machines.json`. `landline server machines` lists them by fingerprint, and `landline server revoke <name>` or
+  `--all` removes them. A client sends `LANDLINE_SECRET`, then `machine.key`, then the secret in `config.toml`. The
+  switchboard refuses every signed request for one signature window after it starts, and refuses to follow a redirect.
+- One TOML config ([0190](docs/decisions/0190-one-toml-config-names-the-switchboard-by-host-and-port.md)).
+  `~/.config/landline/config.toml` replaces `config.json`, which carries over and is kept until the new file reads back.
+  One `host` and `port` name both where the switchboard listens and where clients connect.
+- The switchboard reads its settings from the config
+  ([0220](docs/decisions/0220-the-switchboard-reads-its-settings-from-the-config-and-keeps-machines-json-in-the-data-directory.md)).
+  A `[server]` table holds them, and a flag overrides one for one run with a warning. `machines.json` lives in
+  `~/.local/share/landline/`. One home runs one switchboard, held by a lock on `switchboard.lock`.
+- `landline server rotate-secret` and the menu bar's `Rotate secret…`
+  ([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md),
+  [0260](docs/decisions/0260-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). The command
+  saves a new secret and sends the running switchboard `SIGHUP`, which reads the secret again without a restart. Joined
+  machines keep working through their keys. Every agent registers again.
+- The `landline` skill ships in the binary
+  ([0210](docs/decisions/0210-the-landline-skill-ships-in-the-binary-and-refuses-what-it-does-not-know.md)).
+  `landline setup claude|codex` installs it, and `/landline register`, `/landline agent`, and `/landline help` refuse
+  what they do not know.
+- Upgrade: stop the old switchboard, run `just install`, then `landline server up`. Run `landline setup claude|codex`
+  again so each harness gets the skill, and restart every agent session. A machine that holds a copied secret keeps
+  working until the next rotation. Join it with an invite code so it outlasts rotations.
+
 ## 0.3.0
 
 - An agent has an id, a project, and a task ([0160](docs/decisions/0160-an-agent-has-an-id-a-project-and-a-task.md)).
