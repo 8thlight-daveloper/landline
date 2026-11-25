@@ -19,3 +19,21 @@ instead.
 
 A scenario starts every switchboard on `--addr 127.0.0.1:0` or a free port it picked. The one check of the default
 address sets `LANDLINE_PORT` to a free port, so it runs while a person's own switchboard holds 8787.
+
+## Processes a test starts
+
+A test package that starts a process calls `reaper.Main` from `testsupport/process/reaper` in its `TestMain`. The run
+gets its own folder in the temporary directory, named with the package's prefix and random letters, and `TestMain` sets
+`TMPDIR` inside that folder, so every `t.TempDir()`, built binary, and copied script lands in it.
+
+- The reaper is the test binary started again in its own session. It holds a pipe that only the test process can write.
+  When the test process ends in any way, including SIGKILL or a Ctrl-C to its process group, the reaper kills every
+  process whose command line names a path in the run folder, then removes the folder.
+- The leak check runs after the tests. A process from the run folder that is still running fails the run, even when
+  every test passed, and the check prints its pid and command line. A run that cannot list processes fails too.
+- The sweep runs before the tests, as a backup. It kills a process left by an earlier run of the same package only when
+  that run's folder is gone or its reaper no longer holds the folder's lock, and the process's parent is pid 1 or gone.
+
+Every process a test starts must name a path in the run folder on its command line, or exit by itself within a second. A
+shell script that has to block uses a shell builtin, such as `read _ < fifo` on a FIFO under `t.TempDir()`, rather than
+a `sleep` that runs as a child with no path.

@@ -87,4 +87,4 @@ contracts:
 # Scenarios are Go code that start the built binary and drive it from outside.
 acceptance:
   scenarios: code
-  may_import: []
+  may_import: [github.com/8thlight-daveloper/landline/testsupport]

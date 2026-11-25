@@ -2,7 +2,6 @@ package acceptance
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,14 +13,19 @@ func (c *configuredHome) dataDir() string { return filepath.Dir(c.dataFile("mach
 
 func (c *configuredHome) writeDataFile(name, content string) string {
 	c.t.Helper()
-	if err := os.MkdirAll(c.dataDir(), 0o700); err != nil {
-		c.t.Fatal(err)
-	}
-	path := c.dataFile(name)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	path, err := c.tryWriteDataFile(name, content)
+	if err != nil {
 		c.t.Fatal(err)
 	}
 	return path
+}
+
+func (c *configuredHome) tryWriteDataFile(name, content string) (string, error) {
+	if err := os.MkdirAll(c.dataDir(), 0o700); err != nil {
+		return "", err
+	}
+	path := c.dataFile(name)
+	return path, os.WriteFile(path, []byte(content), 0o600)
 }
 
 func (c *configuredHome) symlink(target, link string) string {
@@ -421,13 +425,7 @@ func TestTheLockFileHoldsTheRunningSwitchboardsProcessIDAndNothingElse(t *testin
 func TestRotateSecretNeverSignalsAProcessNamedByAStalePidFileWhoseCommandLineMentionsTheSwitchboard(t *testing.T) {
 	t.Parallel()
 	c := newConfiguredHome(t, "")
-	stranger := exec.Command("sh", "-c", "sleep 30; : landline-switchboard")
-	if err := stranger.Start(); err != nil {
-		t.Fatal(err)
-	}
-	ended := make(chan struct{})
-	go func() { stranger.Wait(); close(ended) }()
-	t.Cleanup(func() { stranger.Process.Kill(); <-ended })
+	stranger, ended := startIdleProcess(t, filepath.Join(t.TempDir(), switchboardName))
 	c.writeDataFile("switchboard.pid", strconv.Itoa(stranger.Process.Pid))
 	c.landline("server", "rotate-secret")
 	select {

@@ -49,7 +49,7 @@ func menubarBinary(t *testing.T, flags string) string {
 	if dir, ok := built[key]; ok {
 		return filepath.Join(dir, menubarName)
 	}
-	dir, err := os.MkdirTemp("", "landline-acceptance-menubar-")
+	dir, err := os.MkdirTemp("", "landline-menubar-build-")
 	if err != nil {
 		t.Fatal(err)
 	}

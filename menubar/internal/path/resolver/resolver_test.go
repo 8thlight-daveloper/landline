@@ -3,6 +3,7 @@ package resolver
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -41,7 +42,10 @@ func TestLoginAsksTheShellForItsPathWithTheLoginFlag(t *testing.T) {
 
 func TestLoginKeepsTheOwnPathWhenTheShellIsMissingFailsOrHangs(t *testing.T) {
 	dir := t.TempDir()
-	hang := script(t, dir, "hang", "sleep 30")
+	if err := syscall.Mkfifo(filepath.Join(dir, "never-written"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hang := script(t, dir, "hang", `read _ < "$(dirname "$0")/never-written"`)
 	fail := script(t, dir, "fail", "exit 3")
 	for name, shell := range map[string]string{"empty": "", "missing": filepath.Join(dir, "nope"), "fail": fail} {
 		if got := Login(shell, "own", time.Second); got != "own" {

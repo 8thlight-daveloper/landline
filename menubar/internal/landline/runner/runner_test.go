@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/8thlight-daveloper/landline/testsupport/process/reaper"
 )
 
 func fake(t *testing.T, body string) *Runner {
@@ -59,7 +62,8 @@ func TestALongStandardErrorLineIsCut(t *testing.T) {
 }
 
 func TestACommandThatRunsPastTheLimitIsStoppedAndCountedAsFailed(t *testing.T) {
-	r := fake(t, `sleep 30`)
+	r := fake(t, `read _ < "$(dirname "$0")/never-written"`)
+	neverWritten(t, r)
 	r.Limit = 300 * time.Millisecond
 	start := time.Now()
 	failure, _ := r.Run(nil)
@@ -75,7 +79,9 @@ func TestTheLimitIsThirtySeconds(t *testing.T) {
 }
 
 func TestACommandThatLeavesAChildHoldingItsOutputReturnsAfterItExits(t *testing.T) {
-	r := fake(t, `(sleep 20 >/dev/null 2>&1 &) ; sleep 20 >&2 & exit 0`)
+	r := fake(t, `blocked="$(dirname "$0")/never-written"; (sh -c 'read _ < "$0"' "$blocked" >/dev/null 2>&1 &) ; sh -c 'read _ < "$0"' "$blocked" >&2 & exit 0`)
+	neverWritten(t, r)
+	t.Cleanup(func() { reaper.KillProcessesNaming(filepath.Dir(r.Binary)) })
 	start := time.Now()
 	failure, _ := r.Run(nil)
 	if failure != "" || time.Since(start) > 10*time.Second {
@@ -139,5 +145,12 @@ func TestTheCapKeepsTheFirstBytesOnly(t *testing.T) {
 	n, _ := c.Write([]byte("cdef"))
 	if n != 4 || c.String() != "abcd" {
 		t.Fatalf("%d %q", n, c.String())
+	}
+}
+
+func neverWritten(t *testing.T, r *Runner) {
+	t.Helper()
+	if err := syscall.Mkfifo(filepath.Join(filepath.Dir(r.Binary), "never-written"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
