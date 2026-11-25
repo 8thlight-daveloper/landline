@@ -1,0 +1,70 @@
+# Managed by approve.py. Each entry records one approval of one unit, with a hash of its content.
+approvals:
+- gate: contracts
+  unit: contracts/agent/registry
+  hash: sha256:853599e789d842c3b7116fc8fa2b830b0eeabc022435e2d2fdfa4bfc62940855
+  approver:
+    kind: person
+    name: dnawara
+  date: 2026-11-24
+  note: Baseline approval when the ledger was started on rotate-secret-command. This
+    branch did not change the unit.
+- gate: contracts
+  unit: contracts/machine/registry
+  hash: sha256:9f78b37be86acc237163e2b884330845c41d9b0cc50084f6f9627b2227d0e6cf
+  approver:
+    kind: agent
+    harness: claude-code
+    session: cd739941-3b78-4d04-a8d7-5c61633fe34d
+  author:
+    kind: agent
+    harness: claude-code
+    session: 781bb773-f279-46f1-af55-190bdc277114
+  date: 2026-11-24
+  note: 'Approved by the fourteenth review of ADR 0200 on rotate-secret-command, the
+    last of a chain: full reviews through the ninth (Codex and Claude), then targeted
+    reviews ten to fourteen (Claude). Each round''s findings were fixed by a separate
+    test author and builder.'
+- gate: contracts
+  unit: contracts/message/router
+  hash: sha256:ea778d9d904a29bf788d917c2cfe6939728ad3c32d7c2008d8bd587fda4030d1
+  approver:
+    kind: person
+    name: dnawara
+  date: 2026-11-24
+  note: Baseline approval when the ledger was started on rotate-secret-command. This
+    branch did not change the unit.
+- gate: acceptance
+  unit: acceptance
+  hash: sha256:6775adee01c56ba34c24f49e7a56c33e5649aa6146c0a3f88f8b03dd9372b970
+  approver:
+    kind: agent
+    harness: claude-code
+    session: cd739941-3b78-4d04-a8d7-5c61633fe34d
+  author:
+    kind: agent
+    harness: claude-code
+    session: 781bb773-f279-46f1-af55-190bdc277114
+  date: 2026-11-24
+  note: 'Approved by the fourteenth review of ADR 0200 on rotate-secret-command, the
+    last of a chain: full reviews through the ninth (Codex and Claude), then targeted
+    reviews ten to fourteen (Claude). Each round''s findings were fixed by a separate
+    test author and builder.'
+- gate: architecture
+  unit: architecture.yaml
+  hash: sha256:7c307e45d36d59888e1e52c63717fd82ed5f1b30cb651b28dd021b8926a00f8d
+  approver:
+    kind: person
+    name: dnawara
+  date: 2026-11-24
+  note: Baseline approval when the ledger was started on rotate-secret-command. This
+    branch did not change the unit.
+- gate: model
+  unit: internal/model
+  hash: sha256:7e015b3d5a0c3c85ae7031855c7d5ce8daf8fdbe3d8bf9e404795cf0acbbb6d7
+  approver:
+    kind: person
+    name: dnawara
+  date: 2026-11-24
+  note: Baseline approval when the ledger was started on rotate-secret-command. This
+    branch did not change the unit.
