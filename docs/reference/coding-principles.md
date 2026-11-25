@@ -1,6 +1,6 @@
 ---
 approval: person
-reviewed: 2026-11-23
+reviewed: 2026-11-25
 ---
 
 # Coding principles

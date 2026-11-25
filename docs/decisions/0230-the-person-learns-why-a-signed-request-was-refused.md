@@ -1,6 +1,8 @@
 ---
 category: ux
-status: proposed
+status: accepted
+approval: person
+approver: {kind: person, name: dnawara}
 note: Drafted on 2026-11-23 from the person's choices of a notification, a switchboard log line, and an Open Log item. It adds a macOS notification and an unauthenticated path to a log file, and it waits for the person's approval. Revised on 2026-11-24, so that 0200 defines the reason field and a refusal persists after the retries of 0200, and so that a menu action that fails for no credential notifies.
 affects: [switchboard/server, menubar/viewer]
 builds-on: ['0140', '0200']

@@ -1,6 +1,8 @@
 ---
 category: behavior
-status: proposed
+status: accepted
+approval: person
+approver: {kind: person, name: dnawara}
 note: Drafted on 2026-11-24 after the tenth review of 0200, from the person's choice of a reload over a restart. It changes how a rotation reaches the running switchboard, adds a signal the switchboard answers, and has security consequences. The person approved it on 2026-11-24. Amended on 2026-11-24 after the twelfth review of 0200, so that a signal that cannot be sent and a start that fails exit at once. The person approved it on 2026-11-24.
 affects: [cli/command, switchboard/server]
 builds-on: ['0170', '0200', '0220']

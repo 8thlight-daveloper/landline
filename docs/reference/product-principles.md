@@ -89,7 +89,7 @@ screen, or log shows, prints, or stores the secret, a token, a private key, or a
 must live, and a list shows a key only as a fingerprint. A screen that a person may share shows little by default. This
 does not permit sending the root credential on a polling path, or showing a folder or a branch on a menu row.
 
-Records: 0040, 0090, 0140, 0170, 0200
+Records: 0040, 0090, 0140, 0170, 0200, 0260
 
 ### P7. Match protection to the threat you have
 
@@ -108,7 +108,7 @@ it did not write, and a file behind a symbolic link. A destructive action or a w
 person's explicit act, and a narrower one takes effect at once. This does not permit a default that destroys, a rotation
 that also revokes machines, or a write through a link into another repository.
 
-Records: 0170, 0190, 0200, 0210, 0220
+Records: 0170, 0190, 0200, 0210, 0220, 0260
 
 These principles are not points in a score. Privacy, correctness, ownership, and explicit commitments constrain
 convenience. Within those constraints, reduce avoidable work and uncertainty, then prefer a smaller and more reversible
