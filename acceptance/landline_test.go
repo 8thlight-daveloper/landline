@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/8thlight-daveloper/landline/testsupport/clock/sleeper"
 	"io"
 	"net"
 	"net/http"
@@ -1519,7 +1520,7 @@ func TestAnAgentThatStoppedShowsDisconnectedAtOnceThenIsForgottenAfterTheGraceAn
 	if status, body := w.sendHTTP("alpha", agentID, "inside the grace"); status != 409 || !strings.Contains(body, notConnected) {
 		t.Fatalf("inside the grace: %d %s", status, body)
 	}
-	time.Sleep(time.Until(stopped.Add(1500 * time.Millisecond)))
+	sleeper.Until(stopped.Add(1500 * time.Millisecond))
 	eventually(t, agentID+" to be unlisted", func() bool { return !strings.Contains(w.must("", "agents"), agentID) })
 	if status := w.get("/v1/agents", token); status != 401 {
 		t.Fatalf("the forgotten token: %d", status)
@@ -2790,7 +2791,7 @@ func TestARefusedRequestOnEachRouteWithTheObserverTokenKeepsItAliveAndAnObserver
 	}
 	control := w.registerObserver("tui")
 	registered := time.Now()
-	time.Sleep(time.Until(registered.Add(2 * time.Second)))
+	sleeper.Until(registered.Add(2 * time.Second))
 	refused := make([]int, len(routes))
 	var wg sync.WaitGroup
 	for i, route := range routes {
@@ -2814,7 +2815,7 @@ func TestARefusedRequestOnEachRouteWithTheObserverTokenKeepsItAliveAndAnObserver
 		}()
 	}
 	wg.Wait()
-	time.Sleep(time.Until(registered.Add(4 * time.Second)))
+	sleeper.Until(registered.Add(4 * time.Second))
 	for i, route := range routes {
 		if refused[i] != 403 {
 			t.Errorf("%s: the refused request answered %d", route.name, refused[i])

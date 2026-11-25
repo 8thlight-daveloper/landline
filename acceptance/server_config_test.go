@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/8thlight-daveloper/landline/testsupport/clock/sleeper"
 	"net"
 	"os"
 	"os/exec"
@@ -333,7 +334,7 @@ func TestTheKeepaliveDeliveryTimeoutAndGraceOfTheServerTableReachTheSwitchboard(
 	if elapsed := time.Since(started); status != 504 || !strings.Contains(body, "no delivery report") || elapsed > 3*time.Second {
 		t.Errorf("a send with no report answered %d after %s, want 504 after the 500ms of [server]", status, elapsed)
 	}
-	time.Sleep(time.Until(registered.Add(1600 * time.Millisecond)))
+	sleeper.Until(registered.Add(1600 * time.Millisecond))
 	if status := w.get("/v1/agents", w.token("delta")); status != 401 {
 		t.Errorf("an agent silent past the 1s grace of [server] still answers %d", status)
 	}
