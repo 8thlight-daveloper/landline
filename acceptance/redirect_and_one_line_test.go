@@ -226,16 +226,16 @@ func TestAFailedJoinKeepsAConfigEditMadeWhileTheRequestWasInFlight(t *testing.T)
 	original := "# original\nsecret = \"" + secret + "\"\n"
 	writeConfigFile(t, home, "config.toml", original)
 	edited := original + "# edited by a person while the join was in flight\n"
+	failure := newHandlerFailure()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeConfigFile(t, home, "config.toml", edited)
-		if err := os.MkdirAll(filepath.Join(configDirOf(home), "machine.key", "blocker"), 0o700); err != nil {
-			t.Error(err)
-		}
+		failure.note(tryWriteConfigFile(home, "config.toml", edited))
+		failure.note(os.MkdirAll(filepath.Join(configDirOf(home), "machine.key", "blocker"), 0o700))
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"name":"alpha"}`))
 	}))
 	t.Cleanup(server.Close)
 	out, err := runIn(t, bin, env, home, "server", "join", server.Listener.Addr().String(), "--code", "ABCD-EFGH")
+	failure.check(t)
 	if err == nil {
 		t.Fatalf("the join succeeded though machine.key is a folder: %s", out)
 	}
@@ -417,12 +417,38 @@ func TestJoinWithACodeRefusesAndChangesNoFileWhenASwitchboardStartsHereWhileTheR
 	t.Parallel()
 	c := newConfiguredHome(t, "")
 	original := c.configText()
+	failure := newHandlerFailure()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c.writeDataFile("switchboard.lock", "4242")
+		_, err := c.tryWriteDataFile("switchboard.lock", "4242")
+		failure.note(err)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"name":"alpha"}`))
 	}))
 	t.Cleanup(server.Close)
 	result := c.landline("server", "join", server.Listener.Addr().String(), "--code", "ABCD-EFGH")
+	failure.check(t)
 	checkJoinRefusedAndChangedNothing(t, c, result, original, "switchboard.lock")
+}
+
+type handlerFailure chan error
+
+func newHandlerFailure() handlerFailure { return make(handlerFailure, 1) }
+
+func (f handlerFailure) note(err error) {
+	if err == nil {
+		return
+	}
+	select {
+	case f <- err:
+	default:
+	}
+}
+
+func (f handlerFailure) check(t *testing.T) {
+	t.Helper()
+	select {
+	case err := <-f:
+		t.Fatalf("the test's HTTP handler failed: %v", err)
+	default:
+	}
 }

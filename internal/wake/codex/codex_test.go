@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -64,7 +65,10 @@ func contains(s, sub string) bool {
 
 func TestAHungCodexIsStoppedAtTheTimeout(t *testing.T) {
 	script := t.TempDir() + "/codex"
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+	if err := syscall.Mkfifo(script+".fifo", 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nread _ < \"$0.fifo\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", filepath.Dir(script)+string(os.PathListSeparator)+os.Getenv("PATH"))

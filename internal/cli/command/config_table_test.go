@@ -107,7 +107,7 @@ func TestATableLineMustHoldOnlyABareKeyInBracketsAndOtherLinesStayErrors(t *test
 			t.Errorf("%q: want an error at config.toml line %s, got %v", bad, number, err)
 			continue
 		}
-		if strings.Contains(err.Error(), echo) {
+		if strings.Contains(withoutPaths(err.Error()), echo) {
 			t.Errorf("%q: the error repeats %q: %v", bad, echo, err)
 		}
 	}

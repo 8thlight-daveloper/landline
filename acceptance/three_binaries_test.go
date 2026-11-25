@@ -260,11 +260,7 @@ func TestServerDownAndStatusIgnoreAPidInTheSwitchboardPidFileThatIsNotTheSwitchb
 	if err := os.MkdirAll(data, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	sleeper := exec.Command("sleep", "60")
-	if err := sleeper.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { sleeper.Process.Kill(); sleeper.Wait() })
+	sleeper, _ := startIdleProcess(t, filepath.Join(t.TempDir(), "not-the-switchboard"))
 	if err := os.WriteFile(filepath.Join(data, "switchboard.pid"), []byte(fmt.Sprint(sleeper.Process.Pid)), 0o600); err != nil {
 		t.Fatal(err)
 	}

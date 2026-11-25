@@ -27,12 +27,16 @@ func configTomlOf(home string) string { return filepath.Join(configDirOf(home), 
 
 func writeConfigFile(t *testing.T, home, name, content string) {
 	t.Helper()
+	if err := tryWriteConfigFile(home, name, content); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func tryWriteConfigFile(home, name, content string) error {
 	if err := os.MkdirAll(configDirOf(home), 0o700); err != nil {
-		t.Fatal(err)
+		return err
 	}
-	if err := os.WriteFile(filepath.Join(configDirOf(home), name), []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	return os.WriteFile(filepath.Join(configDirOf(home), name), []byte(content), 0o600)
 }
 
 var (
@@ -749,7 +753,7 @@ func TestEveryClientRefusesAMalformedConfigTomlNamingTheFileAndNeverEchoingTheLi
 			writeConfigFile(t, home, "config.toml", strings.ReplaceAll(each.content, "%s", freePort(t)))
 			result := runBin(t, bin, isolatedEnv(home), command.args...)
 			combined := result.stdout + result.stderr
-			if result.code == 0 || !strings.Contains(combined, "config.toml") || !strings.Contains(combined, each.line) || strings.Contains(combined, each.echo) {
+			if result.code == 0 || !strings.Contains(combined, "config.toml") || !strings.Contains(combined, each.line) || strings.Contains(withoutPaths(combined), each.echo) {
 				t.Errorf("%s, %s: %d %q", command.name, each.name, result.code, combined)
 			}
 		}

@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/8thlight-daveloper/landline/testsupport/process/reaper"
 )
 
 const (
@@ -72,13 +74,33 @@ var (
 	built   = map[string]string{}
 )
 
-func TestMain(m *testing.M) {
-	code := m.Run()
-	for _, dir := range built {
-		os.RemoveAll(dir)
+const runFolderPrefix = "landline-acceptance-"
+
+func TestMain(m *testing.M) { reaper.Main(m, runFolderPrefix) }
+
+func startIdleProcess(t *testing.T, named string) (*exec.Cmd, <-chan struct{}) {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "read _", named)
+	held, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	os.Exit(code)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	go func() { cmd.Wait(); close(ended) }()
+	t.Cleanup(func() {
+		cmd.Process.Kill()
+		held.Close()
+		<-ended
+	})
+	return cmd, ended
 }
+
+var pathInText = regexp.MustCompile(`(^|[\s"'(=:])/[^\s"':,()]+`)
+
+func withoutPaths(text string) string { return pathInText.ReplaceAllString(text, "${1}<path>") }
 
 func switchboardOf(bin string) string { return filepath.Join(filepath.Dir(bin), switchboardName) }
 
@@ -111,7 +133,7 @@ func buildAllWith(t *testing.T, flags string) string {
 	if dir, ok := built[flags]; ok {
 		return filepath.Join(dir, landlineName)
 	}
-	dir, err := os.MkdirTemp("", "landline-acceptance-")
+	dir, err := os.MkdirTemp("", "landline-build-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,6 +313,14 @@ func (w *world) token(name string) string {
 
 func (w *world) request(method, path, token string, body any, headers map[string]string) (int, string) {
 	w.t.Helper()
+	status, text, err := w.tryRequest(method, path, token, body, headers)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return status, text
+}
+
+func (w *world) tryRequest(method, path, token string, body any, headers map[string]string) (int, string, error) {
 	var reader io.Reader
 	if body != nil {
 		raw, _ := json.Marshal(body)
@@ -303,12 +333,32 @@ func (w *world) request(method, path, token string, body any, headers map[string
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		w.t.Fatal(err)
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 	var buf bytes.Buffer
 	buf.ReadFrom(resp.Body)
-	return resp.StatusCode, buf.String()
+	return resp.StatusCode, buf.String(), nil
+}
+
+type sendAnswer struct {
+	status int
+	body   string
+	err    error
+}
+
+func (w *world) trySend(fromToken, to, body string) sendAnswer {
+	status, text, err := w.tryRequest("POST", "/v1/send", fromToken, map[string]string{"to": to, "body": body}, nil)
+	return sendAnswer{status: status, body: text, err: err}
+}
+
+func (w *world) tryReport(token string, stream *rawStream, report map[string]any) error {
+	d, err := stream.tryNext()
+	if err != nil {
+		return err
+	}
+	_, _, err = w.tryRequest("POST", "/v1/deliveries/"+d.ID+"/report", token, report, nil)
+	return err
 }
 
 func (w *world) post(path, token string, body any) (int, string) {
@@ -446,13 +496,20 @@ func (w *world) postQuietly(path, token string, body any) {
 
 func (s *rawStream) next(t *testing.T) streamDelivery {
 	t.Helper()
+	d, err := s.tryNext()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func (s *rawStream) tryNext() (streamDelivery, error) {
 	select {
 	case d := <-s.events:
-		return d
+		return d, nil
 	case <-time.After(10 * time.Second):
-		t.Fatal("no delivery arrived on the stream")
+		return streamDelivery{}, errors.New("no delivery arrived on the stream")
 	}
-	return streamDelivery{}
 }
 
 func (s *rawStream) expectNothing(t *testing.T) {
@@ -1166,15 +1223,13 @@ func TestASendAnswersOnlyAfterTheDeliveryIsReportedAndAFailureReportAnswers502(t
 	w := start(t)
 	w.register("alpha", "bravo", "charlie")
 	stream := w.openStream("bravo", false)
-	answered := make(chan [2]any, 1)
-	go func() {
-		status, body := w.sendHTTP("alpha", "bravo", "wait for the report")
-		answered <- [2]any{status, body}
-	}()
+	answered := make(chan sendAnswer, 1)
+	alpha := w.token("alpha")
+	go func() { answered <- w.trySend(alpha, "bravo", "wait for the report") }()
 	d := stream.next(t)
 	select {
 	case got := <-answered:
-		t.Fatalf("the send answered before the report: %v", got)
+		t.Fatalf("the send answered before the report: %+v", got)
 	case <-time.After(400 * time.Millisecond):
 	}
 	if status, _ := w.post("/v1/deliveries/"+d.ID+"/report", w.token("charlie"), map[string]any{"ok": true}); status != 403 {
@@ -1186,20 +1241,17 @@ func TestASendAnswersOnlyAfterTheDeliveryIsReportedAndAFailureReportAnswers502(t
 	if status, _ := w.post("/v1/deliveries/"+d.ID+"/report", w.token("bravo"), map[string]any{"ok": true}); status != 200 {
 		t.Fatalf("the report: %d", status)
 	}
-	if got := <-answered; got[0] != 200 {
-		t.Fatalf("after the report: %v", got)
+	if got := <-answered; got.err != nil || got.status != 200 {
+		t.Fatalf("after the report: %+v", got)
 	}
 	if status, _ := w.post("/v1/deliveries/"+d.ID+"/report", w.token("bravo"), map[string]any{"ok": true}); status != 404 {
 		t.Fatalf("a second report: %d", status)
 	}
-	go func() {
-		status, body := w.sendHTTP("alpha", "bravo", "this one fails")
-		answered <- [2]any{status, body}
-	}()
+	go func() { answered <- w.trySend(alpha, "bravo", "this one fails") }()
 	failing := stream.next(t)
 	w.post("/v1/deliveries/"+failing.ID+"/report", w.token("bravo"), map[string]any{"ok": false, "error": "the channel write failed"})
-	if got := <-answered; got[0] != 502 || !strings.Contains(got[1].(string), "the channel write failed") {
-		t.Fatalf("after a failure report: %v", got)
+	if got := <-answered; got.err != nil || got.status != 502 || !strings.Contains(got.body, "the channel write failed") {
+		t.Fatalf("after a failure report: %+v", got)
 	}
 }
 
@@ -1928,11 +1980,15 @@ func TestTheHubNeverPrintsTheSecretATokenOrABody(t *testing.T) {
 	w := start(t)
 	w.register("alpha", "bravo")
 	stream := w.openStream("bravo", false)
+	reported := make(chan error, 1)
+	bravo := w.token("bravo")
 	go func() {
-		d := stream.next(t)
-		w.post("/v1/deliveries/"+d.ID+"/report", w.token("bravo"), map[string]any{"ok": false, "error": "refused by the session"})
+		reported <- w.tryReport(bravo, stream, map[string]any{"ok": false, "error": "refused by the session"})
 	}()
 	w.sendHTTP("alpha", "bravo", "a very private body")
+	if err := <-reported; err != nil {
+		t.Fatal(err)
+	}
 	w.sendHTTP("alpha", "ghost", "refused body")
 	printed := w.hubErr.String()
 	if !strings.Contains(printed, "refused by the session") {
@@ -1950,11 +2006,15 @@ func TestAReportedFailureCannotForgeALineOnTheHubTerminal(t *testing.T) {
 	w := start(t)
 	w.register("alpha", "bravo")
 	stream := w.openStream("bravo", false)
+	reported := make(chan error, 1)
+	bravo := w.token("bravo")
 	go func() {
-		d := stream.next(t)
-		w.post("/v1/deliveries/"+d.ID+"/report", w.token("bravo"), map[string]any{"ok": false, "error": "first\nFORGED delivered to carol\n\x1b]0;title\x07"})
+		reported <- w.tryReport(bravo, stream, map[string]any{"ok": false, "error": "first\nFORGED delivered to carol\n\x1b]0;title\x07"})
 	}()
 	w.sendHTTP("alpha", "bravo", "hi")
+	if err := <-reported; err != nil {
+		t.Fatal(err)
+	}
 	printed := w.hubErr.String()
 	if !strings.Contains(printed, "first") {
 		t.Fatalf("the failure was not printed:\n%s", printed)

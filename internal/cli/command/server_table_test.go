@@ -105,7 +105,7 @@ func TestABadValueInTheServerTableStopsUpRestartAndRotateSecretBeforeTheyChangeA
 					continue
 				}
 				combined := r.out.String() + r.err.String()
-				if code != 1 || !badLine.MatchString(combined) || strings.Contains(combined, each.echo) {
+				if code != 1 || !badLine.MatchString(combined) || strings.Contains(withoutPaths(combined), each.echo) {
 					t.Errorf("%v: code %d, want 1 and an error at config.toml line 7 that does not repeat the line: %q", command, code, combined)
 				}
 				if command[0] != "up" && (!r.running() || r.pid(t) != before) {
@@ -244,3 +244,7 @@ func linesAfterTheStop(stdout string) []string {
 	}
 	return kept
 }
+
+var pathInText = regexp.MustCompile(`(^|[\s"'(=:])/[^\s"':,()]+`)
+
+func withoutPaths(text string) string { return pathInText.ReplaceAllString(text, "${1}<path>") }

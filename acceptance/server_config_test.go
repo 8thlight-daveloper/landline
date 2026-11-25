@@ -414,7 +414,7 @@ var badServerValues = map[string]struct{ line, echo string }{
 }
 
 func (c *configuredHome) repeats(output, echo string) bool {
-	return echo != "" && strings.Contains(strings.ReplaceAll(output, c.home, "<home>"), echo)
+	return echo != "" && strings.Contains(withoutPaths(output), echo)
 }
 
 func TestABadValueInTheServerTableStopsTheBinaryAndUpWithExitOneNamingTheFileAndLine(t *testing.T) {
@@ -838,7 +838,7 @@ func TestEveryClientRefusesASecondServerTableOrAKeyGivenTwiceInItAtItsLine(t *te
 			writeConfigFile(t, home, "config.toml", strings.ReplaceAll(each.content, "%s", freePort(t)))
 			result := runBin(t, bin, isolatedEnv(home), command.args...)
 			combined := result.stdout + result.stderr
-			if result.code == 0 || !errorAtLine(combined, each.line) || (each.echo != "" && strings.Contains(combined, each.echo)) {
+			if result.code == 0 || !errorAtLine(combined, each.line) || (each.echo != "" && strings.Contains(withoutPaths(combined), each.echo)) {
 				t.Errorf("%s, %s: %d %q", command.name, each.name, result.code, combined)
 			}
 		}

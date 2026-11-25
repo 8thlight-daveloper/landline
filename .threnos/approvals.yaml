@@ -36,28 +36,34 @@ approvals:
     branch did not change the unit.
 - gate: acceptance
   unit: acceptance
-  hash: sha256:d6be9aaa43e5848360f8a715c9e11cb539ab9551a2e5a79a564ec90a4ce3d31f
+  hash: sha256:5bb758fdddd369497b793252ddd7ade21975c4b8baf3f595bbec9d4a13bc1949
   approver:
     kind: agent
     harness: claude-code
-    session: 8ba449f7-2970-48f7-afd9-30a3de05d3f7
+    session: eb1ac87a-b2ad-4ce3-ac1e-2605910eec0c
   author:
     kind: agent
     harness: claude-code
     session: 781bb773-f279-46f1-af55-190bdc277114
   date: 2026-11-25
-  note: Skip and Fatal in case closures use the subtest t, after the Linux CI panic
-    at switchboard_start_test.go:312. Reviewed by two fresh Claude sessions. The skip
-    path was checked on a case-sensitive disk image.
+  note: 'Reviewed on test-teardown by a fresh session after two rejected rounds: the
+    reaper, leak check and sweep in testsupport/process/reaper, goroutine Fatal fixes,
+    run-folder names without digits.'
 - gate: architecture
   unit: architecture.yaml
-  hash: sha256:7c307e45d36d59888e1e52c63717fd82ed5f1b30cb651b28dd021b8926a00f8d
+  hash: sha256:09bd7b8f1a6159d9c8d65fcc80ee6bd31469a192cb6f151f19cd6f0689fd6a00
   approver:
-    kind: person
-    name: dnawara
-  date: 2026-11-24
-  note: Baseline approval when the ledger was started on rotate-secret-command. This
-    branch did not change the unit.
+    kind: agent
+    harness: claude-code
+    session: eb1ac87a-b2ad-4ce3-ac1e-2605910eec0c
+  author:
+    kind: agent
+    harness: claude-code
+    session: 781bb773-f279-46f1-af55-190bdc277114
+  date: 2026-11-25
+  note: 'One line: acceptance.may_import allows github.com/8thlight-daveloper/landline/testsupport,
+    so acceptance tests can import the reaper. The person approved the change on 2026-11-25.
+    Same review as the acceptance approval.'
 - gate: model
   unit: internal/model
   hash: sha256:7e015b3d5a0c3c85ae7031855c7d5ce8daf8fdbe3d8bf9e404795cf0acbbb6d7
