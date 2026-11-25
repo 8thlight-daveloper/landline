@@ -56,7 +56,7 @@ write no file.
 `cmd/landline-switchboard` reads the file when it starts, with the reader of `cli/command`: the top-level keys for the
 address and the secret, and `[server]` for the log path and the timings. On `SIGHUP` it reads the top-level `secret`
 again, and nothing else
-([0260](../decisions/0260-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). It writes no part
+([0240](../decisions/0240-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). It writes no part
 of the file. `cli/command` reads `[server]` for `landline server up`, `restart`, and `rotate-secret`, so that an error
 in the table stops them before they change anything and so that they print a line for each flag that differs from the
 table. They pass on the flags a person gave and the saved address, and never a value from the table. Its writer keeps

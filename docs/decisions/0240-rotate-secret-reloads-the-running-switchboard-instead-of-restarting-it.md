@@ -3,13 +3,13 @@ category: behavior
 status: accepted
 approval: person
 approver: {kind: person, name: dnawara}
-note: Drafted on 2026-11-24 after the tenth review of 0200, from the person's choice of a reload over a restart. It changes how a rotation reaches the running switchboard, adds a signal the switchboard answers, and has security consequences. The person approved it on 2026-11-24. Amended on 2026-11-24 after the twelfth review of 0200, so that a signal that cannot be sent and a start that fails exit at once. The person approved it on 2026-11-24.
+note: Drafted on 2026-11-24 after the tenth review of 0200, from the person's choice of a reload over a restart. It changes how a rotation reaches the running switchboard, adds a signal the switchboard answers, and has security consequences. The person approved it on 2026-11-24. Amended on 2026-11-24 after the twelfth review of 0200, so that a signal that cannot be sent and a start that fails exit at once. The person approved it on 2026-11-24. Renumbered from 0260 to 0240 on 2026-11-25, so the records on main stay in order before the harness adapter records. The person approved the renumbering on 2026-11-25.
 affects: [cli/command, switchboard/server]
 builds-on: ['0170', '0200', '0220']
 partly-supersedes: ['0170', '0220']
 ---
 
-# 0260. `rotate-secret` reloads the running switchboard instead of restarting it
+# 0240. `rotate-secret` reloads the running switchboard instead of restarting it
 
 ## Context
 

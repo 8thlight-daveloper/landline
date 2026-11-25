@@ -177,7 +177,7 @@ whose own environment sets `LANDLINE_SECRET`, it exits `1`, says that the new se
 switchboard where it runs. It refuses, and changes nothing, when the saved host is not this machine's (`localhost`, a
 loopback IP, or a name or IP that resolves to an address of one of its interfaces), when `LANDLINE_SECRET` is set in the
 environment, or when `landline-switchboard` cannot be found
-([0260](docs/decisions/0260-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). A session whose
+([0240](docs/decisions/0240-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). A session whose
 own environment sets `LANDLINE_SECRET` keeps the old value and gets `401` until you restart that session
 ([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md)).
 

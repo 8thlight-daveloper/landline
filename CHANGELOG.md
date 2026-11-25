@@ -18,7 +18,7 @@
   `~/.local/share/landline/`. One home runs one switchboard, held by a lock on `switchboard.lock`.
 - `landline server rotate-secret` and the menu bar's `Rotate secret…`
   ([0170](docs/decisions/0170-a-person-rotates-the-switchboard-secret-with-one-command-or-one-menu-item.md),
-  [0260](docs/decisions/0260-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). The command
+  [0240](docs/decisions/0240-rotate-secret-reloads-the-running-switchboard-instead-of-restarting-it.md)). The command
   saves a new secret and sends the running switchboard `SIGHUP`, which reads the secret again without a restart. Joined
   machines keep working through their keys. Every agent registers again.
 - The `landline` skill ships in the binary

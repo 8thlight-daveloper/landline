@@ -46,4 +46,4 @@ one value has to mean twice. Add a guard only when no part can go, and say in th
 review finding at the edge of a fix from the round before is a sign that the fix added a part, and the next fix starts
 by asking which part to take out.
 
-Records: 0220, 0260
+Records: 0220, 0240
